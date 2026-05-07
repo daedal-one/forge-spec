@@ -1,0 +1,48 @@
+use std::path::Path;
+
+use anyhow::Result;
+
+use crate::lint;
+use crate::lint::diagnostic::Severity;
+use crate::model::registry::SpecRegistry;
+
+pub fn run(specs_dir: &Path) -> Result<bool> {
+    let registry = SpecRegistry::load(specs_dir)?;
+
+    if registry.documents.is_empty() {
+        println!("No spec files found in {}", specs_dir.display());
+        return Ok(true);
+    }
+
+    let diags = lint::lint_all(&registry);
+
+    if diags.is_empty() {
+        println!(
+            "OK: {} spec(s) checked, no issues found.",
+            registry.documents.len()
+        );
+        return Ok(true);
+    }
+
+    for d in &diags {
+        eprintln!("{d}");
+        eprintln!();
+    }
+
+    let errors = diags.iter().filter(|d| d.severity == Severity::Error).count();
+    let warnings = diags
+        .iter()
+        .filter(|d| d.severity == Severity::Warning)
+        .count();
+    let infos = diags.iter().filter(|d| d.severity == Severity::Info).count();
+
+    eprintln!(
+        "Checked {} spec(s): {} error(s), {} warning(s), {} info(s)",
+        registry.documents.len(),
+        errors,
+        warnings,
+        infos
+    );
+
+    Ok(errors == 0)
+}
