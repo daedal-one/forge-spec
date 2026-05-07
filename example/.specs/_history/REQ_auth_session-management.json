@@ -1,0 +1,23 @@
+{
+  "id": "REQ:auth/session-management",
+  "events": [
+    {
+      "sha": "a1b2c3d",
+      "kind": "touches",
+      "date": "2026-01-10",
+      "author": "carlo"
+    },
+    {
+      "sha": "7c3a9f1",
+      "kind": "refines",
+      "date": "2026-04-04",
+      "author": "carlo"
+    },
+    {
+      "sha": "a1d2e3b",
+      "kind": "implements",
+      "date": "2026-04-09",
+      "author": "carlo"
+    }
+  ]
+}

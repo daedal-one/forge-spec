@@ -1,0 +1,7 @@
+[[redirect]]
+from = "REQ:auth/session-timeout"
+to   = "REQ:auth/session-expiry"
+
+[[redirect]]
+from = "REQ:auth/session-expiry#timeout"
+to   = "REQ:auth/session-expiry#timeout-policy"
