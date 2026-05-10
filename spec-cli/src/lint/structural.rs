@@ -10,7 +10,7 @@ use crate::model::registry::SpecRegistry;
 use super::diagnostic::Diagnostic;
 
 static ID_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(REQ|INV|IFC|ADR|GLO|TOPIC|SCN):[a-z0-9][\w-]*/[a-z0-9][\w-]*$").unwrap()
+    Regex::new(r"^(REQ|INV|IFC|ADR|GLO|TOPIC|SCN|TASK):[a-z0-9][\w-]*/[a-z0-9][\w-]*$").unwrap()
 });
 
 /// R001: ID matches `<TYPE>:namespace/slug` pattern.
@@ -88,6 +88,28 @@ pub fn check_type_specific_fields(doc: &SpecDocument) -> Vec<Diagnostic> {
         }
         (EntityType::Ifc, TypeSpecificFields::Interface { .. }) => {
             // stability has a default
+        }
+        (EntityType::Task, TypeSpecificFields::Task { refines, blocked_by, progress, .. }) => {
+            // R018: a task that has no parent to refine and no upstream blockers
+            // is dangling — surface as a warning so authors can attach it.
+            if refines.is_empty() && blocked_by.is_empty() {
+                diags.push(Diagnostic::warning(
+                    "R018",
+                    "TASK has neither `refines:` nor `blocked_by:` — task will not appear in any coverage report",
+                    doc.source_path.clone(),
+                ));
+            }
+            // R019: deferred tasks with no `eta:` or summary explanation are
+            // easy to lose track of; warn rather than error.
+            if matches!(progress, crate::model::frontmatter::Progress::Deferred)
+                && doc.universal.summary.as_deref().map(str::trim).unwrap_or("").is_empty()
+            {
+                diags.push(Diagnostic::warning(
+                    "R019",
+                    "TASK is deferred without a summary explaining why",
+                    doc.source_path.clone(),
+                ));
+            }
         }
         _ => {}
     }

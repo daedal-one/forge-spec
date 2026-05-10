@@ -84,6 +84,46 @@ pub enum Commands {
     Orphans,
     /// Apply _redirects.toml, rewrite refs, update superseded_by
     Migrate,
+    /// List open tasks (pending, in-progress, blocked).
+    Todo {
+        /// Filter by progress state (pending|in-progress|done|blocked|deferred)
+        #[arg(long)]
+        state: Option<String>,
+        /// Filter to tasks refining the given REQ id (matches doc id, with or without #anchor)
+        #[arg(long)]
+        under: Option<String>,
+        /// Show all tasks, including done/deferred (shorthand for `--state all`)
+        #[arg(long)]
+        all: bool,
+    },
+    /// Mark a task as in-progress.
+    Start {
+        /// TASK spec id (e.g. TASK:codon/session-actions)
+        id: String,
+    },
+    /// Mark a task as done.
+    Done {
+        /// TASK spec id
+        id: String,
+    },
+    /// Mark a task as blocked, optionally citing a blocker.
+    Block {
+        /// TASK spec id
+        id: String,
+        /// Optional blocker — another spec id, e.g. ADR:foo/bar
+        #[arg(long)]
+        on: Option<String>,
+    },
+    /// Mark a task as pending (clear in-progress / blocked / done).
+    Reset {
+        /// TASK spec id
+        id: String,
+    },
+    /// Mark a task as deferred (out of scope for current iteration).
+    Defer {
+        /// TASK spec id
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, ValueEnum)]
@@ -102,6 +142,7 @@ fn parse_entity_type(s: &str) -> Result<String, String> {
         "glo" | "glossary" => Ok("GLO".to_string()),
         "topic" => Ok("TOPIC".to_string()),
         "scn" | "scenario" => Ok("SCN".to_string()),
+        "task" => Ok("TASK".to_string()),
         _ => Err(format!("unknown entity type: {s}")),
     }
 }

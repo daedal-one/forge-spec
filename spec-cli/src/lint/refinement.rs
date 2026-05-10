@@ -23,44 +23,47 @@ pub fn check_refinement(registry: &SpecRegistry) -> Vec<Diagnostic> {
         node_map.insert(id, idx);
     }
 
-    // Add refinement edges (child -> parent)
+    // Add refinement edges (child -> parent). Both REQ and TASK can refine.
     for doc in &registry.documents {
-        if let TypeSpecificFields::Requirement { ref refines, .. } = doc.type_fields {
-            let child_id = doc.id_str();
-            let child_node = node_map[&child_id];
+        let refines: &[String] = match &doc.type_fields {
+            TypeSpecificFields::Requirement { refines, .. } => refines,
+            TypeSpecificFields::Task { refines, .. } => refines,
+            _ => continue,
+        };
+        let child_id = doc.id_str();
+        let child_node = node_map[&child_id];
 
-            for refine_target in refines {
-                // Extract the doc ID (strip anchor)
-                let parent_doc_id = if let Some(pos) = refine_target.find('#') {
-                    &refine_target[..pos]
-                } else {
-                    refine_target.as_str()
-                };
+        for refine_target in refines {
+            // Extract the doc ID (strip anchor)
+            let parent_doc_id = if let Some(pos) = refine_target.find('#') {
+                &refine_target[..pos]
+            } else {
+                refine_target.as_str()
+            };
 
-                if let Some(&parent_node) = node_map.get(parent_doc_id) {
-                    graph.add_edge(child_node, parent_node, ());
-                }
+            if let Some(&parent_node) = node_map.get(parent_doc_id) {
+                graph.add_edge(child_node, parent_node, ());
+            }
 
-                // R008: Check that the clause exists on the parent
-                if let Some(anchor) = refine_target.find('#').map(|p| &refine_target[p + 1..]) {
-                    if let Some(parent_doc) = registry.get_by_id(parent_doc_id) {
-                        let has_clause = parent_doc.blocks.iter().any(|block| {
-                            block.clauses.iter().any(|c| c.id == anchor)
-                                || block.id == anchor
-                        });
-                        if !has_clause {
-                            diags.push(Diagnostic::error(
-                                "R008",
-                                format!(
-                                    "refinement target '{}' — clause '{}' not found on parent",
-                                    refine_target, anchor
-                                ),
-                                doc.source_path.clone(),
-                            ));
-                        }
-                    } else {
-                        // Parent doc not found — R005 will catch this separately
+            // R008: Check that the clause exists on the parent
+            if let Some(anchor) = refine_target.find('#').map(|p| &refine_target[p + 1..]) {
+                if let Some(parent_doc) = registry.get_by_id(parent_doc_id) {
+                    let has_clause = parent_doc.blocks.iter().any(|block| {
+                        block.clauses.iter().any(|c| c.id == anchor)
+                            || block.id == anchor
+                    });
+                    if !has_clause {
+                        diags.push(Diagnostic::error(
+                            "R008",
+                            format!(
+                                "refinement target '{}' — clause '{}' not found on parent",
+                                refine_target, anchor
+                            ),
+                            doc.source_path.clone(),
+                        ));
                     }
+                } else {
+                    // Parent doc not found — R005 will catch this separately
                 }
             }
         }
@@ -184,13 +187,16 @@ fn find_refining_levels(registry: &SpecRegistry, clause_ref: &str) -> Vec<Level>
 fn check_coverage(registry: &SpecRegistry) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
-    // Collect all refines targets
+    // Collect all refines targets (REQ and TASK both refine).
     let mut refined_targets: BTreeSet<String> = BTreeSet::new();
     for doc in &registry.documents {
-        if let TypeSpecificFields::Requirement { ref refines, .. } = doc.type_fields {
-            for r in refines {
-                refined_targets.insert(r.clone());
-            }
+        let refines: &[String] = match &doc.type_fields {
+            TypeSpecificFields::Requirement { refines, .. } => refines,
+            TypeSpecificFields::Task { refines, .. } => refines,
+            _ => continue,
+        };
+        for r in refines {
+            refined_targets.insert(r.clone());
         }
     }
 
@@ -222,11 +228,11 @@ fn check_aspects(registry: &SpecRegistry) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
     for doc in &registry.documents {
-        if let TypeSpecificFields::Requirement {
-            ref refines,
-            ref aspects,
-            ..
-        } = doc.type_fields
+        let (refines, aspects): (&[String], &[String]) = match &doc.type_fields {
+            TypeSpecificFields::Requirement { refines, aspects, .. } => (refines, aspects),
+            TypeSpecificFields::Task { refines, aspects, .. } => (refines, aspects),
+            _ => continue,
+        };
         {
             if refines.len() > 1 {
                 // Collect distinct parent doc IDs

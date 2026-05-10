@@ -12,6 +12,7 @@ pub fn run(specs_dir: &Path, entity_type: &str, slug: &str) -> Result<()> {
         "GLO" => "glossary",
         "TOPIC" => "topic",
         "SCN" => "scenario",
+        "TASK" => "task",
         _ => bail!("unknown entity type: {entity_type}"),
     };
 
@@ -186,6 +187,36 @@ owners: []
 # {title}
 
 TODO: walk through the scenario step by step.
+"#,
+            title = slug_to_title(slug),
+        ),
+        "TASK" => format!(
+            r#"---
+id: {id}
+type: {type_name}
+status: accepted
+version: 0.1.0
+summary: >
+  TODO: one-line description of the work.
+owners: []
+progress: pending
+refines: []
+assignee:
+eta:
+blocked_by: []
+---
+
+# {title}
+
+## Plan
+
+TODO: describe the work, links to the parent requirement, and any
+specific files / functions to touch. Reference source with
+`[ident](spec:src:path/to/file.rs:42-78)`.
+
+## Acceptance
+
+TODO: what observable signal indicates this task is done.
 "#,
             title = slug_to_title(slug),
         ),

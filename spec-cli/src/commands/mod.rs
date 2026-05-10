@@ -5,3 +5,4 @@ pub mod migrate;
 pub mod new;
 pub mod query;
 pub mod render;
+pub mod task;

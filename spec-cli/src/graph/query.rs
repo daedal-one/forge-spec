@@ -69,6 +69,14 @@ pub struct CoverageEntry {
     pub clause_id: String,
     pub clause_text: String,
     pub refined_by: Vec<String>,
+    /// Tasks that refine this clause, with their progress states.
+    pub tasks: Vec<TaskCoverage>,
+}
+
+/// Coverage info for a single task refining a clause.
+pub struct TaskCoverage {
+    pub id: String,
+    pub progress: crate::model::frontmatter::Progress,
 }
 
 pub fn coverage(registry: &SpecRegistry, id: &str) -> Vec<CoverageEntry> {
@@ -76,24 +84,46 @@ pub fn coverage(registry: &SpecRegistry, id: &str) -> Vec<CoverageEntry> {
         return vec![];
     };
 
-    // Collect all refines targets pointing to this doc
-    let mut clause_children: std::collections::BTreeMap<String, Vec<String>> =
+    // Collect refining requirements and tasks pointing to this doc, keyed by anchor.
+    let mut req_children: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    let mut task_children: std::collections::BTreeMap<String, Vec<TaskCoverage>> =
         std::collections::BTreeMap::new();
 
     for child_doc in &registry.documents {
-        if let TypeSpecificFields::Requirement { ref refines, .. } = child_doc.type_fields {
-            for refine_target in refines {
-                if let Some(anchor_pos) = refine_target.find('#') {
-                    let doc_id = &refine_target[..anchor_pos];
-                    let anchor = &refine_target[anchor_pos + 1..];
-                    if doc_id == id {
-                        clause_children
-                            .entry(anchor.to_string())
-                            .or_default()
-                            .push(child_doc.id_str());
+        match &child_doc.type_fields {
+            TypeSpecificFields::Requirement { refines, .. } => {
+                for refine_target in refines {
+                    if let Some(anchor_pos) = refine_target.find('#') {
+                        let doc_id = &refine_target[..anchor_pos];
+                        let anchor = &refine_target[anchor_pos + 1..];
+                        if doc_id == id {
+                            req_children
+                                .entry(anchor.to_string())
+                                .or_default()
+                                .push(child_doc.id_str());
+                        }
                     }
                 }
             }
+            TypeSpecificFields::Task { refines, progress, .. } => {
+                for refine_target in refines {
+                    if let Some(anchor_pos) = refine_target.find('#') {
+                        let doc_id = &refine_target[..anchor_pos];
+                        let anchor = &refine_target[anchor_pos + 1..];
+                        if doc_id == id {
+                            task_children
+                                .entry(anchor.to_string())
+                                .or_default()
+                                .push(TaskCoverage {
+                                    id: child_doc.id_str(),
+                                    progress: *progress,
+                                });
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -103,9 +133,8 @@ pub fn coverage(registry: &SpecRegistry, id: &str) -> Vec<CoverageEntry> {
             entries.push(CoverageEntry {
                 clause_id: clause.id.clone(),
                 clause_text: clause.text.clone(),
-                refined_by: clause_children
-                    .remove(&clause.id)
-                    .unwrap_or_default(),
+                refined_by: req_children.remove(&clause.id).unwrap_or_default(),
+                tasks: task_children.remove(&clause.id).unwrap_or_default(),
             });
         }
     }

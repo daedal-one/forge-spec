@@ -112,5 +112,29 @@ fn run(cli: Cli) -> Result<()> {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             commands::migrate::run(&specs_dir)
         }
+        Commands::Todo { state, under, all } => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::task::todo(&specs_dir, state.as_deref(), under.as_deref(), all)
+        }
+        Commands::Start { id } => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::task::start(&specs_dir, &id)
+        }
+        Commands::Done { id } => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::task::done(&specs_dir, &id)
+        }
+        Commands::Block { id, on } => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::task::block(&specs_dir, &id, on.as_deref())
+        }
+        Commands::Reset { id } => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::task::reset(&specs_dir, &id)
+        }
+        Commands::Defer { id } => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::task::defer(&specs_dir, &id)
+        }
     }
 }

@@ -20,6 +20,8 @@ pub enum EntityType {
     Topic,
     #[serde(alias = "scenario")]
     Scn,
+    #[serde(alias = "task")]
+    Task,
 }
 
 impl EntityType {
@@ -32,6 +34,7 @@ impl EntityType {
             Self::Glo => "GLO",
             Self::Topic => "TOPIC",
             Self::Scn => "SCN",
+            Self::Task => "TASK",
         }
     }
 
@@ -44,6 +47,7 @@ impl EntityType {
             Self::Glo => "glossary",
             Self::Topic => "topic",
             Self::Scn => "scenario",
+            Self::Task => "task",
         }
     }
 
@@ -56,6 +60,7 @@ impl EntityType {
             "GLO" => Some(Self::Glo),
             "TOPIC" => Some(Self::Topic),
             "SCN" => Some(Self::Scn),
+            "TASK" => Some(Self::Task),
             _ => None,
         }
     }
@@ -69,6 +74,7 @@ impl EntityType {
             "glossary" => Some(Self::Glo),
             "topic" => Some(Self::Topic),
             "scenario" => Some(Self::Scn),
+            "task" => Some(Self::Task),
             _ => None,
         }
     }

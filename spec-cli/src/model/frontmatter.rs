@@ -78,6 +78,47 @@ impl Stability {
     }
 }
 
+/// Implementation-lifecycle state for TASK entities.
+///
+/// Distinct from [`Status`], which is the document lifecycle (draft, accepted,
+/// deprecated, superseded). A task can be `accepted` as a document while still
+/// being `pending` as work to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Progress {
+    Pending,
+    InProgress,
+    Done,
+    Blocked,
+    Deferred,
+}
+
+impl Progress {
+    pub fn from_str_val(s: &str) -> Option<Self> {
+        match s {
+            "pending" => Some(Self::Pending),
+            "in-progress" | "in_progress" => Some(Self::InProgress),
+            "done" => Some(Self::Done),
+            "blocked" => Some(Self::Blocked),
+            "deferred" => Some(Self::Deferred),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in-progress",
+            Self::Done => "done",
+            Self::Blocked => "blocked",
+            Self::Deferred => "deferred",
+        }
+    }
+
+    pub fn is_open(&self) -> bool {
+        matches!(self, Self::Pending | Self::InProgress | Self::Blocked)
+    }
+}
+
 /// Universal frontmatter present on all spec documents.
 #[derive(Debug, Clone)]
 pub struct UniversalFrontmatter {
@@ -120,6 +161,15 @@ pub enum TypeSpecificFields {
     Glossary,
     Topic,
     Scenario,
+    Task {
+        progress: Progress,
+        refines: Vec<String>,
+        aspects: Vec<String>,
+        assignee: Option<String>,
+        eta: Option<String>,
+        blocked_by: Vec<String>,
+        categorized_under: Vec<String>,
+    },
 }
 
 /// Raw YAML frontmatter — flat struct for deserialization before validation.
@@ -153,4 +203,9 @@ pub struct RawFrontmatter {
     // ADR fields
     pub decision_date: Option<String>,
     pub decided_by: Option<Vec<String>>,
+    // TASK fields
+    pub progress: Option<String>,
+    pub assignee: Option<String>,
+    pub eta: Option<String>,
+    pub blocked_by: Option<Vec<String>>,
 }

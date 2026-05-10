@@ -80,14 +80,25 @@ pub fn coverage(specs_dir: &Path, id: &str) -> Result<()> {
 
     println!("Coverage for {id}:");
     for entry in &entries {
-        let status = if entry.refined_by.is_empty() {
-            "UNCOVERED"
-        } else {
-            "covered"
+        let status = match (entry.refined_by.is_empty(), entry.tasks.is_empty()) {
+            (true, true) => "UNCOVERED".to_string(),
+            (false, true) => "covered".to_string(),
+            (_, false) => {
+                let total = entry.tasks.len();
+                let done = entry
+                    .tasks
+                    .iter()
+                    .filter(|t| matches!(t.progress, crate::model::frontmatter::Progress::Done))
+                    .count();
+                format!("tasks {done}/{total}")
+            }
         };
         println!("  #{} ({}) — {}", entry.clause_id, status, entry.clause_text);
         for child in &entry.refined_by {
             println!("    refined by: {child}");
+        }
+        for task in &entry.tasks {
+            println!("    task [{}] {}", task.progress.as_str(), task.id);
         }
     }
 

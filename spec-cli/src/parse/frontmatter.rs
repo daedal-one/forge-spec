@@ -125,6 +125,22 @@ pub fn parse_frontmatter(
         EntityType::Glo => TypeSpecificFields::Glossary,
         EntityType::Topic => TypeSpecificFields::Topic,
         EntityType::Scn => TypeSpecificFields::Scenario,
+        EntityType::Task => {
+            let progress = raw
+                .progress
+                .as_deref()
+                .and_then(Progress::from_str_val)
+                .unwrap_or(Progress::Pending);
+            TypeSpecificFields::Task {
+                progress,
+                refines: raw.refines.unwrap_or_default(),
+                aspects: raw.aspects.unwrap_or_default(),
+                assignee: raw.assignee,
+                eta: raw.eta,
+                blocked_by: raw.blocked_by.unwrap_or_default(),
+                categorized_under: raw.categorized_under.unwrap_or_default(),
+            }
+        }
     };
 
     Ok((universal, type_fields, warnings))
