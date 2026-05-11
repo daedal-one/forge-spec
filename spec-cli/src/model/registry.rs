@@ -24,6 +24,8 @@ pub struct SpecRegistry {
     pub anchor_index: BTreeMap<String, usize>,
     pub redirects: Vec<Redirect>,
     pub specs_dir: PathBuf,
+    /// Resolved root of the knowledge-base vault (from `_config.toml`).
+    pub kb_root: Option<PathBuf>,
 }
 
 impl SpecRegistry {
@@ -84,12 +86,17 @@ impl SpecRegistry {
             Vec::new()
         };
 
+        // Load knowledge-base configuration
+        let kb_root = parse::config::load_kb_root(specs_dir)
+            .with_context(|| "loading _config.toml")?;
+
         Ok(Self {
             documents,
             id_index,
             anchor_index,
             redirects,
             specs_dir: specs_dir.to_path_buf(),
+            kb_root,
         })
     }
 

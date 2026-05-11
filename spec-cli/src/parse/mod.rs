@@ -1,5 +1,6 @@
 pub mod anchors;
 pub mod blocks;
+pub mod config;
 pub mod frontmatter;
 pub mod redirects;
 pub mod references;

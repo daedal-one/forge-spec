@@ -34,7 +34,7 @@ pub enum Commands {
         id_or_query: String,
         /// Render target
         #[arg(long, default_value = "human", value_enum)]
-        target: RenderTarget,
+        target: CliRenderTarget,
         /// Traversal depth
         #[arg(long)]
         depth: Option<usize>,
@@ -130,12 +130,23 @@ pub enum Commands {
         /// TASK spec id
         id: String,
     },
+    /// Scan the knowledge base for references back to specs.
+    KbRefs,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
-pub enum RenderTarget {
+pub enum CliRenderTarget {
     Human,
     Agent,
+}
+
+impl From<CliRenderTarget> for spec_cli::render::RenderTarget {
+    fn from(val: CliRenderTarget) -> Self {
+        match val {
+            CliRenderTarget::Human => spec_cli::render::RenderTarget::Human,
+            CliRenderTarget::Agent => spec_cli::render::RenderTarget::Agent,
+        }
+    }
 }
 
 fn parse_entity_type(s: &str) -> Result<String, String> {

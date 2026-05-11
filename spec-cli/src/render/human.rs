@@ -1,5 +1,6 @@
 use crate::model::document::SpecDocument;
 use crate::model::frontmatter::TypeSpecificFields;
+use crate::model::reference::SpecReference;
 use crate::model::registry::SpecRegistry;
 
 use super::scope::{DetailLevel, ScopedEntry};
@@ -39,6 +40,34 @@ fn render_full(doc: &SpecDocument, out: &mut String) {
     out.push_str(&doc.body_raw);
     if !doc.body_raw.ends_with('\n') {
         out.push('\n');
+    }
+    // Knowledge-base references
+    render_kb_refs(doc, out);
+}
+
+fn render_kb_refs(doc: &SpecDocument, out: &mut String) {
+    let kb_refs: Vec<_> = doc
+        .references
+        .iter()
+        .filter_map(|lr| match &lr.reference {
+            SpecReference::KnowledgeBase { path, heading } => {
+                Some((path.clone(), heading.clone(), lr.link_text.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+
+    if kb_refs.is_empty() {
+        return;
+    }
+
+    out.push_str("\n### Knowledge base references\n\n");
+    for (path, heading, link_text) in &kb_refs {
+        let display = if link_text.is_empty() { path } else { link_text };
+        match heading {
+            Some(h) => out.push_str(&format!("- [{display}](spec:kb:{path}#{h})\n")),
+            None => out.push_str(&format!("- [{display}](spec:kb:{path})\n")),
+        }
     }
 }
 

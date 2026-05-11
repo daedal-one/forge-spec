@@ -33,6 +33,8 @@ CommonMark links with `spec:` URL scheme.
 [link text](spec:REQ:auth/session-management#c-lifetime)
 [link text](spec:GLO:terms/idempotency-key)
 [link text](spec:src:packages/auth/session.ts:42-78)
+[link text](spec:kb:engineering/auth/session-tokens.md)
+[link text](spec:kb:engineering/auth/session-tokens.md#credential-rotation)
 ```
 
 ## Typed block
@@ -77,6 +79,7 @@ refines:
 | `TOPIC` | informal grouping                |
 | `SCN`   | scenario                         |
 | `src:`  | (virtual) source-tree reference  |
+| `kb:`   | (virtual) knowledge-base file   |
 
 ## Common commands
 
@@ -92,6 +95,7 @@ spec graph --refinement                    # DOT of the refinement DAG
 spec history --update                      # rebuild .specs/_history/
 spec migrate                               # apply _redirects.toml
 spec orphans                               # leaf specs with no children
+spec kb-refs                               # reverse refs from knowledge base
 ```
 
 ## Git trailer
@@ -115,6 +119,9 @@ referencing an `ADR:` in the same commit.
 | `R010`   | clause has no refining child (warning)                             | add a child or remove the clause          |
 | `R011`   | referenced spec missing `summary:`                                 | add `summary:` to the target              |
 | `R012`   | multi-parent refinement without `aspects:`                         | add `aspects:` justifying the split       |
+| `R018`   | knowledge-base file not found                                      | fix path or configure `_config.toml`      |
+| `R019`   | knowledge-base heading not found (warning)                         | fix heading slug or update target         |
+| `R020`   | knowledge base not configured (info)                               | add `[knowledge_base]` to `_config.toml`  |
 | `R-redir`| reference traversed a redirect (info)                              | rewrite to the canonical target           |
 
 ## Status escape hatch

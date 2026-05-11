@@ -21,6 +21,8 @@ In scope:
 - Capturing requirements, invariants, interface contracts, architecture
   decisions, and glossary entries as first-class entities.
 - Cross-referencing entities both within the spec graph and to source code.
+- Cross-referencing to external knowledge-base markdown files via
+  configurable vault path.
 - Tracking refinement (a high-level requirement decomposed into
   sub-requirements) at clause-level granularity.
 - Linking specs to the commits that touch or implement them.
@@ -59,6 +61,7 @@ mirrors ID namespaces by convention but is not enforced by the toolchain.
 ├── _adrs/
 │   ├── 0001-storage-engine.spec.md
 │   └── 0002-auth-provider.spec.md
+├── _config.toml              # optional; knowledge-base path, etc.
 ├── _redirects.toml
 └── _history/                 # generated; tracked
     └── REQ_auth_session-expiry.json
@@ -188,10 +191,12 @@ Registered prefixes for full document IDs:
 | `TOPIC` | topic                           | informal grouping for navigation                       |
 | `SCN`   | scenario                        | example walkthrough                                    |
 
-Plus one virtual prefix used only inside reference URLs:
+Plus two virtual prefixes used only inside reference URLs:
 
 - `src:` — references a path (and optional line range) in the working tree,
   resolved against `pinned_at` if set, else HEAD.
+- `kb:` — references a path (and optional heading) in the knowledge-base
+  vault, resolved against the root configured in `_config.toml`.
 
 ### 4.1 Type-specific frontmatter
 
@@ -253,6 +258,8 @@ References are CommonMark links with a `spec:` URL scheme:
 [clause: lifetime cap](spec:REQ:auth/session-management#c-lifetime)
 [idempotency key](spec:GLO:terms/idempotency-key)
 [session.ts:42-78](spec:src:packages/auth/session.ts:42-78)
+[session token design](spec:kb:engineering/auth/session-tokens.md)
+[rotation policy](spec:kb:engineering/auth/session-tokens.md#credential-rotation)
 ```
 
 This survives any standard Markdown renderer (the URL is shown as a link to
@@ -265,6 +272,9 @@ links during transmutation.
 - `#anchor` suffix → look up doc-local anchor (typed-block id or clause id).
 - `src:path:lines` → resolve against `pinned_at` if set on the referencing
   spec, otherwise HEAD.
+- `kb:path#heading` → resolve path relative to the knowledge-base root
+  declared in `_config.toml`. The heading slug follows GitHub-style
+  slugification (lowercase, spaces → hyphens, non-alphanumeric stripped).
 
 ### 5.3 Validation
 
@@ -274,7 +284,11 @@ The linter:
 - emits `R005` (error) for dangling references;
 - emits `R006` (warning) for references to deprecated specs lacking an
   acknowledgment;
-- emits `R-redir` (info) when a reference traverses a redirect.
+- emits `R-redir` (info) when a reference traverses a redirect;
+- emits `R018` (error) when a `kb:` reference points to a nonexistent file;
+- emits `R019` (warning) when a `kb:` heading slug is not found in the target;
+- emits `R020` (info) when `kb:` references exist but the knowledge base is
+  not configured.
 
 ---
 
@@ -486,6 +500,9 @@ config in `.specs/_lint.toml`.
 | `R015`      | error    | No two anchors share a (doc, anchor) pair                            |
 | `R016`      | warning  | Multi-entity file warning past threshold (configurable, default 10)  |
 | `R017`      | warning  | RFC 2119 keyword discipline (a `requirement` block with no MUST/SHOULD/MAY) |
+| `R018`      | error    | Knowledge-base file not found at resolved path                       |
+| `R019`      | warning  | Knowledge-base heading slug not found in target markdown             |
+| `R020`      | info     | Knowledge base not configured; `kb:` references skipped              |
 | `R-redir`   | info     | Reference traverses a redirect                                       |
 
 `status: draft` downgrades `R002`–`R012` from error to warning. This is the
@@ -512,6 +529,7 @@ Subcommands:
 | `spec coverage <id>`                | clause-by-clause refinement-coverage report                   |
 | `spec orphans`                      | list referenceless leaf specs                                 |
 | `spec migrate`                      | apply `_redirects.toml`, rewrite refs, update `superseded_by` |
+| `spec kb-refs`                      | scan knowledge base for reverse references to specs           |
 
 Recommended pre-commit hook chain: `spec lint && spec history --update`.
 
@@ -585,7 +603,14 @@ Enforcement point: [session.ts:42-78](spec:src:packages/auth/session.ts:42-78).
 
 - **Cross-repo references.** Useful for monorepo / multi-repo organizations.
   The `spec:` URL scheme is extensible (`spec:other-repo/REQ:foo`); resolution
-  needs a registry. Out of scope for v0.1.
+  needs a registry. Note: `kb:` references provide a lighter-weight
+  alternative for referencing non-spec knowledge within a configured vault.
+  Full cross-repo spec references remain out of scope for v0.1.
+
+- **Reverse reference indexing.** The `spec kb-refs` command scans vault
+  files for `spec:` URLs and `specs:` frontmatter. A persistent index file
+  (analogous to `_history/`) could cache results for performance on large
+  vaults. Deferred until vault sizes warrant it.
 
 - **Symbolic clause-coverage proof.** The current coverage check is
   syntactic: every clause has at least one refining child. A semantic check

@@ -1,17 +1,11 @@
 mod cli;
-mod commands;
-mod graph;
-mod history;
-mod lint;
-mod model;
-mod parse;
-mod render;
 
 use std::path::PathBuf;
 use std::process;
 
 use anyhow::Result;
 use clap::Parser;
+use spec_cli::{commands, render};
 
 use cli::{Cli, Commands};
 
@@ -72,10 +66,11 @@ fn run(cli: Cli) -> Result<()> {
             ..
         } => {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
+            let lib_target: render::RenderTarget = target.into();
             commands::render::run(
                 &specs_dir,
                 &id_or_query,
-                &target,
+                &lib_target,
                 depth,
                 &ancestors,
                 &descendants,
@@ -139,6 +134,10 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Wontdo { id } => {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             commands::task::wontdo(&specs_dir, &id)
+        }
+        Commands::KbRefs => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::kb_refs::run(&specs_dir)
         }
     }
 }

@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Specs format toolchain — validate, render, and query project specifications"
 
+[lib]
+name = "spec_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "spec"
 path = "src/main.rs"

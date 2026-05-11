@@ -2,8 +2,8 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 
-use crate::cli::RenderTarget;
 use crate::model::registry::SpecRegistry;
+use crate::render::RenderTarget;
 use crate::render::scope::{compute_scope, DetailLevel};
 use crate::render::{agent, human};
 

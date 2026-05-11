@@ -7,7 +7,7 @@ This repo uses the **Specs Format v0.1** to capture requirements, invariants, in
 - Specs live in `.specs/` as `.spec.md` files with YAML frontmatter + CommonMark body.
 - Every spec has an `id` of the form `TYPE:namespace/slug` (e.g. `REQ:auth/session-expiry`).
 - Types: `REQ` requirement, `INV` invariant, `IFC` interface, `ADR` decision record, `GLO` glossary, `TOPIC` grouping, `SCN` scenario.
-- Cross-reference with `[text](spec:REQ:auth/session-expiry)` links. Source refs: `spec:src:path/file.ts:42-78`.
+- Cross-reference with `[text](spec:REQ:auth/session-expiry)` links. Source refs: `spec:src:path/file.ts:42-78`. Knowledge-base refs: `spec:kb:path/to/note.md#heading`.
 - Requirements use typed blocks: `:::{requirement id="name" level="MUST"} ... :::`.
 - Clause anchors inside blocks (`- {#c-lifetime} description`) create addressable sub-properties for refinement.
 - Children declare `refines: [REQ:parent#c-clause]` in frontmatter; add `aspects:` when refining multiple parents.
@@ -25,6 +25,7 @@ spec render REQ:auth/foo --target=agent   # XML envelope for LLM context
 spec children REQ:auth/foo     # who refines this?
 spec coverage REQ:auth/foo     # clause-by-clause coverage
 spec graph --refinement        # DOT output of refinement DAG
+spec kb-refs                   # reverse refs from knowledge base
 ```
 
 ## Specification reference
@@ -41,6 +42,6 @@ Full spec: `specification.md`. Key sections by line number:
 | Refinement, categorization, coverage | 281-329 | 6 |
 | Git trailers & history | 332-384 | 7 |
 | Render targets (human & agent XML) | 387-458 | 8 |
-| Lint rules R001-R017 | 465-493 | 9 |
+| Lint rules R001-R020 | 465-497 | 9 |
 | CLI subcommands | 496-520 | 10 |
 | Worked file template | 523-572 | 11 |

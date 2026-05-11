@@ -1,6 +1,7 @@
 use crate::graph;
 use crate::model::document::SpecDocument;
 use crate::model::frontmatter::TypeSpecificFields;
+use crate::model::reference::SpecReference;
 use crate::model::registry::SpecRegistry;
 
 use super::scope::{DetailLevel, ScopedEntry};
@@ -144,6 +145,27 @@ fn render_spec_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut Strin
             }
         }
         out.push_str("    </descendants>\n");
+    }
+
+    // Knowledge-base references
+    let kb_refs: Vec<_> = doc
+        .references
+        .iter()
+        .filter_map(|lr| match &lr.reference {
+            SpecReference::KnowledgeBase { path, heading } => Some((path, heading)),
+            _ => None,
+        })
+        .collect();
+    if !kb_refs.is_empty() {
+        out.push_str("    <kb-refs>\n");
+        for (path, heading) in &kb_refs {
+            out.push_str(&format!("      <kb-ref path=\"{}\"", escape_xml(path)));
+            if let Some(h) = heading {
+                out.push_str(&format!(" heading=\"{}\"", escape_xml(h)));
+            }
+            out.push_str(" />\n");
+        }
+        out.push_str("    </kb-refs>\n");
     }
 
     out.push_str("  </spec>\n");

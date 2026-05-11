@@ -52,6 +52,7 @@ pub fn lint_all(registry: &SpecRegistry) -> Vec<Diagnostic> {
     diags.extend(structural::check_unique_ids(registry));
     diags.extend(references::check_references(registry));
     diags.extend(references::check_summary_on_referenced(registry));
+    diags.extend(references::check_kb_references(registry));
     diags.extend(refinement::check_refinement(registry));
     diags.extend(trailers::check_trailer_references(registry));
 

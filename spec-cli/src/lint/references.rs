@@ -1,3 +1,8 @@
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+
+use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+
 use crate::model::frontmatter::Status;
 use crate::model::reference::SpecReference;
 use crate::model::registry::SpecRegistry;
@@ -64,9 +69,9 @@ pub fn check_references(registry: &SpecRegistry) -> Vec<Diagnostic> {
                         }
                     }
                 }
-                SpecReference::Source { .. } => {
-                    // Source references are not validated against the registry
-                    // (they reference files in the working tree, not specs)
+                SpecReference::Source { .. } | SpecReference::KnowledgeBase { .. } => {
+                    // Source and knowledge-base references are not validated
+                    // against the registry (handled separately by check_kb_references)
                 }
             }
         }
@@ -117,4 +122,180 @@ pub fn check_summary_on_referenced(registry: &SpecRegistry) -> Vec<Diagnostic> {
     }
 
     diags
+}
+
+/// R018: kb: file exists at resolved path.
+/// R019: kb: heading slug found in target markdown (warning).
+/// R020: Knowledge base not configured (info, emitted once).
+pub fn check_kb_references(registry: &SpecRegistry) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+
+    // Collect all kb: references across documents
+    let mut has_kb_refs = false;
+    for doc in &registry.documents {
+        for loc_ref in &doc.references {
+            if matches!(&loc_ref.reference, SpecReference::KnowledgeBase { .. }) {
+                has_kb_refs = true;
+                break;
+            }
+        }
+        if has_kb_refs {
+            break;
+        }
+    }
+
+    if !has_kb_refs {
+        return diags;
+    }
+
+    let kb_root = match &registry.kb_root {
+        Some(root) => root,
+        None => {
+            // R020: emit once for the whole registry
+            diags.push(Diagnostic::info(
+                "R020",
+                "knowledge base not configured; kb: references cannot be validated \
+                 (add [knowledge_base] to .specs/_config.toml)",
+                registry.specs_dir.join("_config.toml"),
+            ));
+            return diags;
+        }
+    };
+
+    // Cache extracted headings per file to avoid re-parsing
+    let mut heading_cache: std::collections::HashMap<PathBuf, BTreeSet<String>> =
+        std::collections::HashMap::new();
+
+    for doc in &registry.documents {
+        for loc_ref in &doc.references {
+            if let SpecReference::KnowledgeBase {
+                ref path,
+                ref heading,
+            } = loc_ref.reference
+            {
+                let full_path = kb_root.join(path);
+
+                // R018: file must exist
+                if !full_path.exists() {
+                    diags.push(
+                        Diagnostic::error(
+                            "R018",
+                            format!("knowledge-base file not found: '{path}'"),
+                            doc.source_path.clone(),
+                        )
+                        .at_line(loc_ref.line),
+                    );
+                    continue;
+                }
+
+                // R019: heading must exist (if specified)
+                if let Some(heading_slug) = heading {
+                    let headings = heading_cache
+                        .entry(full_path.clone())
+                        .or_insert_with(|| extract_heading_slugs(&full_path));
+
+                    if !headings.contains(heading_slug.as_str()) {
+                        diags.push(
+                            Diagnostic::warning(
+                                "R019",
+                                format!(
+                                    "heading '#{heading_slug}' not found in '{path}'"
+                                ),
+                                doc.source_path.clone(),
+                            )
+                            .at_line(loc_ref.line),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    diags
+}
+
+/// Extract heading slugs from a markdown file using GitHub-style slugification.
+fn extract_heading_slugs(path: &PathBuf) -> BTreeSet<String> {
+    let mut slugs = BTreeSet::new();
+
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return slugs,
+    };
+
+    // Skip YAML frontmatter if present
+    let body = if content.starts_with("---") {
+        if let Some(end) = content[3..].find("\n---") {
+            &content[end + 7..]
+        } else {
+            &content
+        }
+    } else {
+        &content
+    };
+
+    let parser = Parser::new_ext(body, Options::all());
+    let mut in_heading = false;
+    let mut heading_text = String::new();
+
+    for event in parser {
+        match event {
+            Event::Start(Tag::Heading { level, .. })
+                if matches!(
+                    level,
+                    HeadingLevel::H1
+                        | HeadingLevel::H2
+                        | HeadingLevel::H3
+                        | HeadingLevel::H4
+                        | HeadingLevel::H5
+                        | HeadingLevel::H6
+                ) =>
+            {
+                in_heading = true;
+                heading_text.clear();
+            }
+            Event::Text(text) if in_heading => {
+                heading_text.push_str(&text);
+            }
+            Event::Code(code) if in_heading => {
+                heading_text.push_str(&code);
+            }
+            Event::End(TagEnd::Heading(_)) if in_heading => {
+                in_heading = false;
+                slugs.insert(slugify_heading(&heading_text));
+            }
+            _ => {}
+        }
+    }
+
+    slugs
+}
+
+/// GitHub-style heading slugification:
+/// lowercase, replace spaces/runs-of-whitespace with hyphens,
+/// strip non-alphanumeric except hyphens and underscores.
+fn slugify_heading(text: &str) -> String {
+    let lower = text.to_lowercase();
+    let mut slug = String::with_capacity(lower.len());
+    let mut prev_was_sep = false;
+
+    for ch in lower.chars() {
+        if ch.is_alphanumeric() || ch == '_' {
+            slug.push(ch);
+            prev_was_sep = false;
+        } else if ch == ' ' || ch == '\t' || ch == '-' {
+            if !prev_was_sep && !slug.is_empty() {
+                slug.push('-');
+                prev_was_sep = true;
+            }
+        }
+        // Other characters are stripped
+    }
+
+    // Trim trailing hyphen
+    if slug.ends_with('-') {
+        slug.pop();
+    }
+
+    slug
 }

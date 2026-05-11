@@ -11,6 +11,11 @@ pub enum SpecReference {
         path: String,
         lines: Option<(u32, u32)>,
     },
+    /// Reference to a knowledge-base markdown file (and optional heading slug).
+    KnowledgeBase {
+        path: String,
+        heading: Option<String>,
+    },
 }
 
 impl fmt::Display for SpecReference {
@@ -22,6 +27,14 @@ impl fmt::Display for SpecReference {
                 path,
                 lines: Some((start, end)),
             } => write!(f, "spec:src:{path}:{start}-{end}"),
+            Self::KnowledgeBase {
+                path,
+                heading: None,
+            } => write!(f, "spec:kb:{path}"),
+            Self::KnowledgeBase {
+                path,
+                heading: Some(h),
+            } => write!(f, "spec:kb:{path}#{h}"),
         }
     }
 }

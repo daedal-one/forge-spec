@@ -1,5 +1,6 @@
 pub mod graph;
 pub mod history;
+pub mod kb_refs;
 pub mod lint;
 pub mod migrate;
 pub mod new;
