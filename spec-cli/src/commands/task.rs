@@ -28,7 +28,7 @@ pub fn todo(specs_dir: &Path, state: Option<&str>, under: Option<&str>, all: boo
         (Some(s), _) => match Progress::from_str_val(s) {
             Some(p) => StateFilter::Specific(p),
             None => bail!(
-                "unknown progress state '{s}' — expected pending|in-progress|done|blocked|deferred|all"
+                "unknown progress state '{s}' — expected pending|in-progress|done|blocked|deferred|wontdo|all"
             ),
         },
         (None, false) => StateFilter::Open,
@@ -115,6 +115,10 @@ pub fn reset(specs_dir: &Path, id: &str) -> Result<()> {
 
 pub fn defer(specs_dir: &Path, id: &str) -> Result<()> {
     set_progress(specs_dir, id, Progress::Deferred, None)
+}
+
+pub fn wontdo(specs_dir: &Path, id: &str) -> Result<()> {
+    set_progress(specs_dir, id, Progress::WontDo, None)
 }
 
 fn set_progress(
@@ -283,6 +287,7 @@ fn progress_order(p: Progress) -> u8 {
         Progress::Pending => 2,
         Progress::Done => 3,
         Progress::Deferred => 4,
+        Progress::WontDo => 5,
     }
 }
 

@@ -124,6 +124,12 @@ pub enum Commands {
         /// TASK spec id
         id: String,
     },
+    /// Mark a task as wontdo (intentionally not implemented; the parent
+    /// clause stays in place for traceability but no work is planned).
+    Wontdo {
+        /// TASK spec id
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, ValueEnum)]

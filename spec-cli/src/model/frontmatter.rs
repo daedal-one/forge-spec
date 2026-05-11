@@ -83,6 +83,13 @@ impl Stability {
 /// Distinct from [`Status`], which is the document lifecycle (draft, accepted,
 /// deprecated, superseded). A task can be `accepted` as a document while still
 /// being `pending` as work to do.
+///
+/// `Deferred` and `WontDo` look similar but differ in intent:
+/// - `Deferred` means "out of scope for the current iteration — revisit later"
+/// - `WontDo` means "we've decided not to implement this; the clause stays in
+///   the parent REQ for traceability but the work will not happen unless
+///   requirements change". Use `WontDo` when a task is rendered redundant by
+///   another design choice or a working alternative.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Progress {
     Pending,
@@ -90,6 +97,7 @@ pub enum Progress {
     Done,
     Blocked,
     Deferred,
+    WontDo,
 }
 
 impl Progress {
@@ -100,6 +108,7 @@ impl Progress {
             "done" => Some(Self::Done),
             "blocked" => Some(Self::Blocked),
             "deferred" => Some(Self::Deferred),
+            "wontdo" | "wont-do" | "wont_do" => Some(Self::WontDo),
             _ => None,
         }
     }
@@ -111,6 +120,7 @@ impl Progress {
             Self::Done => "done",
             Self::Blocked => "blocked",
             Self::Deferred => "deferred",
+            Self::WontDo => "wontdo",
         }
     }
 

@@ -84,13 +84,26 @@ pub fn coverage(specs_dir: &Path, id: &str) -> Result<()> {
             (true, true) => "UNCOVERED".to_string(),
             (false, true) => "covered".to_string(),
             (_, false) => {
-                let total = entry.tasks.len();
+                use crate::model::frontmatter::Progress as P;
+                // WontDo tasks are intentional non-work and excluded from the
+                // denominator — counting them as outstanding would suggest
+                // there's still something to do when the team has already
+                // decided otherwise.
+                let total = entry
+                    .tasks
+                    .iter()
+                    .filter(|t| !matches!(t.progress, P::WontDo))
+                    .count();
                 let done = entry
                     .tasks
                     .iter()
-                    .filter(|t| matches!(t.progress, crate::model::frontmatter::Progress::Done))
+                    .filter(|t| matches!(t.progress, P::Done))
                     .count();
-                format!("tasks {done}/{total}")
+                if total == 0 {
+                    "wontdo".to_string()
+                } else {
+                    format!("tasks {done}/{total}")
+                }
             }
         };
         println!("  #{} ({}) — {}", entry.clause_id, status, entry.clause_text);

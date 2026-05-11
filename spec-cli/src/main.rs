@@ -136,5 +136,9 @@ fn run(cli: Cli) -> Result<()> {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             commands::task::defer(&specs_dir, &id)
         }
+        Commands::Wontdo { id } => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::task::wontdo(&specs_dir, &id)
+        }
     }
 }

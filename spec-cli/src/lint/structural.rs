@@ -99,14 +99,20 @@ pub fn check_type_specific_fields(doc: &SpecDocument) -> Vec<Diagnostic> {
                     doc.source_path.clone(),
                 ));
             }
-            // R019: deferred tasks with no `eta:` or summary explanation are
-            // easy to lose track of; warn rather than error.
-            if matches!(progress, crate::model::frontmatter::Progress::Deferred)
+            // R019: deferred and wontdo tasks with no summary explanation
+            // are easy to lose track of; warn rather than error.
+            use crate::model::frontmatter::Progress as P;
+            if matches!(progress, P::Deferred | P::WontDo)
                 && doc.universal.summary.as_deref().map(str::trim).unwrap_or("").is_empty()
             {
+                let msg = match progress {
+                    P::Deferred => "TASK is deferred without a summary explaining why",
+                    P::WontDo => "TASK is wontdo without a summary explaining why",
+                    _ => unreachable!(),
+                };
                 diags.push(Diagnostic::warning(
                     "R019",
-                    "TASK is deferred without a summary explaining why",
+                    msg,
                     doc.source_path.clone(),
                 ));
             }
