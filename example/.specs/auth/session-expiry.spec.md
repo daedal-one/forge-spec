@@ -23,7 +23,14 @@ pinned_at: 7c3a9f1
 
 Sessions persist across browser restarts; the auth subsystem must revoke
 them under defined conditions. See
-[the storage decision](spec:ADR:auth/0001-session-storage).
+[the storage decision](spec:ADR:auth/0001-session-storage). The token
+format and rotation flow are documented in the
+[session token design note](spec:kb:engineering/auth/session-tokens.md#credential-rotation).
+
+Additional background lives in the
+[threat model](spec:kb:engineering/auth/threat-model.md), and an older
+note we never wrote up is at
+[stale ref](spec:kb:engineering/auth/session-tokens.md#nonexistent-heading).
 
 :::{requirement id="timeout-policy" level="MUST"}
 A session token MUST be invalidated when any of the following holds:

@@ -25,6 +25,11 @@ Session state MUST be stored in Redis. Each session key carries a TTL
 equal to the maximum session lifetime (30 days).
 :::
 
+Deployment topology is documented in the
+[Redis deployment note](spec:kb:engineering/storage/redis-deployment.md),
+with an older capacity plan at
+[missing note](spec:kb:engineering/storage/capacity-2025.md).
+
 ## Consequences
 
 - Redis becomes an infrastructure dependency for the auth service.
