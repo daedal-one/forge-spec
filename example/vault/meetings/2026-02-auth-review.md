@@ -7,6 +7,7 @@ specs:
   - REQ:auth/session-management
   - ADR:auth/0001-session-storage
   - INV:auth/no-stale-tokens
+_width: normal
 ---
 
 # Auth review — Feb 2026
