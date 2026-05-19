@@ -538,6 +538,43 @@ impl App {
             push_jump(&mut actions, &mut seen, "refined-by", &c);
         }
 
+        // Reverse relationships — scan the registry for incoming refs whose
+        // target (with any clause anchor stripped) is this spec.
+        let me = id_str.as_str();
+        let strips_to_me = |raw: &str| strip_anchor(raw) == me;
+        for other in &self.registry.documents {
+            let other_id = other.id_str();
+            if other_id == id_str {
+                continue;
+            }
+            // `categorizes` — specs that name this one in their
+            // `categorized_under`. Most useful on TOPIC nodes.
+            let categorized_under = match &other.type_fields {
+                TypeSpecificFields::Requirement {
+                    categorized_under, ..
+                } => Some(categorized_under),
+                TypeSpecificFields::Task {
+                    categorized_under, ..
+                } => Some(categorized_under),
+                _ => None,
+            };
+            if let Some(cu) = categorized_under {
+                if cu.iter().any(|r| strips_to_me(r)) {
+                    push_jump(&mut actions, &mut seen, "categorizes", &other_id);
+                }
+            }
+            // `blocks` — tasks that list this spec in their `blocked_by`.
+            if let TypeSpecificFields::Task { blocked_by, .. } = &other.type_fields {
+                if blocked_by.iter().any(|r| strips_to_me(r)) {
+                    push_jump(&mut actions, &mut seen, "blocks", &other_id);
+                }
+            }
+            // `related-from` — undirected `related` link back to this spec.
+            if other.universal.related.iter().any(|r| strips_to_me(r)) {
+                push_jump(&mut actions, &mut seen, "related-from", &other_id);
+            }
+        }
+
         self.modal = Some(Modal {
             title: format!("Actions — {id_str}"),
             actions,
@@ -961,28 +998,95 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                 }
             }
 
-            // Children / ancestors
+            // Refinement: ancestors are what *this* refines (outgoing),
+            // children are what refines this (incoming).
             let id_str = doc.id_str();
-            let children = graph::query::children(&app.registry, &id_str);
-            let ancestors = graph::query::ancestors(&app.registry, &id_str);
-            if !ancestors.is_empty() {
+            let refines_targets = graph::query::ancestors(&app.registry, &id_str);
+            let refined_by = graph::query::children(&app.registry, &id_str);
+            if !refines_targets.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "Refines",
+                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                )));
+                for a in &refines_targets {
+                    lines.push(Line::from(format!("  ↑ {a}")));
+                }
+            }
+            if !refined_by.is_empty() {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     "Refined by",
                     Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
                 )));
-                for a in &ancestors {
-                    lines.push(Line::from(format!("  ↑ {a}")));
+                for c in &refined_by {
+                    lines.push(Line::from(format!("  ↓ {c}")));
                 }
             }
-            if !children.is_empty() {
+
+            // Reverse non-refinement relationships — single scan across
+            // the registry collecting `categorizes`, `blocks`, and
+            // undirected `related-from` back-refs.
+            let me = id_str.as_str();
+            let mut categorizes: Vec<String> = Vec::new();
+            let mut blocks: Vec<String> = Vec::new();
+            let mut related_from: Vec<String> = Vec::new();
+            for other in &app.registry.documents {
+                let other_id = other.id_str();
+                if other_id == id_str {
+                    continue;
+                }
+                let cu = match &other.type_fields {
+                    TypeSpecificFields::Requirement {
+                        categorized_under, ..
+                    } => Some(categorized_under),
+                    TypeSpecificFields::Task {
+                        categorized_under, ..
+                    } => Some(categorized_under),
+                    _ => None,
+                };
+                if let Some(list) = cu {
+                    if list.iter().any(|r| strip_anchor(r) == me) {
+                        categorizes.push(other_id.clone());
+                    }
+                }
+                if let TypeSpecificFields::Task { blocked_by, .. } = &other.type_fields {
+                    if blocked_by.iter().any(|r| strip_anchor(r) == me) {
+                        blocks.push(other_id.clone());
+                    }
+                }
+                if other.universal.related.iter().any(|r| strip_anchor(r) == me) {
+                    related_from.push(other_id);
+                }
+            }
+            if !categorizes.is_empty() {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
-                    "Children",
+                    "Categorizes",
                     Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
                 )));
-                for c in &children {
-                    lines.push(Line::from(format!("  ↓ {c}")));
+                for c in &categorizes {
+                    lines.push(Line::from(format!("  ↪ {c}")));
+                }
+            }
+            if !blocks.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "Blocks",
+                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                )));
+                for c in &blocks {
+                    lines.push(Line::from(format!("  ✋ {c}")));
+                }
+            }
+            if !related_from.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "Related from",
+                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                )));
+                for c in &related_from {
+                    lines.push(Line::from(format!("  ↔ {c}")));
                 }
             }
 
@@ -990,7 +1094,7 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
             if !doc.blocks.is_empty() {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
-                    "Blocks",
+                    "Body blocks",
                     Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
                 )));
                 for b in &doc.blocks {
