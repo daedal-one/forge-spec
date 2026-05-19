@@ -24,26 +24,36 @@ impl SpecGraph {
         }
 
         for doc in &registry.documents {
-            if let TypeSpecificFields::Requirement { ref refines, ref aspects, .. } = doc.type_fields
-            {
-                let child_id = doc.id_str();
-                let child_node = node_map[&child_id];
+            // Both REQs and TASKs can refine other specs; the spec format
+            // treats TASK refinement the same way (a TASK refines a clause
+            // on its parent REQ).
+            let (refines, aspects): (&[String], &[String]) = match &doc.type_fields {
+                TypeSpecificFields::Requirement {
+                    refines, aspects, ..
+                } => (refines, aspects),
+                TypeSpecificFields::Task {
+                    refines, aspects, ..
+                } => (refines, aspects),
+                _ => continue,
+            };
 
-                for (i, refine_target) in refines.iter().enumerate() {
-                    let parent_doc_id = if let Some(pos) = refine_target.find('#') {
-                        &refine_target[..pos]
+            let child_id = doc.id_str();
+            let child_node = node_map[&child_id];
+
+            for (i, refine_target) in refines.iter().enumerate() {
+                let parent_doc_id = if let Some(pos) = refine_target.find('#') {
+                    &refine_target[..pos]
+                } else {
+                    refine_target.as_str()
+                };
+
+                if let Some(&parent_node) = node_map.get(parent_doc_id) {
+                    let label = if aspects.len() > i {
+                        aspects[i].clone()
                     } else {
-                        refine_target.as_str()
+                        String::new()
                     };
-
-                    if let Some(&parent_node) = node_map.get(parent_doc_id) {
-                        let label = if aspects.len() > i {
-                            aspects[i].clone()
-                        } else {
-                            String::new()
-                        };
-                        graph.add_edge(child_node, parent_node, label);
-                    }
+                    graph.add_edge(child_node, parent_node, label);
                 }
             }
         }
@@ -63,18 +73,29 @@ impl SpecGraph {
         }
 
         for doc in &registry.documents {
-            if let TypeSpecificFields::Requirement {
-                ref categorized_under,
-                ..
-            } = doc.type_fields
-            {
-                let doc_id = doc.id_str();
-                let doc_node = node_map[&doc_id];
+            // Same story for categorization — TASKs can also be categorized
+            // under a TOPIC and should appear as the topic's children.
+            let categorized_under: &[String] = match &doc.type_fields {
+                TypeSpecificFields::Requirement {
+                    categorized_under, ..
+                } => categorized_under,
+                TypeSpecificFields::Task {
+                    categorized_under, ..
+                } => categorized_under,
+                _ => continue,
+            };
 
-                for topic_id in categorized_under {
-                    if let Some(&topic_node) = node_map.get(topic_id) {
-                        graph.add_edge(doc_node, topic_node, String::new());
-                    }
+            let doc_id = doc.id_str();
+            let doc_node = node_map[&doc_id];
+
+            for topic_id in categorized_under {
+                let topic_doc = if let Some(pos) = topic_id.find('#') {
+                    &topic_id[..pos]
+                } else {
+                    topic_id.as_str()
+                };
+                if let Some(&topic_node) = node_map.get(topic_doc) {
+                    graph.add_edge(doc_node, topic_node, String::new());
                 }
             }
         }

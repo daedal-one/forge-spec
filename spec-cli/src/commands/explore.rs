@@ -527,6 +527,29 @@ impl App {
                     push_jump(&mut actions, &mut seen, "under", r);
                 }
             }
+            TypeSpecificFields::Invariant {
+                enforcement,
+                applies_to,
+            } => {
+                for r in applies_to {
+                    push_jump(&mut actions, &mut seen, "applies-to", r);
+                }
+                for r in enforcement {
+                    push_jump(&mut actions, &mut seen, "enforced-by", r);
+                }
+            }
+            TypeSpecificFields::Interface {
+                consumed_by,
+                provided_by,
+                ..
+            } => {
+                for r in provided_by {
+                    push_jump(&mut actions, &mut seen, "provided-by", r);
+                }
+                for r in consumed_by {
+                    push_jump(&mut actions, &mut seen, "consumed-by", r);
+                }
+            }
             _ => {}
         }
         for r in &doc.universal.related {
@@ -540,39 +563,9 @@ impl App {
 
         // Reverse relationships — scan the registry for incoming refs whose
         // target (with any clause anchor stripped) is this spec.
-        let me = id_str.as_str();
-        let strips_to_me = |raw: &str| strip_anchor(raw) == me;
-        for other in &self.registry.documents {
-            let other_id = other.id_str();
-            if other_id == id_str {
-                continue;
-            }
-            // `categorizes` — specs that name this one in their
-            // `categorized_under`. Most useful on TOPIC nodes.
-            let categorized_under = match &other.type_fields {
-                TypeSpecificFields::Requirement {
-                    categorized_under, ..
-                } => Some(categorized_under),
-                TypeSpecificFields::Task {
-                    categorized_under, ..
-                } => Some(categorized_under),
-                _ => None,
-            };
-            if let Some(cu) = categorized_under {
-                if cu.iter().any(|r| strips_to_me(r)) {
-                    push_jump(&mut actions, &mut seen, "categorizes", &other_id);
-                }
-            }
-            // `blocks` — tasks that list this spec in their `blocked_by`.
-            if let TypeSpecificFields::Task { blocked_by, .. } = &other.type_fields {
-                if blocked_by.iter().any(|r| strips_to_me(r)) {
-                    push_jump(&mut actions, &mut seen, "blocks", &other_id);
-                }
-            }
-            // `related-from` — undirected `related` link back to this spec.
-            if other.universal.related.iter().any(|r| strips_to_me(r)) {
-                push_jump(&mut actions, &mut seen, "related-from", &other_id);
-            }
+        let reverse = reverse_refs(&self.registry, &id_str);
+        for (cat, other_id) in reverse {
+            push_jump(&mut actions, &mut seen, cat, &other_id);
         }
 
         self.modal = Some(Modal {
@@ -1024,69 +1017,28 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                 }
             }
 
-            // Reverse non-refinement relationships — single scan across
-            // the registry collecting `categorizes`, `blocks`, and
-            // undirected `related-from` back-refs.
-            let me = id_str.as_str();
-            let mut categorizes: Vec<String> = Vec::new();
-            let mut blocks: Vec<String> = Vec::new();
-            let mut related_from: Vec<String> = Vec::new();
-            for other in &app.registry.documents {
-                let other_id = other.id_str();
-                if other_id == id_str {
-                    continue;
-                }
-                let cu = match &other.type_fields {
-                    TypeSpecificFields::Requirement {
-                        categorized_under, ..
-                    } => Some(categorized_under),
-                    TypeSpecificFields::Task {
-                        categorized_under, ..
-                    } => Some(categorized_under),
-                    _ => None,
-                };
-                if let Some(list) = cu {
-                    if list.iter().any(|r| strip_anchor(r) == me) {
-                        categorizes.push(other_id.clone());
+            // Other reverse relationships — categorizes / blocks /
+            // related-from / consumes / provides / constrained-by /
+            // enforces / superseded-by / supersedes-from.
+            let reverse = reverse_refs(&app.registry, &id_str);
+            if !reverse.is_empty() {
+                let mut last_cat: &str = "";
+                for (cat, other_id) in &reverse {
+                    if *cat != last_cat {
+                        lines.push(Line::from(""));
+                        lines.push(Line::from(Span::styled(
+                            reverse_section_title(cat).to_string(),
+                            Style::default()
+                                .fg(Color::Magenta)
+                                .add_modifier(Modifier::BOLD),
+                        )));
+                        last_cat = cat;
                     }
-                }
-                if let TypeSpecificFields::Task { blocked_by, .. } = &other.type_fields {
-                    if blocked_by.iter().any(|r| strip_anchor(r) == me) {
-                        blocks.push(other_id.clone());
-                    }
-                }
-                if other.universal.related.iter().any(|r| strip_anchor(r) == me) {
-                    related_from.push(other_id);
-                }
-            }
-            if !categorizes.is_empty() {
-                lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled(
-                    "Categorizes",
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-                )));
-                for c in &categorizes {
-                    lines.push(Line::from(format!("  ↪ {c}")));
-                }
-            }
-            if !blocks.is_empty() {
-                lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled(
-                    "Blocks",
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-                )));
-                for c in &blocks {
-                    lines.push(Line::from(format!("  ✋ {c}")));
-                }
-            }
-            if !related_from.is_empty() {
-                lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled(
-                    "Related from",
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-                )));
-                for c in &related_from {
-                    lines.push(Line::from(format!("  ↔ {c}")));
+                    lines.push(Line::from(format!(
+                        "  {} {}",
+                        reverse_glyph(cat),
+                        other_id
+                    )));
                 }
             }
 
@@ -1331,11 +1283,126 @@ fn launch_editor(terminal: &mut Term, path: &Path, app: &mut App) -> Result<()> 
     Ok(())
 }
 
+fn reverse_section_title(cat: &str) -> &'static str {
+    match cat {
+        "categorizes" => "Categorizes",
+        "blocks" => "Blocks",
+        "consumes" => "Consumed by",
+        "provides" => "Provided by",
+        "constrained-by" => "Constrained by",
+        "enforces" => "Enforced by",
+        "related-from" => "Related from",
+        "superseded-by" => "Superseded by",
+        "supersedes-from" => "Supersedes",
+        _ => "Reverse",
+    }
+}
+
+fn reverse_glyph(cat: &str) -> &'static str {
+    match cat {
+        "blocks" => "✋",
+        "categorizes" => "↪",
+        "consumes" | "provides" => "⇄",
+        "constrained-by" | "enforces" => "⊕",
+        "related-from" => "↔",
+        "superseded-by" | "supersedes-from" => "⇲",
+        _ => "·",
+    }
+}
+
 fn strip_anchor(s: &str) -> String {
     match s.split_once('#') {
         Some((id, _)) => id.to_string(),
         None => s.to_string(),
     }
+}
+
+/// Scan the registry for all incoming references to `target_id` (anchor
+/// stripped). Returns `(category-label, source-spec-id)` pairs in stable
+/// order — first by category, then by source id.
+fn reverse_refs(registry: &SpecRegistry, target_id: &str) -> Vec<(&'static str, String)> {
+    let me = target_id;
+    let mut out: Vec<(&'static str, String)> = Vec::new();
+    let strips_to_me = |raw: &str| strip_anchor(raw) == me;
+
+    for other in &registry.documents {
+        let other_id = other.id_str();
+        if other_id == me {
+            continue;
+        }
+
+        // refined-by — handled separately via the refinement graph in
+        // callers, since the graph also picks up TASK→REQ refinement.
+
+        // categorizes — REQ/TASK pointing here via `categorized_under`.
+        let cu: Option<&[String]> = match &other.type_fields {
+            TypeSpecificFields::Requirement {
+                categorized_under, ..
+            } => Some(categorized_under),
+            TypeSpecificFields::Task {
+                categorized_under, ..
+            } => Some(categorized_under),
+            _ => None,
+        };
+        if let Some(cu) = cu {
+            if cu.iter().any(|r| strips_to_me(r)) {
+                out.push(("categorizes", other_id.clone()));
+            }
+        }
+
+        // blocks — TASK pointing here via `blocked_by`.
+        if let TypeSpecificFields::Task { blocked_by, .. } = &other.type_fields {
+            if blocked_by.iter().any(|r| strips_to_me(r)) {
+                out.push(("blocks", other_id.clone()));
+            }
+        }
+
+        // INV reverse — applies_to / enforcement on an INV pointing here.
+        if let TypeSpecificFields::Invariant {
+            applies_to,
+            enforcement,
+        } = &other.type_fields
+        {
+            if applies_to.iter().any(|r| strips_to_me(r)) {
+                out.push(("constrained-by", other_id.clone()));
+            }
+            if enforcement.iter().any(|r| strips_to_me(r)) {
+                out.push(("enforces", other_id.clone()));
+            }
+        }
+
+        // IFC reverse — consumed_by / provided_by on an IFC pointing here.
+        if let TypeSpecificFields::Interface {
+            consumed_by,
+            provided_by,
+            ..
+        } = &other.type_fields
+        {
+            if consumed_by.iter().any(|r| strips_to_me(r)) {
+                out.push(("consumes", other_id.clone()));
+            }
+            if provided_by.iter().any(|r| strips_to_me(r)) {
+                out.push(("provides", other_id.clone()));
+            }
+        }
+
+        // related-from — undirected `related` link back to this spec.
+        if other.universal.related.iter().any(|r| strips_to_me(r)) {
+            out.push(("related-from", other_id.clone()));
+        }
+
+        // superseded-by / supersedes — universal pointers.
+        if other.universal.supersedes.as_deref().map(strip_anchor).as_deref() == Some(me) {
+            out.push(("superseded-by", other_id.clone()));
+        }
+        if other.universal.superseded_by.as_deref().map(strip_anchor).as_deref() == Some(me) {
+            out.push(("supersedes-from", other_id));
+        }
+    }
+
+    out.sort_by(|a, b| a.0.cmp(b.0).then_with(|| a.1.cmp(&b.1)));
+    out.dedup();
+    out
 }
 
 fn type_style(ty: &str) -> Style {
