@@ -140,5 +140,27 @@ fn run(cli: Cli) -> Result<()> {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             commands::task::wontdo(&specs_dir, &id)
         }
+        Commands::Tree {
+            namespace,
+            r#type,
+            no_color,
+        } => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::tree::run(
+                &specs_dir,
+                namespace.as_deref(),
+                r#type.as_deref(),
+                no_color,
+            )
+        }
+        Commands::Explore => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::explore::run(&specs_dir)
+        }
+        Commands::Completions { shell } => commands::completions::run(shell),
+        Commands::Complete { what } => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::complete::run(&specs_dir, &what)
+        }
     }
 }

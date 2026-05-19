@@ -37,9 +37,29 @@ spec render REQ:auth/session-expiry --target=agent
 spec children REQ:auth/session-management
 spec coverage REQ:auth/session-management
 spec graph --refinement             # DOT output
+spec tree                           # printed tree of all specs
+spec explore                        # interactive TUI browser
 ```
 
 Run `spec --help` for the full command list.
+
+## Shell completion
+
+`spec completions <shell>` prints a completion script for `bash`, `zsh`, or `fish`.
+It completes subcommands, flags, and — for id-taking subcommands — actual spec IDs
+from the current `.specs/` directory (powered by a hidden `spec __complete ids`).
+
+```sh
+# fish
+spec completions fish > ~/.config/fish/completions/spec.fish
+
+# bash
+spec completions bash > /usr/local/etc/bash_completion.d/spec
+# or per-session: source <(spec completions bash)
+
+# zsh (ensure the target dir is on $fpath)
+spec completions zsh > ~/.zsh/completions/_spec
+```
 
 ## Spec format at a glance
 

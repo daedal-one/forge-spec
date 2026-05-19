@@ -130,6 +130,40 @@ pub enum Commands {
         /// TASK spec id
         id: String,
     },
+    /// Print a tree of all specs grouped by namespace, then type.
+    Tree {
+        /// Restrict to a single namespace prefix (e.g. `auth`)
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Restrict to a single entity type (e.g. `REQ`, `TASK`)
+        #[arg(long, value_parser = parse_entity_type)]
+        r#type: Option<String>,
+        /// Disable colored output
+        #[arg(long)]
+        no_color: bool,
+    },
+    /// Interactive TUI to browse specs (ratatui).
+    Explore,
+    /// Print a shell completion script (bash, zsh, fish).
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+    /// Internal: emit machine-readable data for shell completion.
+    #[command(hide = true)]
+    #[command(name = "__complete")]
+    Complete {
+        /// What to list (currently only `ids`)
+        what: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum Shell {
+    Bash,
+    Zsh,
+    Fish,
 }
 
 #[derive(Debug, Clone, ValueEnum)]

@@ -1,3 +1,6 @@
+pub mod complete;
+pub mod completions;
+pub mod explore;
 pub mod graph;
 pub mod history;
 pub mod lint;
@@ -6,3 +9,4 @@ pub mod new;
 pub mod query;
 pub mod render;
 pub mod task;
+pub mod tree;
