@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::Result;
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -10,7 +11,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Terminal;
 
 use crate::commands::tree::progress_glyph;
@@ -41,17 +42,46 @@ pub fn run(specs_dir: &Path) -> Result<()> {
     res
 }
 
-fn event_loop<B: ratatui::backend::Backend>(
-    terminal: &mut Terminal<B>,
-    app: &mut App,
-) -> Result<()> {
+type Term = Terminal<CrosstermBackend<io::Stdout>>;
+
+fn event_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
     loop {
         terminal.draw(|f| draw(f, app))?;
+
+        // Handle pending external-editor request before reading the next key.
+        if let Some(path) = app.edit_request.take() {
+            launch_editor(terminal, &path, app)?;
+            continue;
+        }
 
         if let Event::Key(key) = event::read()? {
             if key.kind != KeyEventKind::Press {
                 continue;
             }
+            // Modal handles its own keys first
+            if app.modal.is_some() {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => app.close_modal(),
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.close_modal();
+                    }
+                    KeyCode::Enter | KeyCode::Char('e') => app.modal_trigger_cursor(),
+                    KeyCode::Up | KeyCode::Char('k') => app.modal_move(-1),
+                    KeyCode::Down | KeyCode::Char('j') => app.modal_move(1),
+                    KeyCode::Char(c @ '1'..='9') => {
+                        // Numeric shortcuts: 1..=9 map to the 1st..9th Jump
+                        // action (the Edit action is always first, so 1
+                        // targets the first Jump, i.e. modal index 1).
+                        let n = (c as u8 - b'0') as usize;
+                        app.trigger_action_at(n);
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+            // Any key outside the modal clears the transient status line.
+            app.status_message = None;
+
             // Filter input mode swallows most keys
             if app.filter_mode {
                 match key.code {
@@ -100,7 +130,16 @@ fn event_loop<B: ratatui::backend::Backend>(
                 KeyCode::PageDown => app.move_selection(10),
                 KeyCode::PageUp => app.move_selection(-10),
                 KeyCode::Char('h') | KeyCode::Left => app.collapse(),
-                KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => app.expand_or_select(),
+                KeyCode::Char('l') | KeyCode::Right => app.expand_or_select(),
+                KeyCode::Enter => {
+                    // On a spec node, open the action menu. On a group
+                    // node, behave like `l` and expand.
+                    match app.current_node().map(|n| n.kind) {
+                        Some(NodeKind::Spec) => app.open_action_menu(),
+                        Some(_) => app.expand_or_select(),
+                        None => {}
+                    }
+                }
                 KeyCode::Char(' ') => app.toggle(),
                 KeyCode::Char('/') => {
                     app.filter_mode = true;
@@ -132,6 +171,33 @@ struct Node {
     entity_type: Option<&'static str>,
 }
 
+/// A single row in the action menu modal.
+#[derive(Clone)]
+enum Action {
+    /// Open the file in $EDITOR.
+    Edit(PathBuf),
+    /// Jump tree selection to another spec by id.
+    Jump {
+        /// Doc id to jump to (anchor stripped if any).
+        target_id: String,
+        /// Source-field label (e.g. "refines", "related").
+        category: &'static str,
+        /// Display label — usually the original ref string including anchor.
+        label: String,
+        /// True if the target resolves to a doc in the registry.
+        resolvable: bool,
+    },
+}
+
+struct Modal {
+    title: String,
+    /// First action is the default (triggered by Enter). The rest are
+    /// numbered 1..=9 jump entries.
+    actions: Vec<Action>,
+    /// Selection cursor within the modal — purely visual.
+    cursor: usize,
+}
+
 struct App {
     registry: SpecRegistry,
     /// All nodes in tree order (DFS).
@@ -147,6 +213,13 @@ struct App {
     /// Viewport height of the tree list (inner area, excluding borders).
     /// Updated each draw; used to size half-page jumps.
     viewport_height: usize,
+    /// When set, a popup is rendered and most keys are intercepted.
+    modal: Option<Modal>,
+    /// Transient status-bar message — cleared after a redraw on next keypress.
+    status_message: Option<String>,
+    /// True after exit-due-to-edit signal; consumed by the event loop to
+    /// suspend the TUI, spawn $EDITOR, and re-enter.
+    edit_request: Option<PathBuf>,
 }
 
 impl App {
@@ -212,6 +285,9 @@ impl App {
             filter: String::new(),
             filter_mode: false,
             viewport_height: 20,
+            modal: None,
+            status_message: None,
+            edit_request: None,
         };
         app.rebuild_visible();
         app
@@ -391,6 +467,168 @@ impl App {
         }
     }
 
+    /// Open the context menu for the currently-selected spec (no-op for
+    /// group nodes).
+    fn open_action_menu(&mut self) {
+        let Some(node) = self.current_node() else { return };
+        let Some(doc_idx) = node.doc_idx else { return };
+        let doc = &self.registry.documents[doc_idx];
+        let id_str = doc.id_str();
+
+        let mut actions = vec![Action::Edit(doc.source_path.clone())];
+
+        // refines → ancestors in the refinement graph; use frontmatter to
+        // preserve clause anchors in the label.
+        let mut seen = std::collections::HashSet::<String>::new();
+        let push_jump = |actions: &mut Vec<Action>,
+                             seen: &mut std::collections::HashSet<String>,
+                             cat: &'static str,
+                             raw: &str| {
+            let target_id = strip_anchor(raw);
+            let key = format!("{cat}::{raw}");
+            if !seen.insert(key) {
+                return;
+            }
+            let resolvable = self.registry.id_index.contains_key(&target_id);
+            actions.push(Action::Jump {
+                target_id,
+                category: cat,
+                label: raw.to_string(),
+                resolvable,
+            });
+        };
+
+        match &doc.type_fields {
+            TypeSpecificFields::Requirement {
+                refines,
+                categorized_under,
+                ..
+            } => {
+                for r in refines {
+                    push_jump(&mut actions, &mut seen, "refines", r);
+                }
+                for r in categorized_under {
+                    push_jump(&mut actions, &mut seen, "under", r);
+                }
+            }
+            TypeSpecificFields::Task {
+                refines,
+                categorized_under,
+                blocked_by,
+                ..
+            } => {
+                for r in refines {
+                    push_jump(&mut actions, &mut seen, "refines", r);
+                }
+                for r in blocked_by {
+                    push_jump(&mut actions, &mut seen, "blocked-by", r);
+                }
+                for r in categorized_under {
+                    push_jump(&mut actions, &mut seen, "under", r);
+                }
+            }
+            _ => {}
+        }
+        for r in &doc.universal.related {
+            push_jump(&mut actions, &mut seen, "related", r);
+        }
+        // refined-by (children) — pulled from the graph to catch links not
+        // expressed in this doc's frontmatter.
+        for c in graph::query::children(&self.registry, &id_str) {
+            push_jump(&mut actions, &mut seen, "refined-by", &c);
+        }
+
+        self.modal = Some(Modal {
+            title: format!("Actions — {id_str}"),
+            actions,
+            cursor: 0,
+        });
+    }
+
+    fn close_modal(&mut self) {
+        self.modal = None;
+    }
+
+    fn modal_move(&mut self, delta: isize) {
+        if let Some(m) = self.modal.as_mut() {
+            if m.actions.is_empty() {
+                return;
+            }
+            let cur = m.cursor as isize;
+            let new = (cur + delta).clamp(0, m.actions.len() as isize - 1) as usize;
+            m.cursor = new;
+        }
+    }
+
+    /// Trigger the currently-highlighted action (Enter inside the modal).
+    fn modal_trigger_cursor(&mut self) {
+        if let Some(m) = self.modal.as_ref() {
+            let idx = m.cursor;
+            self.trigger_action_at(idx);
+        }
+    }
+
+    /// Trigger the action at index `idx` in the current modal (used by
+    /// numeric shortcuts).
+    fn trigger_action_at(&mut self, idx: usize) {
+        let action = match self.modal.as_ref() {
+            Some(m) => m.actions.get(idx).cloned(),
+            None => None,
+        };
+        let Some(action) = action else { return };
+        match action {
+            Action::Edit(path) => {
+                self.edit_request = Some(path);
+                self.close_modal();
+            }
+            Action::Jump {
+                target_id,
+                resolvable,
+                category,
+                label,
+            } => {
+                if !resolvable {
+                    self.status_message =
+                        Some(format!("can't jump: '{label}' ({category}) is not in this .specs/"));
+                    self.close_modal();
+                    return;
+                }
+                self.jump_to(&target_id);
+                self.close_modal();
+            }
+        }
+    }
+
+    /// Move the tree selection to the spec with the given id, expanding
+    /// its namespace/type groups so it's visible.
+    fn jump_to(&mut self, target_id: &str) {
+        // Find the target spec's node in all_nodes
+        let target_idx = self.all_nodes.iter().position(|n| {
+            matches!(n.kind, NodeKind::Spec)
+                && n.doc_idx
+                    .map(|i| self.registry.documents[i].id_str() == target_id)
+                    .unwrap_or(false)
+        });
+        let Some(abs_idx) = target_idx else {
+            self.status_message = Some(format!("not found: {target_id}"));
+            return;
+        };
+        let target = &self.all_nodes[abs_idx];
+        // Expand parent groups
+        let ns_key = target.namespace.clone();
+        let type_key = format!("{}::{}", target.namespace, target.entity_type.unwrap_or(""));
+        self.collapsed.remove(&ns_key);
+        self.collapsed.remove(&type_key);
+        // Also clear any active filter so the target is guaranteed visible
+        if !self.filter.is_empty() {
+            self.filter.clear();
+        }
+        self.rebuild_visible();
+        if let Some(vi) = self.visible.iter().position(|&i| i == abs_idx) {
+            self.list_state.select(Some(vi));
+        }
+    }
+
     fn current_node(&self) -> Option<&Node> {
         let sel = self.list_state.selected()?;
         let abs = *self.visible.get(sel)?;
@@ -464,6 +702,9 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
     draw_tree(f, app, body[0]);
     draw_detail(f, app, body[1]);
     draw_status(f, app, chunks[1]);
+    if app.modal.is_some() {
+        draw_modal(f, app, chunks[0]);
+    }
 }
 
 fn draw_tree(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
@@ -806,13 +1047,191 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
 }
 
 fn draw_status(f: &mut ratatui::Frame, app: &App, area: Rect) {
-    let text = if app.filter_mode {
+    let text = if let Some(msg) = &app.status_message {
+        msg.clone()
+    } else if app.filter_mode {
         format!("/{}_  [Enter to apply, Esc to cancel]", app.filter)
+    } else if app.modal.is_some() {
+        "Enter: run   1-9: jump   j/k: move   Esc: close".to_string()
     } else {
-        "j/k: move   ^d/^u: half-page   ^e/^y: scroll   h/l: collapse/expand   /: filter   q: quit".to_string()
+        "Enter: actions   l: expand   h: collapse   j/k: move   /: filter   q: quit".to_string()
     };
-    let p = Paragraph::new(text).style(Style::default().fg(Color::DarkGray));
+    let style = if app.status_message.is_some() {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let p = Paragraph::new(text).style(style);
     f.render_widget(p, area);
+}
+
+fn draw_modal(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    let Some(modal) = app.modal.as_ref() else { return };
+
+    let popup_w = area.width.saturating_sub(8).min(72);
+    let popup_h = (modal.actions.len() as u16 + 4).min(area.height.saturating_sub(4));
+    let popup_x = area.x + (area.width.saturating_sub(popup_w)) / 2;
+    let popup_y = area.y + (area.height.saturating_sub(popup_h)) / 2;
+    let popup = Rect::new(popup_x, popup_y, popup_w, popup_h);
+
+    f.render_widget(Clear, popup);
+
+    let mut items: Vec<ListItem> = Vec::new();
+    for (idx, action) in modal.actions.iter().enumerate() {
+        // The Edit action lives at index 0 and is invoked by Enter / `e`.
+        // Jump actions are indices 1.., shown with numeric shortcuts 1..=9
+        // (matching the user's numeric keypress for index 1..=9).
+        let shortcut = match action {
+            Action::Edit(_) => "e  ".to_string(),
+            Action::Jump { .. } => {
+                if idx <= 9 {
+                    format!("{idx}  ")
+                } else {
+                    "   ".to_string()
+                }
+            }
+        };
+        let line = match action {
+            Action::Edit(path) => Line::from(vec![
+                Span::styled(
+                    shortcut,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Edit  ",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    path.file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+            Action::Jump {
+                target_id,
+                category,
+                label,
+                resolvable,
+            } => {
+                let label_color = if *resolvable {
+                    Color::White
+                } else {
+                    Color::DarkGray
+                };
+                let cat_color = if *resolvable {
+                    Color::Cyan
+                } else {
+                    Color::DarkGray
+                };
+                let _ = target_id;
+                Line::from(vec![
+                    Span::styled(
+                        shortcut,
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(format!("{category:<10}"), Style::default().fg(cat_color)),
+                    Span::styled(label.clone(), Style::default().fg(label_color)),
+                ])
+            }
+        };
+        items.push(ListItem::new(line));
+    }
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(modal.cursor));
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(modal.title.as_str()),
+        )
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+
+    f.render_stateful_widget(list, popup, &mut list_state);
+}
+
+fn launch_editor(terminal: &mut Term, path: &Path, app: &mut App) -> Result<()> {
+    let editor = std::env::var("VISUAL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var("EDITOR").ok().filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| "vi".to_string());
+
+    // Suspend the TUI so the child editor owns the terminal.
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    // `sh -c` lets EDITOR strings like "code --wait" or "nvim +5" work.
+    let status = Command::new("sh")
+        .arg("-c")
+        .arg(format!("{editor} \"$@\"", editor = editor))
+        .arg("--")
+        .arg(path.as_os_str())
+        .status();
+
+    // Re-enter the TUI regardless of editor exit.
+    enable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        EnterAlternateScreen,
+        EnableMouseCapture
+    )?;
+    terminal.clear()?;
+
+    match status {
+        Ok(s) if s.success() => {
+            // Reload the registry to reflect any edits.
+            match SpecRegistry::load(&app.registry.specs_dir) {
+                Ok(new_reg) => {
+                    let prev_id = app
+                        .current_node()
+                        .and_then(|n| n.doc_idx)
+                        .map(|i| app.registry.documents[i].id_str());
+                    *app = App::new(new_reg);
+                    if let Some(id) = prev_id {
+                        app.jump_to(&id);
+                    }
+                    app.status_message = Some(format!("reloaded ({})", editor));
+                }
+                Err(e) => {
+                    app.status_message = Some(format!("reload failed: {e}"));
+                }
+            }
+        }
+        Ok(s) => {
+            app.status_message =
+                Some(format!("{editor} exited with status {}", s.code().unwrap_or(-1)));
+        }
+        Err(e) => {
+            app.status_message = Some(format!("failed to launch {editor}: {e}"));
+        }
+    }
+    Ok(())
+}
+
+fn strip_anchor(s: &str) -> String {
+    match s.split_once('#') {
+        Some((id, _)) => id.to_string(),
+        None => s.to_string(),
+    }
 }
 
 fn type_style(ty: &str) -> Style {
