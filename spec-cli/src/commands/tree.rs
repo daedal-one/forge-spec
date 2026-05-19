@@ -103,11 +103,14 @@ pub fn run(
 }
 
 fn first_line(s: &str) -> String {
-    let line: String = s.lines().next().unwrap_or("").to_string();
-    if line.len() > 80 {
-        format!("— {}…", &line[..77])
-    } else if line.is_empty() {
-        String::new()
+    let line = s.lines().next().unwrap_or("");
+    if line.is_empty() {
+        return String::new();
+    }
+    let max_chars = 77;
+    if line.chars().count() > max_chars {
+        let truncated: String = line.chars().take(max_chars).collect();
+        format!("— {truncated}…")
     } else {
         format!("— {line}")
     }
