@@ -81,6 +81,18 @@ fn event_loop<B: ratatui::backend::Backend>(
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     return Ok(());
                 }
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.half_page_down();
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.half_page_up();
+                }
+                KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.scroll_down();
+                }
+                KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.scroll_up();
+                }
                 KeyCode::Char('j') | KeyCode::Down => app.move_selection(1),
                 KeyCode::Char('k') | KeyCode::Up => app.move_selection(-1),
                 KeyCode::Char('g') => app.set_selection(0),
@@ -132,6 +144,9 @@ struct App {
     list_state: ListState,
     filter: String,
     filter_mode: bool,
+    /// Viewport height of the tree list (inner area, excluding borders).
+    /// Updated each draw; used to size half-page jumps.
+    viewport_height: usize,
 }
 
 impl App {
@@ -196,6 +211,7 @@ impl App {
             list_state: state,
             filter: String::new(),
             filter_mode: false,
+            viewport_height: 20,
         };
         app.rebuild_visible();
         app
@@ -323,6 +339,58 @@ impl App {
         self.list_state.select(Some(new));
     }
 
+    /// Ctrl+d — move selection down by half a viewport.
+    fn half_page_down(&mut self) {
+        let step = (self.viewport_height / 2).max(1) as isize;
+        self.move_selection(step);
+    }
+
+    /// Ctrl+u — move selection up by half a viewport.
+    fn half_page_up(&mut self) {
+        let step = (self.viewport_height / 2).max(1) as isize;
+        self.move_selection(-step);
+    }
+
+    /// Ctrl+e — scroll viewport down one line. Cursor stays on its line
+    /// unless that line scrolls off, in which case it follows.
+    fn scroll_down(&mut self) {
+        if self.visible.is_empty() {
+            return;
+        }
+        let max_offset = self.visible.len().saturating_sub(1);
+        let cur_offset = *self.list_state.offset_mut();
+        if cur_offset < max_offset {
+            *self.list_state.offset_mut() = cur_offset + 1;
+        }
+        // If selection scrolled off the top, push it down.
+        if let Some(sel) = self.list_state.selected() {
+            let new_offset = *self.list_state.offset_mut();
+            if sel < new_offset {
+                self.list_state.select(Some(new_offset));
+            }
+        }
+    }
+
+    /// Ctrl+y — scroll viewport up one line.
+    fn scroll_up(&mut self) {
+        if self.visible.is_empty() {
+            return;
+        }
+        let cur_offset = *self.list_state.offset_mut();
+        if cur_offset == 0 {
+            return;
+        }
+        *self.list_state.offset_mut() = cur_offset - 1;
+        // If selection scrolled off the bottom, pull it up.
+        if let Some(sel) = self.list_state.selected() {
+            let new_offset = *self.list_state.offset_mut();
+            let last_visible = new_offset + self.viewport_height.saturating_sub(1);
+            if sel > last_visible {
+                self.list_state.select(Some(last_visible));
+            }
+        }
+    }
+
     fn current_node(&self) -> Option<&Node> {
         let sel = self.list_state.selected()?;
         let abs = *self.visible.get(sel)?;
@@ -399,6 +467,8 @@ fn draw(f: &mut ratatui::Frame, app: &mut App) {
 }
 
 fn draw_tree(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
+    // area includes the border; the inner list region is height-2.
+    app.viewport_height = (area.height as usize).saturating_sub(2).max(1);
     let items: Vec<ListItem> = app
         .visible
         .iter()
@@ -739,7 +809,7 @@ fn draw_status(f: &mut ratatui::Frame, app: &App, area: Rect) {
     let text = if app.filter_mode {
         format!("/{}_  [Enter to apply, Esc to cancel]", app.filter)
     } else {
-        "j/k: move   h/l: collapse/expand   space: toggle   /: filter   q: quit".to_string()
+        "j/k: move   ^d/^u: half-page   ^e/^y: scroll   h/l: collapse/expand   /: filter   q: quit".to_string()
     };
     let p = Paragraph::new(text).style(Style::default().fg(Color::DarkGray));
     f.render_widget(p, area);
