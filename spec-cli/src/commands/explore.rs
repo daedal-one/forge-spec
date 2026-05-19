@@ -13,8 +13,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Terminal;
 
+use crate::commands::tree::progress_glyph;
 use crate::graph;
-use crate::model::frontmatter::{Status, TypeSpecificFields};
+use crate::model::frontmatter::{Progress, Status, TypeSpecificFields};
 use crate::model::registry::SpecRegistry;
 
 pub fn run(specs_dir: &Path) -> Result<()> {
@@ -438,16 +439,24 @@ fn draw_tree(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
                 NodeKind::Spec => {
                     let doc = &app.registry.documents[node.doc_idx.unwrap()];
                     let status_color = status_color(doc.universal.status);
-                    ListItem::new(Line::from(vec![
+                    let mut spans = vec![
                         Span::raw(indent),
                         Span::raw("  "),
                         Span::raw(node.label.clone()),
                         Span::raw(" "),
-                        Span::styled(
-                            format!("[{}]", doc.universal.status.as_str()),
-                            Style::default().fg(status_color),
-                        ),
-                    ]))
+                    ];
+                    if let TypeSpecificFields::Task { progress, .. } = &doc.type_fields {
+                        let (glyph, _) = progress_glyph(*progress);
+                        spans.push(Span::styled(
+                            format!("{glyph} "),
+                            progress_style(*progress),
+                        ));
+                    }
+                    spans.push(Span::styled(
+                        format!("[{}]", doc.universal.status.as_str()),
+                        Style::default().fg(status_color),
+                    ));
+                    ListItem::new(Line::from(spans))
                 }
             }
         })
@@ -568,13 +577,11 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                     blocked_by,
                     ..
                 } => {
+                    let (glyph, name) = progress_glyph(*progress);
                     lines.push(Line::from(vec![
                         Span::styled("progress", Style::default().fg(Color::DarkGray)),
                         Span::raw(" "),
-                        Span::styled(
-                            progress.as_str().to_string(),
-                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                        ),
+                        Span::styled(format!("{glyph} {name}"), progress_style(*progress)),
                     ]));
                     if let Some(a) = assignee {
                         lines.push(Line::from(vec![
@@ -750,6 +757,18 @@ fn type_style(ty: &str) -> Style {
         "SCN" => base.fg(Color::LightBlue),
         "TASK" => base.fg(Color::LightYellow),
         _ => base,
+    }
+}
+
+fn progress_style(progress: Progress) -> Style {
+    let base = Style::default().add_modifier(Modifier::BOLD);
+    match progress {
+        Progress::Done => base.fg(Color::Green),
+        Progress::InProgress => base.fg(Color::Cyan),
+        Progress::Blocked => base.fg(Color::Red),
+        Progress::Pending => base.fg(Color::Yellow),
+        Progress::Deferred => Style::default().fg(Color::DarkGray),
+        Progress::WontDo => Style::default().fg(Color::DarkGray),
     }
 }
 

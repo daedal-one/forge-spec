@@ -4,7 +4,7 @@ use std::path::Path;
 use anyhow::Result;
 use colored::Colorize;
 
-use crate::model::frontmatter::Status;
+use crate::model::frontmatter::{Progress, Status, TypeSpecificFields};
 use crate::model::registry::SpecRegistry;
 
 pub fn run(
@@ -87,11 +87,19 @@ pub fn run(
                 .unwrap_or("");
             let summary_trimmed = first_line(summary);
             let ty_colored = colorize_type(ty);
+            let progress_glyph = match &doc.type_fields {
+                TypeSpecificFields::Task { progress, .. } => Some(progress_label(*progress)),
+                _ => None,
+            };
+            let progress_part = match &progress_glyph {
+                Some(g) => format!("{g} "),
+                None => String::new(),
+            };
             let line = if summary_trimmed.is_empty() {
-                format!("{ty_colored:<5} {slug} {status_label}")
+                format!("{ty_colored:<5} {slug} {progress_part}{status_label}")
             } else {
                 format!(
-                    "{ty_colored:<5} {slug} {status_label} {}",
+                    "{ty_colored:<5} {slug} {progress_part}{status_label} {}",
                     summary_trimmed.dimmed()
                 )
             };
@@ -137,5 +145,30 @@ fn status_label(status: Status) -> colored::ColoredString {
         Status::Draft => s.yellow(),
         Status::Deprecated => s.bright_black(),
         Status::Superseded => s.bright_black(),
+    }
+}
+
+fn progress_label(progress: Progress) -> colored::ColoredString {
+    let (glyph, name) = progress_glyph(progress);
+    let label = format!("{glyph} {name}");
+    match progress {
+        Progress::Done => label.green().bold(),
+        Progress::InProgress => label.cyan(),
+        Progress::Blocked => label.red(),
+        Progress::Pending => label.yellow(),
+        Progress::Deferred => label.bright_black(),
+        Progress::WontDo => label.bright_black(),
+    }
+}
+
+/// (glyph, short-name). Glyphs chosen to render in most terminal fonts.
+pub fn progress_glyph(progress: Progress) -> (&'static str, &'static str) {
+    match progress {
+        Progress::Pending => ("○", "pending"),
+        Progress::InProgress => ("◐", "in-progress"),
+        Progress::Done => ("✓", "done"),
+        Progress::Blocked => ("⊘", "blocked"),
+        Progress::Deferred => ("◌", "deferred"),
+        Progress::WontDo => ("✗", "wontdo"),
     }
 }
