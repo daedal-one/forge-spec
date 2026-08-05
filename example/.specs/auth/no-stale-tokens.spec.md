@@ -2,7 +2,6 @@
 id: INV:auth/no-stale-tokens
 type: invariant
 status: accepted
-version: 1.0.0
 summary: >
   No session token in the active set may exceed its wall-clock or idle
   time bounds.
@@ -27,4 +26,4 @@ rollouts and clock-skew windows.
 
 Violations of this invariant are logged as critical alerts and trigger
 automatic token revocation via the
-[session reaper](spec:src:packages/auth/reaper.ts:10-30).
+[session reaper](spec:src:example/packages/auth/reaper.ts:7-18).

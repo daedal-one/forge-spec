@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn rewrites_existing_progress_line() {
-        let input = "---\nid: TASK:codon/foo\ntype: task\nstatus: accepted\nversion: 0.1.0\nowners: [carlo]\nprogress: pending\n---\n# Body\n";
+        let input = "---\nid: TASK:codon/foo\ntype: task\nstatus: accepted\nowners: [carlo]\nprogress: pending\n---\n# Body\n";
         let out = rewrite_progress(input, Progress::Done, None).unwrap();
         assert!(out.contains("progress: done\n"));
         assert!(!out.contains("progress: pending\n"));
@@ -306,14 +306,14 @@ mod tests {
 
     #[test]
     fn appends_progress_when_missing() {
-        let input = "---\nid: TASK:codon/foo\ntype: task\nstatus: accepted\nversion: 0.1.0\nowners: [carlo]\n---\n# Body\n";
+        let input = "---\nid: TASK:codon/foo\ntype: task\nstatus: accepted\nowners: [carlo]\n---\n# Body\n";
         let out = rewrite_progress(input, Progress::InProgress, None).unwrap();
         assert!(out.contains("progress: in-progress\n"));
     }
 
     #[test]
     fn block_replaces_empty_blocked_by_inline() {
-        let input = "---\nid: TASK:codon/foo\ntype: task\nstatus: accepted\nversion: 0.1.0\nowners: [carlo]\nprogress: pending\nblocked_by: []\n---\n# Body\n";
+        let input = "---\nid: TASK:codon/foo\ntype: task\nstatus: accepted\nowners: [carlo]\nprogress: pending\nblocked_by: []\n---\n# Body\n";
         let out = rewrite_progress(input, Progress::Blocked, Some("ADR:codon/0001-stack")).unwrap();
         assert!(out.contains("progress: blocked\n"));
         assert!(out.contains("blocked_by:\n  - ADR:codon/0001-stack\n"));
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn block_appends_when_blocked_by_missing() {
-        let input = "---\nid: TASK:codon/foo\ntype: task\nstatus: accepted\nversion: 0.1.0\nowners: [carlo]\nprogress: pending\n---\n# Body\n";
+        let input = "---\nid: TASK:codon/foo\ntype: task\nstatus: accepted\nowners: [carlo]\nprogress: pending\n---\n# Body\n";
         let out = rewrite_progress(input, Progress::Blocked, Some("ADR:codon/0001-stack")).unwrap();
         assert!(out.contains("blocked_by:\n  - ADR:codon/0001-stack\n"));
     }

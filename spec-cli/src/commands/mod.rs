@@ -8,5 +8,6 @@ pub mod migrate;
 pub mod new;
 pub mod query;
 pub mod render;
+pub mod source;
 pub mod task;
 pub mod tree;

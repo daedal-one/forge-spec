@@ -1,16 +1,16 @@
 use regex::Regex;
-use std::sync::LazyLock;
+use once_cell::sync::Lazy;
 
 use crate::model::block::{BlockKind, TypedBlock};
 use crate::parse::anchors::extract_clause_anchors;
 
-static BLOCK_OPEN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^:::\{(\w[\w-]*)\s*(.*)\}\s*$").unwrap());
-static BLOCK_CLOSE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^:::\s*$").unwrap());
-static ATTR_ID: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"id="([^"]+)""#).unwrap());
-static ATTR_LEVEL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"level="([^"]+)""#).unwrap());
+static BLOCK_OPEN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^:::\{(\w[\w-]*)\s*(.*)\}\s*$").unwrap());
+static BLOCK_CLOSE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^:::\s*$").unwrap());
+static ATTR_ID: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"id="([^"]+)""#).unwrap());
+static ATTR_LEVEL: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"level="([^"]+)""#).unwrap());
 
 /// Extract typed fenced divs from a spec body.
 ///

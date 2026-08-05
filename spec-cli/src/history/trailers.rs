@@ -2,10 +2,10 @@ use std::path::Path;
 
 use anyhow::Result;
 use regex::Regex;
-use std::sync::LazyLock;
+use once_cell::sync::Lazy;
 
-static TRAILER_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^Spec-Ref:\s+(.+?)(?:\s+\((\w+)\))?\s*$").unwrap());
+static TRAILER_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^Spec-Ref:\s+(.+?)(?:\s+\((\w+)\))?\s*$").unwrap());
 
 /// A parsed commit trailer event.
 #[derive(Debug, Clone)]

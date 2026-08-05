@@ -1,12 +1,3 @@
-mod cli;
-mod commands;
-mod graph;
-mod history;
-mod lint;
-mod model;
-mod parse;
-mod render;
-
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -14,7 +5,8 @@ use anyhow::Result;
 use clap::Parser;
 use walkdir::WalkDir;
 
-use cli::{Cli, Commands};
+use spec_cli::cli::{Cli, Commands};
+use spec_cli::commands;
 
 const SPECS_DIR_NAMES: [&str; 2] = [".specs", "specs"];
 
@@ -104,9 +96,13 @@ fn run(cli: Cli) -> Result<()> {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             commands::new::run(&specs_dir, &entity_type, &slug)
         }
-        Commands::Lint { paths: _ } => {
+        Commands::Lint {
+            paths: _,
+            require_symbols,
+            allow_custom_lsp,
+        } => {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
-            let ok = commands::lint::run(&specs_dir)?;
+            let ok = commands::lint::run(&specs_dir, require_symbols, allow_custom_lsp)?;
             if !ok {
                 process::exit(1);
             }
@@ -118,7 +114,7 @@ fn run(cli: Cli) -> Result<()> {
             depth,
             ancestors,
             descendants,
-            ..
+            include_source,
         } => {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             commands::render::run(
@@ -128,6 +124,7 @@ fn run(cli: Cli) -> Result<()> {
                 depth,
                 &ancestors,
                 &descendants,
+                include_source,
             )
         }
         Commands::Graph {
@@ -160,6 +157,27 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Migrate => {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             commands::migrate::run(&specs_dir)
+        }
+        Commands::Symbols {
+            path,
+            query,
+            json,
+            allow_custom_lsp,
+        } => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::source::symbols(&specs_dir, &path, query.as_deref(), json, allow_custom_lsp)
+        }
+        Commands::Resolve {
+            reference,
+            json,
+            allow_custom_lsp,
+        } => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::source::resolve(&specs_dir, &reference, json, allow_custom_lsp)
+        }
+        Commands::Lsp => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            spec_cli::lsp::run_stdio(&specs_dir)
         }
         Commands::Todo { state, under, all } => {
             let specs_dir = find_specs_dir(cli.specs_dir)?;

@@ -1,4 +1,5 @@
 pub mod block;
+pub mod config;
 pub mod document;
 pub mod frontmatter;
 pub mod id;

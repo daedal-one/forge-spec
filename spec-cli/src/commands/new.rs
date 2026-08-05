@@ -1,8 +1,17 @@
 use std::path::Path;
 
+use crate::model::config::CURRENT_SPEC_BASELINE;
 use anyhow::{bail, Result};
 
 pub fn run(specs_dir: &Path, entity_type: &str, slug: &str) -> Result<()> {
+    std::fs::create_dir_all(specs_dir)?;
+    let config_path = specs_dir.join("_config.toml");
+    if !config_path.exists() {
+        std::fs::write(
+            &config_path,
+            format!("baseline = \"{CURRENT_SPEC_BASELINE}\"\n"),
+        )?;
+    }
     let id = format!("{entity_type}:{slug}");
     let type_name = match entity_type {
         "REQ" => "requirement",
@@ -42,7 +51,6 @@ fn generate_template(entity_type: &str, type_name: &str, id: &str, slug: &str) -
 id: {id}
 type: {type_name}
 status: draft
-version: 0.1.0
 level: MUST
 summary: >
   TODO: describe what this requirement specifies.
@@ -69,7 +77,6 @@ TODO: state the requirement using RFC 2119 keywords (MUST/SHOULD/MAY).
 id: {id}
 type: {type_name}
 status: draft
-version: 0.1.0
 summary: >
   TODO: describe the invariant.
 owners: []
@@ -91,7 +98,6 @@ TODO: state the invariant — the property that must always hold.
 id: {id}
 type: {type_name}
 status: draft
-version: 0.1.0
 summary: >
   TODO: describe the interface contract.
 owners: []
@@ -114,7 +120,6 @@ TODO: describe the API surface contract.
 id: {id}
 type: {type_name}
 status: draft
-version: 0.1.0
 summary: >
   TODO: one-line decision summary.
 owners: []
@@ -143,7 +148,6 @@ TODO: describe the consequences of this decision.
 id: {id}
 type: {type_name}
 status: draft
-version: 0.1.0
 summary: Glossary terms.
 owners: []
 ---
@@ -161,7 +165,6 @@ owners: []
 id: {id}
 type: {type_name}
 status: draft
-version: 0.1.0
 summary: >
   TODO: describe what this topic groups.
 owners: []
@@ -178,7 +181,6 @@ TODO: describe this topic and link to related specs.
 id: {id}
 type: {type_name}
 status: draft
-version: 0.1.0
 summary: >
   TODO: describe this scenario.
 owners: []
@@ -195,7 +197,6 @@ TODO: walk through the scenario step by step.
 id: {id}
 type: {type_name}
 status: accepted
-version: 0.1.0
 summary: >
   TODO: one-line description of the work.
 owners: []
@@ -221,7 +222,7 @@ TODO: what observable signal indicates this task is done.
             title = slug_to_title(slug),
         ),
         _ => format!(
-            "---\nid: {id}\ntype: {type_name}\nstatus: draft\nversion: 0.1.0\nowners: []\n---\n\n# TODO\n"
+            "---\nid: {id}\ntype: {type_name}\nstatus: draft\nowners: []\n---\n\n# TODO\n"
         ),
     }
 }

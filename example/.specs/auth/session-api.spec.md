@@ -2,7 +2,6 @@
 id: IFC:auth/session-api
 type: interface
 status: accepted
-version: 1.0.0
 summary: >
   HTTP API surface for session creation, validation, and revocation.
 owners: [carlo]

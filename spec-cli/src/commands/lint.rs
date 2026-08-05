@@ -6,7 +6,7 @@ use crate::lint;
 use crate::lint::diagnostic::Severity;
 use crate::model::registry::SpecRegistry;
 
-pub fn run(specs_dir: &Path) -> Result<bool> {
+pub fn run(specs_dir: &Path, require_symbols: bool, allow_custom_lsp: bool) -> Result<bool> {
     let registry = SpecRegistry::load(specs_dir)?;
 
     if registry.documents.is_empty() {
@@ -14,7 +14,7 @@ pub fn run(specs_dir: &Path) -> Result<bool> {
         return Ok(true);
     }
 
-    let diags = lint::lint_all(&registry);
+    let diags = lint::lint_all_with_options(&registry, require_symbols, allow_custom_lsp);
 
     if diags.is_empty() {
         println!(
@@ -29,12 +29,18 @@ pub fn run(specs_dir: &Path) -> Result<bool> {
         eprintln!();
     }
 
-    let errors = diags.iter().filter(|d| d.severity == Severity::Error).count();
+    let errors = diags
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .count();
     let warnings = diags
         .iter()
         .filter(|d| d.severity == Severity::Warning)
         .count();
-    let infos = diags.iter().filter(|d| d.severity == Severity::Info).count();
+    let infos = diags
+        .iter()
+        .filter(|d| d.severity == Severity::Info)
+        .count();
 
     eprintln!(
         "Checked {} spec(s): {} error(s), {} warning(s), {} info(s)",

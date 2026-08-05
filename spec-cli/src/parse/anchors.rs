@@ -1,10 +1,10 @@
 use regex::Regex;
-use std::sync::LazyLock;
+use once_cell::sync::Lazy;
 
 use crate::model::block::ClauseAnchor;
 
-static CLAUSE_ANCHOR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\{#([\w-]+)\}\s*(.*)").unwrap());
+static CLAUSE_ANCHOR: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\{#([\w-]+)\}\s*(.*)").unwrap());
 
 /// Extract clause anchors (e.g. `{#c-lifetime} bounded lifetime`) from block body text.
 ///

@@ -13,9 +13,9 @@ pub fn split_frontmatter(content: &str) -> Result<(&str, &str, usize)> {
     }
 
     let after_first = &content[3..];
-    let after_first = after_first.strip_prefix('\n').unwrap_or(
-        after_first.strip_prefix("\r\n").unwrap_or(after_first),
-    );
+    let after_first = after_first
+        .strip_prefix('\n')
+        .unwrap_or(after_first.strip_prefix("\r\n").unwrap_or(after_first));
 
     let end_pos = after_first
         .find("\n---")
@@ -47,10 +47,7 @@ pub fn parse_frontmatter(
         .ok_or_else(|| anyhow::anyhow!("unknown type: {}", raw.entity_type))?;
 
     // Parse spec ID
-    let spec_id: SpecId = raw
-        .id
-        .parse()
-        .map_err(|e: String| anyhow::anyhow!("{e}"))?;
+    let spec_id: SpecId = raw.id.parse().map_err(|e: String| anyhow::anyhow!("{e}"))?;
 
     // Validate type matches ID prefix
     if spec_id.entity_type != entity_type {
@@ -68,7 +65,6 @@ pub fn parse_frontmatter(
         .and_then(Status::from_str_val)
         .unwrap_or(Status::Draft);
 
-    let version = raw.version.unwrap_or_else(|| "0.1.0".to_string());
     let owners = raw.owners.unwrap_or_default();
     let related = raw.related.unwrap_or_default();
 
@@ -76,7 +72,6 @@ pub fn parse_frontmatter(
         id: spec_id,
         entity_type,
         status,
-        version,
         summary: raw.summary,
         owners,
         pinned_at: raw.pinned_at,
@@ -165,7 +160,6 @@ mod tests {
 id: REQ:auth/session-expiry
 type: requirement
 status: draft
-version: 0.1.0
 level: MUST
 summary: Sessions expire.
 owners: [carlo]

@@ -1,0 +1,730 @@
+//! Forge-spec language server.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
+use serde_json::{json, Value};
+use url::Url;
+
+use crate::lint::diagnostic::Severity;
+use crate::model::document::SpecDocument;
+use crate::model::reference::SpecReference;
+use crate::model::registry::SpecRegistry;
+use crate::parse::references::parse_spec_url;
+use crate::symbol::SymbolService;
+
+#[derive(Debug, Clone)]
+struct OpenDocument {
+    path: PathBuf,
+    text: String,
+    version: i64,
+}
+
+pub fn run_stdio(specs_dir: &Path) -> Result<()> {
+    let (connection, threads) = Connection::stdio();
+    run_connection(connection, specs_dir)?;
+    threads
+        .join()
+        .context("joining language-server I/O threads")?;
+    Ok(())
+}
+
+fn run_connection(connection: Connection, specs_dir: &Path) -> Result<()> {
+    let (initialize_id, _) = connection.initialize_start()?;
+    connection.initialize_finish(
+        initialize_id,
+        json!({
+            "capabilities": {
+                "textDocumentSync": 1,
+                "completionProvider": { "triggerCharacters": [":", "#", "/", "="] },
+                "hoverProvider": true,
+                "definitionProvider": true,
+                "referencesProvider": true,
+                "documentSymbolProvider": true
+            },
+            "serverInfo": {
+                "name": "forge-spec",
+                "version": env!("CARGO_PKG_VERSION")
+            }
+        }),
+    )?;
+
+    let mut open_documents: HashMap<String, OpenDocument> = HashMap::new();
+    for message in &connection.receiver {
+        match message {
+            Message::Request(request) => {
+                if connection.handle_shutdown(&request)? {
+                    break;
+                }
+                let response = handle_request(request, specs_dir, &open_documents);
+                connection.sender.send(Message::Response(response))?;
+            }
+            Message::Notification(notification) => {
+                handle_notification(notification, specs_dir, &mut open_documents, &connection)?;
+            }
+            Message::Response(_) => {}
+        }
+    }
+    Ok(())
+}
+
+fn handle_notification(
+    notification: Notification,
+    specs_dir: &Path,
+    documents: &mut HashMap<String, OpenDocument>,
+    connection: &Connection,
+) -> Result<()> {
+    match notification.method.as_str() {
+        "textDocument/didOpen" => {
+            let uri = value_string(&notification.params, "/textDocument/uri")?;
+            let text = value_string(&notification.params, "/textDocument/text")?;
+            let version = notification
+                .params
+                .pointer("/textDocument/version")
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            let path = uri_to_path(&uri)?;
+            documents.insert(
+                uri.clone(),
+                OpenDocument {
+                    path,
+                    text,
+                    version,
+                },
+            );
+            publish_diagnostics(connection, specs_dir, &uri, documents.get(&uri).unwrap())?;
+        }
+        "textDocument/didChange" => {
+            let uri = value_string(&notification.params, "/textDocument/uri")?;
+            if let Some(document) = documents.get_mut(&uri) {
+                if let Some(text) = notification
+                    .params
+                    .pointer("/contentChanges/0/text")
+                    .and_then(Value::as_str)
+                {
+                    document.text = text.to_string();
+                }
+                document.version = notification
+                    .params
+                    .pointer("/textDocument/version")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(document.version);
+                publish_diagnostics(connection, specs_dir, &uri, document)?;
+            }
+        }
+        "textDocument/didSave" => {
+            let uri = value_string(&notification.params, "/textDocument/uri")?;
+            if let Some(document) = documents.get(&uri) {
+                publish_diagnostics(connection, specs_dir, &uri, document)?;
+            }
+        }
+        "textDocument/didClose" => {
+            let uri = value_string(&notification.params, "/textDocument/uri")?;
+            documents.remove(&uri);
+            send_notification(
+                connection,
+                "textDocument/publishDiagnostics",
+                json!({
+                    "uri": uri,
+                    "diagnostics": []
+                }),
+            )?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn publish_diagnostics(
+    connection: &Connection,
+    specs_dir: &Path,
+    uri: &str,
+    document: &OpenDocument,
+) -> Result<()> {
+    let diagnostics = match SpecRegistry::load_with_override(
+        specs_dir,
+        &document.path,
+        &document.text,
+    ) {
+        Ok(registry) => crate::lint::lint_all(&registry)
+            .into_iter()
+            .filter(|diagnostic| diagnostic.file == document.path)
+            .map(|diagnostic| {
+                let line = diagnostic.line.unwrap_or(1).saturating_sub(1) as u32;
+                let severity = match diagnostic.severity {
+                    Severity::Error => 1,
+                    Severity::Warning => 2,
+                    Severity::Info => 3,
+                };
+                json!({
+                    "range": {
+                        "start": { "line": line, "character": 0 },
+                        "end": { "line": line, "character": line_utf16_len(&document.text, line) }
+                    },
+                    "severity": severity,
+                    "code": diagnostic.code,
+                    "source": "forge-spec",
+                    "message": diagnostic.message,
+                    "data": { "detail": diagnostic.detail }
+                })
+            })
+            .collect::<Vec<_>>(),
+        Err(error) => vec![json!({
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": { "line": 0, "character": line_utf16_len(&document.text, 0) }
+            },
+            "severity": 1,
+            "code": "parse",
+            "source": "forge-spec",
+            "message": format!("{error:#}")
+        })],
+    };
+    send_notification(
+        connection,
+        "textDocument/publishDiagnostics",
+        json!({
+            "uri": uri,
+            "version": document.version,
+            "diagnostics": diagnostics
+        }),
+    )
+}
+
+fn handle_request(
+    request: Request,
+    specs_dir: &Path,
+    documents: &HashMap<String, OpenDocument>,
+) -> Response {
+    let id = request.id.clone();
+    let result = match request.method.as_str() {
+        "textDocument/completion" => completion(specs_dir, documents, &request.params),
+        "textDocument/hover" => hover(specs_dir, documents, &request.params),
+        "textDocument/definition" => definition(specs_dir, documents, &request.params),
+        "textDocument/references" => references(specs_dir, documents, &request.params),
+        "textDocument/documentSymbol" => document_symbols(specs_dir, documents, &request.params),
+        _ => {
+            return Response::new_err(
+                id,
+                ErrorCode::MethodNotFound as i32,
+                format!("unsupported method: {}", request.method),
+            )
+        }
+    };
+    match result {
+        Ok(value) => Response::new_ok(id, value),
+        Err(error) => Response::new_err(id, ErrorCode::InvalidParams as i32, format!("{error:#}")),
+    }
+}
+
+fn completion(
+    specs_dir: &Path,
+    documents: &HashMap<String, OpenDocument>,
+    params: &Value,
+) -> Result<Value> {
+    let (document, line, character) = request_document(documents, params)?;
+    let registry = registry_for(specs_dir, document)?;
+    let prefix = line_prefix(&document.text, line, character).unwrap_or_default();
+
+    if let Some((path, query)) = source_symbol_context(prefix) {
+        let service = SymbolService::new(specs_dir, false)?;
+        let symbols = service.list_symbols(path, Some(query))?;
+        return Ok(Value::Array(
+            symbols
+                .into_iter()
+                .map(|symbol| {
+                    completion_item(
+                        &symbol.qualified_name,
+                        3,
+                        Some(format!("{} · {}", symbol.kind, symbol.path)),
+                        &symbol.reference,
+                        prefix,
+                        line,
+                        character,
+                    )
+                })
+                .collect(),
+        ));
+    }
+
+    let mut items = Vec::new();
+    for spec in &registry.documents {
+        let id = spec.id_str();
+        items.push(completion_item(
+            &id,
+            18,
+            spec.universal.summary.clone(),
+            &format!("spec:{id}"),
+            prefix,
+            line,
+            character,
+        ));
+        for anchor in spec.anchors() {
+            let qualified = format!("{id}#{anchor}");
+            items.push(completion_item(
+                &qualified,
+                6,
+                None,
+                &format!("spec:{qualified}"),
+                prefix,
+                line,
+                character,
+            ));
+        }
+    }
+    Ok(Value::Array(items))
+}
+
+fn hover(
+    specs_dir: &Path,
+    documents: &HashMap<String, OpenDocument>,
+    params: &Value,
+) -> Result<Value> {
+    let (document, line, character) = request_document(documents, params)?;
+    let Some(token) = spec_token_at(&document.text, line, character) else {
+        return Ok(Value::Null);
+    };
+    let Some(reference) = parse_spec_url(token) else {
+        return Ok(Value::Null);
+    };
+    let markdown = match reference {
+        SpecReference::Spec(target) => {
+            let registry = registry_for(specs_dir, document)?;
+            let qualified = target.to_string();
+            let id = target.spec_id.to_string();
+            let Some(spec) = registry.get_by_id(&id) else {
+                return Ok(Value::Null);
+            };
+            format!(
+                "**{}** · {} · {}\n\n{}",
+                qualified,
+                spec.universal.entity_type.type_name(),
+                spec.universal.status.as_str(),
+                spec.universal.summary.as_deref().unwrap_or("No summary")
+            )
+        }
+        SpecReference::Source(source) => {
+            let resolved = SymbolService::new(specs_dir, false)?.resolve(&source)?;
+            format!(
+                "**{}**\n\n```\n{}\n```",
+                resolved.reference, resolved.snippet
+            )
+        }
+    };
+    Ok(json!({ "contents": { "kind": "markdown", "value": markdown } }))
+}
+
+fn definition(
+    specs_dir: &Path,
+    documents: &HashMap<String, OpenDocument>,
+    params: &Value,
+) -> Result<Value> {
+    let (document, line, character) = request_document(documents, params)?;
+    let Some(token) = spec_token_at(&document.text, line, character) else {
+        return Ok(Value::Null);
+    };
+    let Some(reference) = parse_spec_url(token) else {
+        return Ok(Value::Null);
+    };
+    match reference {
+        SpecReference::Spec(target) => {
+            let registry = registry_for(specs_dir, document)?;
+            let id = target.spec_id.to_string();
+            let Some(spec) = registry.get_by_id(&id) else {
+                return Ok(Value::Null);
+            };
+            let target_line = definition_line(spec, target.anchor.as_deref());
+            Ok(location(&spec.source_path, target_line, 0, target_line, 0))
+        }
+        SpecReference::Source(source) => {
+            let service = SymbolService::new(specs_dir, false)?;
+            let path = service.resolve_safe_path(&source.path)?;
+            let resolved = service.resolve(&source)?;
+            let Some(range) = resolved.locations.first() else {
+                return Ok(location(&path, 0, 0, 0, 0));
+            };
+            Ok(location(
+                &path,
+                range.start.line,
+                range.start.character,
+                range.end.line,
+                range.end.character,
+            ))
+        }
+    }
+}
+
+fn references(
+    specs_dir: &Path,
+    documents: &HashMap<String, OpenDocument>,
+    params: &Value,
+) -> Result<Value> {
+    let (document, line, character) = request_document(documents, params)?;
+    let Some(token) = spec_token_at(&document.text, line, character) else {
+        return Ok(json!([]));
+    };
+    let Some(SpecReference::Spec(target)) = parse_spec_url(token) else {
+        return Ok(json!([]));
+    };
+    let registry = registry_for(specs_dir, document)?;
+    let target = target.to_string();
+    let mut locations = Vec::new();
+    for spec in &registry.documents {
+        for reference in &spec.references {
+            if matches!(&reference.reference, SpecReference::Spec(found) if found.to_string() == target)
+            {
+                let line = reference.line.saturating_sub(1) as u32;
+                locations.push(location(&spec.source_path, line, 0, line, 0));
+            }
+        }
+    }
+    Ok(Value::Array(locations))
+}
+
+fn document_symbols(
+    specs_dir: &Path,
+    documents: &HashMap<String, OpenDocument>,
+    params: &Value,
+) -> Result<Value> {
+    let uri = value_string(params, "/textDocument/uri")?;
+    let document = documents.get(&uri).context("document is not open")?;
+    let registry = registry_for(specs_dir, document)?;
+    let Some(spec) = registry
+        .documents
+        .iter()
+        .find(|spec| spec.source_path == document.path)
+    else {
+        return Ok(json!([]));
+    };
+    let mut children = Vec::new();
+    for block in &spec.blocks {
+        let mut clauses = Vec::new();
+        for clause in &block.clauses {
+            let line = clause.line.saturating_sub(1) as u32;
+            clauses.push(json!({
+                "name": clause.id,
+                "detail": clause.text,
+                "kind": 8,
+                "range": range(line, 0, line, line_utf16_len(&document.text, line)),
+                "selectionRange": range(line, 0, line, line_utf16_len(&document.text, line))
+            }));
+        }
+        let start = block.start_line.saturating_sub(1) as u32;
+        let end = block.end_line.saturating_sub(1) as u32;
+        children.push(json!({
+            "name": block.id,
+            "detail": block.kind.to_string(),
+            "kind": 5,
+            "range": range(start, 0, end, line_utf16_len(&document.text, end)),
+            "selectionRange": range(start, 0, start, line_utf16_len(&document.text, start)),
+            "children": clauses
+        }));
+    }
+    let end = document.text.lines().count().saturating_sub(1) as u32;
+    Ok(json!([{
+        "name": spec.id_str(),
+        "detail": spec.universal.entity_type.type_name(),
+        "kind": 1,
+        "range": range(0, 0, end, line_utf16_len(&document.text, end)),
+        "selectionRange": range(1, 0, 1, line_utf16_len(&document.text, 1)),
+        "children": children
+    }]))
+}
+
+fn registry_for(specs_dir: &Path, document: &OpenDocument) -> Result<SpecRegistry> {
+    SpecRegistry::load_with_override(specs_dir, &document.path, &document.text)
+}
+
+fn request_document<'a>(
+    documents: &'a HashMap<String, OpenDocument>,
+    params: &Value,
+) -> Result<(&'a OpenDocument, u32, u32)> {
+    let uri = value_string(params, "/textDocument/uri")?;
+    let line = params
+        .pointer("/position/line")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+    let character = params
+        .pointer("/position/character")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+    Ok((
+        documents.get(&uri).context("document is not open")?,
+        line,
+        character,
+    ))
+}
+
+fn source_symbol_context(prefix: &str) -> Option<(&str, &str)> {
+    let marker = "spec:src:";
+    let start = prefix.rfind(marker)? + marker.len();
+    let value = &prefix[start..];
+    let (path, query) = value.split_once("#symbol=")?;
+    if path.is_empty() {
+        None
+    } else {
+        Some((path, query))
+    }
+}
+
+fn completion_item(
+    label: &str,
+    kind: u32,
+    detail: Option<String>,
+    new_text: &str,
+    prefix: &str,
+    line: u32,
+    character: u32,
+) -> Value {
+    let mut item = json!({ "label": label, "kind": kind });
+    if let Some(detail) = detail {
+        item["detail"] = Value::String(detail);
+    }
+    if let Some(byte_start) = prefix.rfind("spec:") {
+        let start_character = prefix[..byte_start].encode_utf16().count() as u32;
+        item["textEdit"] = json!({
+            "range": range(line, start_character, line, character),
+            "newText": new_text
+        });
+    } else {
+        item["insertText"] = Value::String(new_text.to_string());
+    }
+    item
+}
+
+fn definition_line(document: &SpecDocument, anchor: Option<&str>) -> u32 {
+    let Some(anchor) = anchor else {
+        return document
+            .source_path
+            .to_str()
+            .and_then(|_| std::fs::read_to_string(&document.source_path).ok())
+            .and_then(|text| {
+                text.lines()
+                    .position(|line| line.trim_start().starts_with("id:"))
+            })
+            .unwrap_or(1) as u32;
+    };
+    document
+        .blocks
+        .iter()
+        .find_map(|block| {
+            if block.id == anchor {
+                Some(block.start_line.saturating_sub(1) as u32)
+            } else {
+                block
+                    .clauses
+                    .iter()
+                    .find(|clause| clause.id == anchor)
+                    .map(|clause| clause.line.saturating_sub(1) as u32)
+            }
+        })
+        .unwrap_or(0)
+}
+
+fn spec_token_at(text: &str, line: u32, character: u32) -> Option<&str> {
+    let line = text.lines().nth(line as usize)?;
+    let cursor = utf16_to_byte(line, character);
+    for (start, _) in line.match_indices("spec:") {
+        let end = line[start..]
+            .find(|character: char| {
+                character.is_whitespace() || matches!(character, ')' | ']' | '}' | '>' | '"' | '\'')
+            })
+            .map(|offset| start + offset)
+            .unwrap_or(line.len());
+        if (start..=end).contains(&cursor) {
+            return Some(&line[start..end]);
+        }
+    }
+    None
+}
+
+fn line_prefix(text: &str, line: u32, character: u32) -> Option<&str> {
+    let line = text.lines().nth(line as usize)?;
+    Some(&line[..utf16_to_byte(line, character)])
+}
+
+fn utf16_to_byte(line: &str, target: u32) -> usize {
+    let mut units = 0u32;
+    for (index, character) in line.char_indices() {
+        if units >= target {
+            return index;
+        }
+        units += character.len_utf16() as u32;
+    }
+    line.len()
+}
+
+fn line_utf16_len(text: &str, line: u32) -> u32 {
+    text.lines()
+        .nth(line as usize)
+        .unwrap_or("")
+        .encode_utf16()
+        .count() as u32
+}
+
+fn range(start_line: u32, start_character: u32, end_line: u32, end_character: u32) -> Value {
+    json!({
+        "start": { "line": start_line, "character": start_character },
+        "end": { "line": end_line, "character": end_character }
+    })
+}
+
+fn location(
+    path: &Path,
+    start_line: u32,
+    start_character: u32,
+    end_line: u32,
+    end_character: u32,
+) -> Value {
+    let uri = Url::from_file_path(path)
+        .map(|uri| uri.to_string())
+        .unwrap_or_default();
+    json!({ "uri": uri, "range": range(start_line, start_character, end_line, end_character) })
+}
+
+fn value_string(value: &Value, pointer: &str) -> Result<String> {
+    value
+        .pointer(pointer)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .with_context(|| format!("missing string parameter {pointer}"))
+}
+
+fn uri_to_path(uri: &str) -> Result<PathBuf> {
+    Url::parse(uri)?
+        .to_file_path()
+        .map_err(|_| anyhow::anyhow!("URI is not a file: {uri}"))
+}
+
+fn send_notification(connection: &Connection, method: &str, params: Value) -> Result<()> {
+    connection
+        .sender
+        .send(Message::Notification(Notification::new(
+            method.into(),
+            params,
+        )))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+
+    #[test]
+    fn finds_reference_at_utf16_position() {
+        let text = "See [policy](spec:REQ:auth/session-expiry).";
+        assert_eq!(
+            spec_token_at(text, 0, 20),
+            Some("spec:REQ:auth/session-expiry")
+        );
+    }
+
+    #[test]
+    fn recognizes_symbol_completion_context() {
+        assert_eq!(
+            source_symbol_context("[x](spec:src:src/lib.rs#symbol=Ser"),
+            Some(("src/lib.rs", "Ser"))
+        );
+    }
+
+    #[test]
+    fn memory_protocol_publishes_unsaved_diagnostics_and_document_symbols() {
+        let temp = tempfile::tempdir().unwrap();
+        let specs_dir = temp.path().join(".specs");
+        std::fs::create_dir_all(&specs_dir).unwrap();
+        std::fs::write(
+            specs_dir.join("_config.toml"),
+            "baseline = \"forge-spec-v0.2.0\"\n",
+        )
+        .unwrap();
+        let path = specs_dir.join("demo.spec.md");
+        let saved = "---\nid: REQ:demo/example\ntype: requirement\nstatus: accepted\nowners: [dev]\nlevel: MUST\n---\n# Example\n\n:::{requirement id=\"works\" level=\"MUST\"}\nIt MUST work.\n:::\n";
+        std::fs::write(&path, saved).unwrap();
+        let unsaved = saved.replace("owners: [dev]", "owners: []");
+        let uri = Url::from_file_path(&path).unwrap().to_string();
+
+        let (server, client) = Connection::memory();
+        let server_specs = specs_dir.clone();
+        let handle = thread::spawn(move || run_connection(server, &server_specs));
+
+        client
+            .sender
+            .send(Message::Request(Request::new(
+                1.into(),
+                "initialize".into(),
+                json!({ "capabilities": {} }),
+            )))
+            .unwrap();
+        assert!(matches!(
+            client.receiver.recv().unwrap(),
+            Message::Response(_)
+        ));
+        client
+            .sender
+            .send(Message::Notification(Notification::new(
+                "initialized".into(),
+                json!({}),
+            )))
+            .unwrap();
+        client
+            .sender
+            .send(Message::Notification(Notification::new(
+                "textDocument/didOpen".into(),
+                json!({
+                    "textDocument": {
+                        "uri": uri,
+                        "languageId": "markdown",
+                        "version": 2,
+                        "text": unsaved
+                    }
+                }),
+            )))
+            .unwrap();
+        let Message::Notification(diagnostics) = client.receiver.recv().unwrap() else {
+            panic!("expected diagnostics notification")
+        };
+        assert_eq!(diagnostics.method, "textDocument/publishDiagnostics");
+        assert!(diagnostics.params["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "R003"));
+
+        client
+            .sender
+            .send(Message::Request(Request::new(
+                2.into(),
+                "textDocument/documentSymbol".into(),
+                json!({ "textDocument": { "uri": uri } }),
+            )))
+            .unwrap();
+        let Message::Response(symbols) = client.receiver.recv().unwrap() else {
+            panic!("expected document-symbol response")
+        };
+        assert_eq!(symbols.result.unwrap()[0]["name"], "REQ:demo/example");
+
+        client
+            .sender
+            .send(Message::Request(Request::new(
+                3.into(),
+                "shutdown".into(),
+                json!(null),
+            )))
+            .unwrap();
+        client
+            .sender
+            .send(Message::Notification(Notification::new(
+                "exit".into(),
+                json!(null),
+            )))
+            .unwrap();
+        assert!(matches!(
+            client.receiver.recv().unwrap(),
+            Message::Response(_)
+        ));
+        handle.join().unwrap().unwrap();
+    }
+}

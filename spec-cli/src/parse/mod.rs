@@ -15,7 +15,13 @@ pub fn parse_document(path: &Path) -> Result<SpecDocument> {
     let content =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
 
-    let (yaml, body, body_start_line) = frontmatter::split_frontmatter(&content)
+    parse_content(path, &content)
+}
+
+/// Parse an in-memory spec document. Used by the language server so unsaved
+/// editor buffers receive the same parsing and lint behavior as files on disk.
+pub fn parse_content(path: &Path, content: &str) -> Result<SpecDocument> {
+    let (yaml, body, body_start_line) = frontmatter::split_frontmatter(content)
         .with_context(|| format!("parsing frontmatter in {}", path.display()))?;
 
     let (universal, type_fields, _warnings) = frontmatter::parse_frontmatter(yaml)

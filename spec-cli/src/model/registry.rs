@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use walkdir::WalkDir;
 
+use super::config::SpecConfig;
 use super::document::SpecDocument;
 use crate::parse;
 
@@ -24,6 +25,7 @@ pub struct SpecRegistry {
     pub anchor_index: BTreeMap<String, usize>,
     pub redirects: Vec<Redirect>,
     pub specs_dir: PathBuf,
+    pub config: SpecConfig,
 }
 
 impl SpecRegistry {
@@ -31,6 +33,8 @@ impl SpecRegistry {
     pub fn load(specs_dir: &Path) -> Result<Self> {
         let mut documents = Vec::new();
         let mut parse_errors: Vec<String> = Vec::new();
+
+        let config = SpecConfig::load(specs_dir)?;
 
         // Walk all .spec.md files
         for entry in WalkDir::new(specs_dir)
@@ -90,7 +94,38 @@ impl SpecRegistry {
             anchor_index,
             redirects,
             specs_dir: specs_dir.to_path_buf(),
+            config,
         })
+    }
+
+    /// Load the registry while replacing one document with unsaved editor
+    /// content. Redirects and all indexes are rebuilt consistently.
+    pub fn load_with_override(specs_dir: &Path, source_path: &Path, content: &str) -> Result<Self> {
+        let mut registry = Self::load(specs_dir)?;
+        let document = crate::parse::parse_content(source_path, content)?;
+        if let Some(index) = registry
+            .documents
+            .iter()
+            .position(|candidate| candidate.source_path == source_path)
+        {
+            registry.documents[index] = document;
+        } else {
+            registry.documents.push(document);
+        }
+        registry.rebuild_indexes();
+        Ok(registry)
+    }
+
+    fn rebuild_indexes(&mut self) {
+        self.id_index.clear();
+        self.anchor_index.clear();
+        for (index, document) in self.documents.iter().enumerate() {
+            let id = document.id_str();
+            self.id_index.insert(id.clone(), index);
+            for anchor in document.anchors() {
+                self.anchor_index.insert(format!("{id}#{anchor}"), index);
+            }
+        }
     }
 
     /// Look up a document by its ID string.

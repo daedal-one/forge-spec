@@ -1,37 +1,67 @@
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 use crate::model::id::QualifiedAnchor;
-use crate::model::reference::{LocatedReference, SpecReference};
+use crate::model::reference::{
+    decode_symbol_segments, LocatedReference, SourceReference, SpecReference,
+};
 
 /// Parse a `spec:` URL into a `SpecReference`.
 pub fn parse_spec_url(url: &str) -> Option<SpecReference> {
     let rest = url.strip_prefix("spec:")?;
 
     if let Some(src_path) = rest.strip_prefix("src:") {
+        if let Some((path, symbol)) = src_path.split_once("#symbol=") {
+            if path.is_empty() || path.contains('#') {
+                return None;
+            }
+            if path
+                .rsplit_once(':')
+                .map(|(_, suffix)| {
+                    suffix.parse::<u32>().is_ok()
+                        || suffix
+                            .split_once('-')
+                            .map(|(start, end)| {
+                                start.parse::<u32>().is_ok() && end.parse::<u32>().is_ok()
+                            })
+                            .unwrap_or(false)
+                })
+                .unwrap_or(false)
+            {
+                return None;
+            }
+            return Some(SpecReference::Source(SourceReference::symbol(
+                path,
+                decode_symbol_segments(symbol)?,
+            )));
+        }
+
+        if src_path.contains('#') {
+            return None;
+        }
+
         // Source reference: src:path/to/file.ts:42-78
         // Try to split off trailing :NN-NN
         if let Some((path, line_range)) = src_path.rsplit_once(':') {
             if let Some((start_s, end_s)) = line_range.split_once('-') {
                 if let (Ok(start), Ok(end)) = (start_s.parse::<u32>(), end_s.parse::<u32>()) {
-                    return Some(SpecReference::Source {
-                        path: path.to_string(),
-                        lines: Some((start, end)),
-                    });
+                    return Some(SpecReference::Source(SourceReference::lines(
+                        path, start, end,
+                    )));
                 }
             }
             // Single line number
             if let Ok(line) = line_range.parse::<u32>() {
-                return Some(SpecReference::Source {
-                    path: path.to_string(),
-                    lines: Some((line, line)),
-                });
+                return Some(SpecReference::Source(SourceReference::lines(
+                    path, line, line,
+                )));
             }
         }
         // No line range
-        Some(SpecReference::Source {
-            path: src_path.to_string(),
-            lines: None,
-        })
+        if src_path.is_empty() {
+            None
+        } else {
+            Some(SpecReference::Source(SourceReference::file(src_path)))
+        }
     } else {
         // Spec reference: REQ:auth/session-expiry or REQ:auth/session-management#c-lifetime
         let qa: QualifiedAnchor = rest.parse().ok()?;
@@ -124,9 +154,12 @@ mod tests {
     fn parse_source_ref() {
         let r = parse_spec_url("spec:src:packages/auth/session.ts:42-78").unwrap();
         match r {
-            SpecReference::Source { path, lines } => {
-                assert_eq!(path, "packages/auth/session.ts");
-                assert_eq!(lines, Some((42, 78)));
+            SpecReference::Source(source) => {
+                assert_eq!(source.path, "packages/auth/session.ts");
+                assert_eq!(
+                    source.target,
+                    crate::model::reference::SourceTarget::Lines { start: 42, end: 78 }
+                );
             }
             _ => panic!("expected Source variant"),
         }
@@ -136,9 +169,9 @@ mod tests {
     fn parse_source_ref_no_lines() {
         let r = parse_spec_url("spec:src:packages/auth/session.ts").unwrap();
         match r {
-            SpecReference::Source { path, lines } => {
-                assert_eq!(path, "packages/auth/session.ts");
-                assert!(lines.is_none());
+            SpecReference::Source(source) => {
+                assert_eq!(source.path, "packages/auth/session.ts");
+                assert_eq!(source.target, crate::model::reference::SourceTarget::File);
             }
             _ => panic!("expected Source variant"),
         }
@@ -153,7 +186,32 @@ Also check [session.ts](spec:src:packages/auth/session.ts:42-78).
         let refs = extract_references(body, 10);
         assert_eq!(refs.len(), 2);
         assert!(matches!(&refs[0].reference, SpecReference::Spec(_)));
-        assert!(matches!(&refs[1].reference, SpecReference::Source { .. }));
+        assert!(matches!(&refs[1].reference, SpecReference::Source(_)));
+    }
+
+    #[test]
+    fn parse_source_symbol_ref() {
+        let reference =
+            parse_spec_url("spec:src:src/session.rs#symbol=SessionStore/expire%2Fnow").unwrap();
+        assert_eq!(
+            reference,
+            SpecReference::Source(SourceReference::symbol(
+                "src/session.rs",
+                vec!["SessionStore".into(), "expire/now".into()],
+            ))
+        );
+        assert_eq!(
+            reference.to_string(),
+            "spec:src:src/session.rs#symbol=SessionStore/expire%2Fnow"
+        );
+    }
+
+    #[test]
+    fn rejects_empty_or_mixed_source_selectors() {
+        assert!(parse_spec_url("spec:src:").is_none());
+        assert!(parse_spec_url("spec:src:src/lib.rs#symbol=").is_none());
+        assert!(parse_spec_url("spec:src:src/lib.rs:10#symbol=main").is_none());
+        assert!(parse_spec_url("spec:src:src/lib.rs#other=main").is_none());
     }
 
     #[test]

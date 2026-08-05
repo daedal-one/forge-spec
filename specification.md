@@ -1,4 +1,4 @@
-# Specs Format v0.1 — Specification
+# Specs Format v0.2 — Specification
 
 A file format and toolchain for project specifications, designed to be:
 
@@ -34,7 +34,7 @@ Not in scope:
 - Replacing API documentation generators (OpenAPI etc.). Specs reference
   contracts but do not enumerate every field.
 - Symbolic / formal verification. The format is designed to be amenable to
-  it later; v0.1 produces no proofs.
+it later; v0.2 produces no proofs.
 
 ---
 
@@ -122,13 +122,25 @@ body that may contain typed fenced divs.
 | `id`         | yes                | full document ID                                                   |
 | `type`       | yes                | entity type; must match the prefix in `id`                         |
 | `status`     | yes                | `draft`, `accepted`, `deprecated`, or `superseded`                 |
-| `version`    | yes                | semver string                                                      |
 | `summary`    | conditional        | required if any other spec references this one                     |
 | `owners`     | yes                | non-empty list of identifiers                                      |
 | `pinned_at`  | no                 | git SHA used to resolve `src:` references                          |
 | `related`    | no                 | list of related spec IDs (informational, no graph semantics)       |
 | `supersedes` | no                 | spec ID this one replaces                                          |
 | `superseded_by` | no              | reverse pointer; auto-managed by `spec migrate`                    |
+
+File revisions are derived from Git rather than stored in frontmatter. The
+revision is the number of commits that touched the file, following renames.
+Tools render it as `rN`; a changed or untracked working-tree file is rendered
+as `rN+dirty`. This value is informational and may change when history is
+rebased.
+
+The format baseline is declared once for the entire spec tree in
+`.specs/_config.toml`:
+
+```toml
+baseline = "forge-spec-v0.2.0"
+```
 
 ### 3.2 Body
 
@@ -253,6 +265,7 @@ References are CommonMark links with a `spec:` URL scheme:
 [clause: lifetime cap](spec:REQ:auth/session-management#c-lifetime)
 [idempotency key](spec:GLO:terms/idempotency-key)
 [session.ts:42-78](spec:src:packages/auth/session.ts:42-78)
+[SessionStore/expire](spec:src:packages/auth/session.ts#symbol=SessionStore/expire)
 ```
 
 This survives any standard Markdown renderer (the URL is shown as a link to
@@ -263,8 +276,11 @@ links during transmutation.
 
 - Plain spec IDs → look up document; resolve `_redirects.toml` transitively.
 - `#anchor` suffix → look up doc-local anchor (typed-block id or clause id).
-- `src:path:lines` → resolve against `pinned_at` if set on the referencing
-  spec, otherwise HEAD.
+- `src:path:lines` → resolve the one-based inclusive line range against
+  `pinned_at` if set on the referencing spec, otherwise the working tree.
+- `src:path#symbol=segment/segment` → ask the source language server for the
+  named document-symbol hierarchy. Each segment uses URL percent-encoding,
+  so `/` remains the hierarchy separator even when a symbol name contains it.
 
 ### 5.3 Validation
 
@@ -319,13 +335,13 @@ is independent of the refinement graph.
 
 ### 6.3 Composition (deferred)
 
-v0.1 does not have a first-class `COMP:` type. If a requirement describes a
+v0.2 does not have a first-class `COMP:` type. If a requirement describes a
 component, set `kind: component` on the requirement. Future v2 work may
 introduce `COMP:` and migrate `kind: component` requirements to it.
 
 `applies_to:` exists today as a free-form list of component identifiers
 (e.g., `[auth-service, gateway]`). It is not validated against any registry
-in v0.1.
+in v0.2.
 
 ---
 
@@ -486,6 +502,13 @@ config in `.specs/_lint.toml`.
 | `R015`      | error    | No two anchors share a (doc, anchor) pair                            |
 | `R016`      | warning  | Multi-entity file warning past threshold (configurable, default 10)  |
 | `R017`      | warning  | RFC 2119 keyword discipline (a `requirement` block with no MUST/SHOULD/MAY) |
+| `R018`      | warning  | TASK has neither a refinement parent nor an upstream blocker        |
+| `R019`      | warning  | Deferred/wontdo TASK lacks a summary explaining why                 |
+| `R020`      | error    | Source path exists and remains inside the repository                 |
+| `R021`      | error    | Referenced source symbol exists                                      |
+| `R022`      | warning  | Source language server unavailable (`--require-symbols` makes it an error) |
+| `R023`      | error    | Source line range is valid                                           |
+| `R024`      | warning  | `.specs/_config.toml` declares the supported format baseline        |
 | `R-redir`   | info     | Reference traverses a redirect                                       |
 
 `status: draft` downgrades `R002`–`R012` from error to warning. This is the
@@ -503,7 +526,7 @@ Subcommands:
 | command                             | purpose                                                       |
 |-------------------------------------|---------------------------------------------------------------|
 | `spec new <type> <slug>`            | scaffold a new spec from a per-type template                  |
-| `spec lint [paths...]`              | run all checks; exit nonzero on errors                        |
+| `spec lint [--require-symbols]`     | validate specs and source references                          |
 | `spec render <id-or-query> [flags]` | produce render bundles                                        |
 | `spec graph [--refinement\|--categorization]` | emit DOT for the requested graph                    |
 | `spec history [--update\|<id>]`     | regenerate or query commit history per spec                   |
@@ -512,8 +535,35 @@ Subcommands:
 | `spec coverage <id>`                | clause-by-clause refinement-coverage report                   |
 | `spec orphans`                      | list referenceless leaf specs                                 |
 | `spec migrate`                      | apply `_redirects.toml`, rewrite refs, update `superseded_by` |
+| `spec symbols <path> [--query Q]`   | list language-server symbols for a source file                |
+| `spec resolve <reference>`          | resolve a spec or source reference                            |
+| `spec lsp`                          | run the forge-spec language server over stdio                 |
 
 Recommended pre-commit hook chain: `spec lint && spec history --update`.
+
+### 10.1 Language-server integration
+
+`spec lsp` is a Language Server Protocol server for `.spec.md` files. It
+publishes lint diagnostics for unsaved buffers and provides completion, hover,
+definition, references, and document symbols. Source-symbol completion delegates
+to the downstream language server selected from the referenced file extension.
+
+Built-in providers are Rust (`rust-analyzer`), TypeScript/JavaScript
+(`typescript-language-server --stdio`), Python
+(`basedpyright-langserver --stdio`), and SQL (`sqls`). Provider configuration is
+stored in `.specs/_lsp.toml`; changing a command or defining another provider is
+trusted only with the explicit `--allow-custom-lsp` CLI flag:
+
+```toml
+[servers.rust]
+extensions = ["rs"]
+command = "rust-analyzer"
+args = []
+root_markers = ["Cargo.toml"]
+```
+
+Source paths must be repository-relative and remain within the repository after
+canonicalization. Tolaria never opts into custom commands at its IPC boundary.
 
 Implementation language is open. A Rust binary using `tree-sitter-markdown`
 and `pulldown-cmark` is the recommended choice based on parsing throughput
@@ -530,7 +580,6 @@ A typical requirement file:
 id: REQ:auth/session-expiry
 type: requirement
 status: draft
-version: 0.1.0
 level: MUST
 summary: >
   Session tokens are invalidated after bounded wall-clock and idle intervals,
@@ -563,6 +612,8 @@ A session token MUST be invalidated when any of the following holds:
 ∀ token t in the active set: age(t) < 30d ∧ idle(t) < 14d.
 
 Enforcement point: [session.ts:42-78](spec:src:packages/auth/session.ts:42-78).
+Symbolic enforcement point:
+[SessionStore/expire](spec:src:packages/auth/session.ts#symbol=SessionStore/expire).
 :::
 
 ## Non-goals
@@ -573,7 +624,7 @@ Enforcement point: [session.ts:42-78](spec:src:packages/auth/session.ts:42-78).
 
 ---
 
-## 12. Open issues for v0.1 → v1
+## 12. Open issues for v0.2 → v1
 
 - **Component first-class type (`COMP:`).** Deferred. Trigger condition for
   introducing it: more than ~5 requirements with `kind: component` and a
@@ -585,11 +636,11 @@ Enforcement point: [session.ts:42-78](spec:src:packages/auth/session.ts:42-78).
 
 - **Cross-repo references.** Useful for monorepo / multi-repo organizations.
   The `spec:` URL scheme is extensible (`spec:other-repo/REQ:foo`); resolution
-  needs a registry. Out of scope for v0.1.
+  needs a registry. Out of scope for v0.2.
 
 - **Symbolic clause-coverage proof.** The current coverage check is
   syntactic: every clause has at least one refining child. A semantic check
-  — children jointly imply parent — is not feasible in v0.1.
+  — children jointly imply parent — is not feasible in v0.2.
 
 - **Concurrent edits and merge.** No special handling. Standard git merge
   with line-level conflict resolution. Frontmatter is small and conflict-

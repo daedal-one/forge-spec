@@ -1,13 +1,13 @@
 use regex::Regex;
-use std::sync::LazyLock;
+use once_cell::sync::Lazy;
 
 use crate::model::block::BlockKind;
 use crate::model::document::SpecDocument;
 
 use super::diagnostic::Diagnostic;
 
-static RFC2119_KEYWORD: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b(MUST|SHOULD|MAY)\b").unwrap());
+static RFC2119_KEYWORD: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\b(MUST|SHOULD|MAY)\b").unwrap());
 
 /// R016: Warn when a file contains more than a threshold number of typed blocks.
 pub fn check_multi_entity(doc: &SpecDocument, threshold: usize) -> Vec<Diagnostic> {

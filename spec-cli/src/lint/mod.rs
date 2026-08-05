@@ -12,6 +12,15 @@ use self::diagnostic::{Diagnostic, Severity};
 
 /// Run all lint checks on a registry.
 pub fn lint_all(registry: &SpecRegistry) -> Vec<Diagnostic> {
+    lint_all_with_options(registry, false, false)
+}
+
+/// Run all lint checks, optionally requiring downstream symbol verification.
+pub fn lint_all_with_options(
+    registry: &SpecRegistry,
+    require_symbols: bool,
+    allow_custom_lsp: bool,
+) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
     // Per-document checks
@@ -33,10 +42,7 @@ pub fn lint_all(registry: &SpecRegistry) -> Vec<Diagnostic> {
         // Draft status downgrades R002-R012 from error to warning
         if is_draft {
             for d in &mut doc_diags {
-                let code_num: Option<u32> = d
-                    .code
-                    .strip_prefix('R')
-                    .and_then(|s| s.parse().ok());
+                let code_num: Option<u32> = d.code.strip_prefix('R').and_then(|s| s.parse().ok());
                 if let Some(n) = code_num {
                     if (2..=12).contains(&n) && d.severity == Severity::Error {
                         d.downgrade();
@@ -49,8 +55,14 @@ pub fn lint_all(registry: &SpecRegistry) -> Vec<Diagnostic> {
     }
 
     // Registry-wide checks
+    diags.extend(structural::check_spec_config(registry));
     diags.extend(structural::check_unique_ids(registry));
     diags.extend(references::check_references(registry));
+    diags.extend(references::check_source_references(
+        registry,
+        require_symbols,
+        allow_custom_lsp,
+    ));
     diags.extend(references::check_summary_on_referenced(registry));
     diags.extend(refinement::check_refinement(registry));
     diags.extend(trailers::check_trailer_references(registry));

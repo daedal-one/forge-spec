@@ -2,7 +2,6 @@
 id: REQ:infra/observability
 type: requirement
 status: accepted
-version: 1.0.0
 level: SHOULD
 summary: >
   All services emit structured logs, metrics, and traces in a

@@ -2,7 +2,6 @@
 id: REQ:auth/session-management
 type: requirement
 status: accepted
-version: 1.0.0
 level: MUST
 summary: >
   The system manages authenticated sessions with bounded lifetimes,

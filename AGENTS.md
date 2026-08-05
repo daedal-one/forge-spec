@@ -1,13 +1,14 @@
 # Working with specs
 
-This repo uses the **Specs Format v0.1** to capture requirements, invariants, interfaces, ADRs, and glossary entries as version-controlled, cross-referenced documents.
+This repo uses the **Specs Format v0.2** to capture requirements, invariants, interfaces, ADRs, and glossary entries as version-controlled, cross-referenced documents.
 
 ## Quick rules
 
 - Specs live in `.specs/` as `.spec.md` files with YAML frontmatter + CommonMark body.
 - Every spec has an `id` of the form `TYPE:namespace/slug` (e.g. `REQ:auth/session-expiry`).
+- `.specs/_config.toml` declares `baseline = "forge-spec-v0.2.0"` once; per-file revisions are derived from Git.
 - Types: `REQ` requirement, `INV` invariant, `IFC` interface, `ADR` decision record, `GLO` glossary, `TOPIC` grouping, `SCN` scenario.
-- Cross-reference with `[text](spec:REQ:auth/session-expiry)` links. Source refs: `spec:src:path/file.ts:42-78`.
+- Cross-reference with `[text](spec:REQ:auth/session-expiry)` links. Source refs: `spec:src:path/file.ts:42-78` or `spec:src:path/file.ts#symbol=Type/method`.
 - Requirements use typed blocks: `:::{requirement id="name" level="MUST"} ... :::`.
 - Clause anchors inside blocks (`- {#c-lifetime} description`) create addressable sub-properties for refinement.
 - Children declare `refines: [REQ:parent#c-clause]` in frontmatter; add `aspects:` when refining multiple parents.
@@ -33,14 +34,13 @@ Full spec: `specification.md`. Key sections by line number:
 
 | Topic | Lines | Section |
 |-------|-------|---------|
-| File layout & ID format | 44-90 | 2.1-2.2 |
-| Frontmatter fields (universal) | 118-131 | 3.1 |
-| Typed blocks & clause anchors | 133-173 | 3.2-3.3 |
-| Entity types & type-specific fields | 177-242 | 4-4.1 |
-| Reference syntax & resolution | 245-278 | 5 |
-| Refinement, categorization, coverage | 281-329 | 6 |
-| Git trailers & history | 332-384 | 7 |
-| Render targets (human & agent XML) | 387-458 | 8 |
-| Lint rules R001-R017 | 465-493 | 9 |
-| CLI subcommands | 496-520 | 10 |
-| Worked file template | 523-572 | 11 |
+| File layout & ID format | 43-112 | 2.1-2.3 |
+| Frontmatter fields & typed blocks | 118-188 | 3.1-3.3 |
+| Entity types & type-specific fields | 189-256 | 4-4.1 |
+| Reference syntax & resolution | 257-296 | 5 |
+| Refinement, categorization, coverage | 297-347 | 6 |
+| Git trailers & history | 348-402 | 7 |
+| Render targets (human & agent XML) | 403-479 | 8 |
+| Lint rules R001-R024 | 480-518 | 9 |
+| CLI and LSP integration | 519-573 | 10-10.1 |
+| Worked file template | 574-626 | 11 |

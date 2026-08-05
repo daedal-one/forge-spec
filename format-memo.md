@@ -1,6 +1,6 @@
 # Specs Format — Hands-on Memo
 
-One-page reference. For the full spec, see `specs-format-v0.1.md`.
+One-page reference for Specs Format v0.2. For the full spec, see `specification.md`.
 
 ## File layout
 
@@ -15,7 +15,6 @@ One-page reference. For the full spec, see `specs-format-v0.1.md`.
 id: REQ:auth/session-expiry
 type: requirement
 status: draft           # draft | accepted | deprecated | superseded
-version: 0.1.0
 level: MUST             # MUST | SHOULD | MAY | INFO
 summary: Sessions expire after bounded wall-clock and idle intervals.
 owners: [carlo]
@@ -23,6 +22,14 @@ refines: [REQ:auth/session-management#c-lifetime]
 aspects: [duration]     # required if refines has multiple parents
 ---
 ```
+
+Declare the format once in `.specs/_config.toml`:
+
+```toml
+baseline = "forge-spec-v0.2.0"
+```
+
+File revisions are computed from Git history and shown as `rN` or `rN+dirty`.
 
 ## Reference syntax
 
@@ -33,6 +40,7 @@ CommonMark links with `spec:` URL scheme.
 [link text](spec:REQ:auth/session-management#c-lifetime)
 [link text](spec:GLO:terms/idempotency-key)
 [link text](spec:src:packages/auth/session.ts:42-78)
+[link text](spec:src:packages/auth/session.ts#symbol=SessionStore/expire)
 ```
 
 ## Typed block
@@ -88,6 +96,9 @@ spec render REQ:auth/foo --target=agent    # structured envelope for LLMs
 spec children REQ:auth/foo                 # direct refining children
 spec ancestors REQ:auth/foo                # direct refined-by parents
 spec coverage REQ:auth/foo                 # clause-by-clause coverage
+spec symbols src/lib.rs --query Resolver   # discover source symbols via LSP
+spec resolve 'spec:src:src/lib.rs#symbol=Resolver/resolve'
+spec lsp                                   # forge-spec editor language server
 spec graph --refinement                    # DOT of the refinement DAG
 spec history --update                      # rebuild .specs/_history/
 spec migrate                               # apply _redirects.toml

@@ -852,8 +852,17 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                 ),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("version ", Style::default().fg(Color::DarkGray)),
-                Span::raw(doc.universal.version.clone()),
+                Span::styled("revision", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!(
+                    " {}",
+                    crate::history::revision::for_path(&doc.source_path)
+                        .map(|revision| revision.to_string())
+                        .unwrap_or_else(|_| "unavailable".into())
+                )),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("baseline", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!(" {}", app.registry.config.baseline)),
             ]));
             if !doc.universal.owners.is_empty() {
                 lines.push(Line::from(vec![

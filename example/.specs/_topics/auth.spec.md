@@ -2,7 +2,6 @@
 id: TOPIC:topics/auth
 type: topic
 status: accepted
-version: 1.0.0
 summary: Authentication, authorization, and session management.
 owners: [carlo]
 ---

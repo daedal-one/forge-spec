@@ -2,7 +2,6 @@
 id: REQ:auth/session-expiry
 type: requirement
 status: draft
-version: 0.1.0
 level: MUST
 summary: >
   Session tokens are invalidated after bounded wall-clock and idle intervals,
@@ -36,7 +35,8 @@ A session token MUST be invalidated when any of the following holds:
 :::{invariant id="no-stale-tokens"}
 For all token t in the active set: age(t) < 30d and idle(t) < 14d.
 
-Enforcement point: [session.ts:42-78](spec:src:packages/auth/session.ts:42-78).
+Enforcement point:
+[session.ts:8-19](spec:src:example/packages/auth/session.ts:8-19).
 :::
 
 :::{non-goal id="no-sliding-window"}

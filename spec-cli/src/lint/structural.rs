@@ -1,7 +1,8 @@
 use regex::Regex;
 use std::collections::BTreeMap;
-use std::sync::LazyLock;
+use once_cell::sync::Lazy;
 
+use crate::model::config::CURRENT_SPEC_BASELINE;
 use crate::model::document::SpecDocument;
 use crate::model::frontmatter::TypeSpecificFields;
 use crate::model::id::EntityType;
@@ -9,7 +10,7 @@ use crate::model::registry::SpecRegistry;
 
 use super::diagnostic::Diagnostic;
 
-static ID_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+static ID_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^(REQ|INV|IFC|ADR|GLO|TOPIC|SCN|TASK):[a-z0-9][\w-]*/[a-z0-9][\w-]*$").unwrap()
 });
 
@@ -58,8 +59,30 @@ pub fn check_universal_fields(doc: &SpecDocument) -> Vec<Diagnostic> {
             doc.source_path.clone(),
         ));
     }
-    // id, type, status, version are validated during parsing — if we got here they exist.
     diags
+}
+
+/// R024: the spec tree declares a supported forge-spec baseline once.
+pub fn check_spec_config(registry: &SpecRegistry) -> Vec<Diagnostic> {
+    let path = registry.specs_dir.join("_config.toml");
+    if !registry.config.declared {
+        return vec![Diagnostic::warning(
+            "R024",
+            format!("missing _config.toml; add `baseline = \"{CURRENT_SPEC_BASELINE}\"`"),
+            path,
+        )];
+    }
+    if registry.config.baseline != CURRENT_SPEC_BASELINE {
+        return vec![Diagnostic::error(
+            "R024",
+            format!(
+                "unsupported baseline '{}'; this CLI supports {CURRENT_SPEC_BASELINE}",
+                registry.config.baseline
+            ),
+            path,
+        )];
+    }
+    Vec::new()
 }
 
 /// R004: Type-specific frontmatter fields present.
@@ -70,7 +93,13 @@ pub fn check_type_specific_fields(doc: &SpecDocument) -> Vec<Diagnostic> {
         (EntityType::Req, TypeSpecificFields::Requirement { level: _, .. }) => {
             // level has a default; nothing strictly required beyond universal
         }
-        (EntityType::Adr, TypeSpecificFields::Adr { decision_date, decided_by }) => {
+        (
+            EntityType::Adr,
+            TypeSpecificFields::Adr {
+                decision_date,
+                decided_by,
+            },
+        ) => {
             if decision_date.is_empty() {
                 diags.push(Diagnostic::error(
                     "R004",
@@ -89,7 +118,15 @@ pub fn check_type_specific_fields(doc: &SpecDocument) -> Vec<Diagnostic> {
         (EntityType::Ifc, TypeSpecificFields::Interface { .. }) => {
             // stability has a default
         }
-        (EntityType::Task, TypeSpecificFields::Task { refines, blocked_by, progress, .. }) => {
+        (
+            EntityType::Task,
+            TypeSpecificFields::Task {
+                refines,
+                blocked_by,
+                progress,
+                ..
+            },
+        ) => {
             // R018: a task that has no parent to refine and no upstream blockers
             // is dangling — surface as a warning so authors can attach it.
             if refines.is_empty() && blocked_by.is_empty() {
@@ -103,18 +140,20 @@ pub fn check_type_specific_fields(doc: &SpecDocument) -> Vec<Diagnostic> {
             // are easy to lose track of; warn rather than error.
             use crate::model::frontmatter::Progress as P;
             if matches!(progress, P::Deferred | P::WontDo)
-                && doc.universal.summary.as_deref().map(str::trim).unwrap_or("").is_empty()
+                && doc
+                    .universal
+                    .summary
+                    .as_deref()
+                    .map(str::trim)
+                    .unwrap_or("")
+                    .is_empty()
             {
                 let msg = match progress {
                     P::Deferred => "TASK is deferred without a summary explaining why",
                     P::WontDo => "TASK is wontdo without a summary explaining why",
                     _ => unreachable!(),
                 };
-                diags.push(Diagnostic::warning(
-                    "R019",
-                    msg,
-                    doc.source_path.clone(),
-                ));
+                diags.push(Diagnostic::warning("R019", msg, doc.source_path.clone()));
             }
         }
         _ => {}
@@ -156,7 +195,10 @@ pub fn check_unique_anchors(doc: &SpecDocument) -> Vec<Diagnostic> {
                 diags.push(
                     Diagnostic::error(
                         "R015",
-                        format!("duplicate anchor '{}' (first at line {prev_line})", block.id),
+                        format!(
+                            "duplicate anchor '{}' (first at line {prev_line})",
+                            block.id
+                        ),
                         doc.source_path.clone(),
                     )
                     .at_line(block.start_line),

@@ -2,7 +2,6 @@
 id: GLO:terms/auth
 type: glossary
 status: accepted
-version: 1.0.0
 summary: Authentication and session terminology.
 owners: [carlo]
 ---

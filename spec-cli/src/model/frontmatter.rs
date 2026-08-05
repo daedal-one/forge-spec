@@ -135,7 +135,6 @@ pub struct UniversalFrontmatter {
     pub id: SpecId,
     pub entity_type: EntityType,
     pub status: Status,
-    pub version: String,
     pub summary: Option<String>,
     pub owners: Vec<String>,
     pub pinned_at: Option<String>,
@@ -189,7 +188,6 @@ pub struct RawFrontmatter {
     #[serde(rename = "type")]
     pub entity_type: String,
     pub status: Option<String>,
-    pub version: Option<String>,
     pub summary: Option<String>,
     pub owners: Option<Vec<String>>,
     pub pinned_at: Option<String>,

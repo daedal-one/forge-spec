@@ -2,7 +2,6 @@
 id: ADR:auth/0001-session-storage
 type: adr
 status: accepted
-version: 1.0.0
 summary: >
   Sessions are stored in Redis with TTL-based expiration rather than
   in the primary database.

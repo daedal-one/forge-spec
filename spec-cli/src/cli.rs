@@ -27,6 +27,12 @@ pub enum Commands {
     Lint {
         /// Specific paths to lint (default: entire .specs/ directory)
         paths: Vec<PathBuf>,
+        /// Fail when source symbols cannot be verified by a language server
+        #[arg(long)]
+        require_symbols: bool,
+        /// Trust custom language-server commands from _lsp.toml
+        #[arg(long)]
+        allow_custom_lsp: bool,
     },
     /// Produce render bundles
     Render {
@@ -84,6 +90,33 @@ pub enum Commands {
     Orphans,
     /// Apply _redirects.toml, rewrite refs, update superseded_by
     Migrate,
+    /// List code symbols in a repository-relative source file
+    Symbols {
+        /// Repository-relative source path
+        path: String,
+        /// Filter by symbol or qualified name
+        #[arg(long)]
+        query: Option<String>,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+        /// Trust custom language-server commands from _lsp.toml
+        #[arg(long)]
+        allow_custom_lsp: bool,
+    },
+    /// Resolve a spec: URL to its canonical target
+    Resolve {
+        /// Full spec: URL
+        reference: String,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+        /// Trust custom language-server commands from _lsp.toml
+        #[arg(long)]
+        allow_custom_lsp: bool,
+    },
+    /// Run the forge-spec language server over standard I/O
+    Lsp,
     /// List open tasks (pending, in-progress, blocked).
     Todo {
         /// Filter by progress state (pending|in-progress|done|blocked|deferred)
@@ -172,7 +205,7 @@ pub enum RenderTarget {
     Agent,
 }
 
-fn parse_entity_type(s: &str) -> Result<String, String> {
+pub fn parse_entity_type(s: &str) -> Result<String, String> {
     let normalized = s.to_lowercase();
     match normalized.as_str() {
         "req" | "requirement" => Ok("REQ".to_string()),

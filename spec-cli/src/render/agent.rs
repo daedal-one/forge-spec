@@ -22,12 +22,9 @@ pub fn render_agent(registry: &SpecRegistry, entries: &[ScopedEntry]) -> String 
 
         match entry.detail {
             DetailLevel::Full => render_spec_full(doc, registry, &mut out),
-            DetailLevel::Summary => render_spec_summary(doc, &mut out),
+            DetailLevel::Summary => render_spec_summary(doc, registry, &mut out),
             DetailLevel::IdOnly => {
-                out.push_str(&format!(
-                    "  <spec id=\"{}\" />\n",
-                    escape_xml(&entry.id)
-                ));
+                out.push_str(&format!("  <spec id=\"{}\" />\n", escape_xml(&entry.id)));
             }
             DetailLevel::None => {}
         }
@@ -43,10 +40,12 @@ fn render_spec_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut Strin
 
     // Opening tag with attributes
     out.push_str(&format!(
-        "  <spec id=\"{}\" type=\"{}\" status=\"{}\"",
+        "  <spec id=\"{}\" type=\"{}\" status=\"{}\" revision=\"{}\" baseline=\"{}\"",
         escape_xml(&id),
         u.entity_type.type_name(),
         u.status.as_str(),
+        revision_for(doc),
+        escape_xml(&registry.config.baseline),
     ));
 
     if let TypeSpecificFields::Requirement { level, .. } = &doc.type_fields {
@@ -76,18 +75,13 @@ fn render_spec_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut Strin
         out.push_str("    <ancestors>\n");
         for anc_id in &ancestors {
             if let Some(anc) = registry.get_by_id(anc_id) {
-                let anc_summary = anc
-                    .universal
-                    .summary
-                    .as_deref()
-                    .unwrap_or("");
-                let level_attr = if let TypeSpecificFields::Requirement { level, .. } =
-                    &anc.type_fields
-                {
-                    format!(" level=\"{}\"", level.as_str())
-                } else {
-                    String::new()
-                };
+                let anc_summary = anc.universal.summary.as_deref().unwrap_or("");
+                let level_attr =
+                    if let TypeSpecificFields::Requirement { level, .. } = &anc.type_fields {
+                        format!(" level=\"{}\"", level.as_str())
+                    } else {
+                        String::new()
+                    };
                 out.push_str(&format!(
                     "      <ancestor id=\"{}\"{}>",
                     escape_xml(anc_id),
@@ -116,13 +110,12 @@ fn render_spec_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut Strin
         out.push_str("    <descendants>\n");
         for child_id in &children {
             if let Some(child) = registry.get_by_id(child_id) {
-                let level_attr = if let TypeSpecificFields::Requirement { level, .. } =
-                    &child.type_fields
-                {
-                    format!(" level=\"{}\"", level.as_str())
-                } else {
-                    String::new()
-                };
+                let level_attr =
+                    if let TypeSpecificFields::Requirement { level, .. } = &child.type_fields {
+                        format!(" level=\"{}\"", level.as_str())
+                    } else {
+                        String::new()
+                    };
                 out.push_str(&format!(
                     "      <descendant id=\"{}\"{}",
                     escape_xml(child_id),
@@ -149,18 +142,16 @@ fn render_spec_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut Strin
     out.push_str("  </spec>\n");
 }
 
-fn render_spec_summary(doc: &SpecDocument, out: &mut String) {
+fn render_spec_summary(doc: &SpecDocument, registry: &SpecRegistry, out: &mut String) {
     let id = doc.id_str();
-    let summary = doc
-        .universal
-        .summary
-        .as_deref()
-        .unwrap_or("");
+    let summary = doc.universal.summary.as_deref().unwrap_or("");
     out.push_str(&format!(
-        "  <spec id=\"{}\" type=\"{}\" status=\"{}\">\n",
+        "  <spec id=\"{}\" type=\"{}\" status=\"{}\" revision=\"{}\" baseline=\"{}\">\n",
         escape_xml(&id),
         doc.universal.entity_type.type_name(),
         doc.universal.status.as_str(),
+        revision_for(doc),
+        escape_xml(&registry.config.baseline),
     ));
     if !summary.is_empty() {
         out.push_str(&format!(
@@ -169,6 +160,12 @@ fn render_spec_summary(doc: &SpecDocument, out: &mut String) {
         ));
     }
     out.push_str("  </spec>\n");
+}
+
+fn revision_for(doc: &SpecDocument) -> String {
+    crate::history::revision::for_path(&doc.source_path)
+        .map(|revision| revision.to_string())
+        .unwrap_or_else(|_| "unavailable".into())
 }
 
 fn escape_xml(s: &str) -> String {

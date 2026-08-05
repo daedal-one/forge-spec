@@ -19,7 +19,7 @@ pub fn render_human(registry: &SpecRegistry, entries: &[ScopedEntry]) -> String 
         };
 
         match entry.detail {
-            DetailLevel::Full => render_full(doc, &mut out),
+            DetailLevel::Full => render_full(doc, registry, &mut out),
             DetailLevel::Summary => render_summary(doc, &mut out),
             DetailLevel::IdOnly => {
                 out.push_str(&format!("- {}\n", entry.id));
@@ -31,9 +31,9 @@ pub fn render_human(registry: &SpecRegistry, entries: &[ScopedEntry]) -> String 
     out
 }
 
-fn render_full(doc: &SpecDocument, out: &mut String) {
+fn render_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut String) {
     // Header table
-    render_frontmatter_table(doc, out);
+    render_frontmatter_table(doc, registry, out);
     out.push('\n');
     // Body
     out.push_str(&doc.body_raw);
@@ -44,26 +44,26 @@ fn render_full(doc: &SpecDocument, out: &mut String) {
 
 fn render_summary(doc: &SpecDocument, out: &mut String) {
     let id = doc.id_str();
-    let summary = doc
-        .universal
-        .summary
-        .as_deref()
-        .unwrap_or("(no summary)");
+    let summary = doc.universal.summary.as_deref().unwrap_or("(no summary)");
     out.push_str(&format!("### {id}\n\n{summary}\n"));
 }
 
-fn render_frontmatter_table(doc: &SpecDocument, out: &mut String) {
+fn render_frontmatter_table(doc: &SpecDocument, registry: &SpecRegistry, out: &mut String) {
     let u = &doc.universal;
     out.push_str(&format!("## {}\n\n", doc.id_str()));
     out.push_str("| Field | Value |\n");
     out.push_str("|-------|-------|\n");
     out.push_str(&format!("| **ID** | `{}` |\n", u.id));
-    out.push_str(&format!(
-        "| **Type** | {} |\n",
-        u.entity_type.type_name()
-    ));
+    out.push_str(&format!("| **Type** | {} |\n", u.entity_type.type_name()));
     out.push_str(&format!("| **Status** | {} |\n", u.status.as_str()));
-    out.push_str(&format!("| **Version** | {} |\n", u.version));
+    let revision = crate::history::revision::for_path(&doc.source_path)
+        .map(|revision| revision.to_string())
+        .unwrap_or_else(|_| "unavailable".into());
+    out.push_str(&format!("| **Revision** | {revision} |\n"));
+    out.push_str(&format!(
+        "| **Spec baseline** | `{}` |\n",
+        registry.config.baseline
+    ));
     if let Some(ref summary) = u.summary {
         out.push_str(&format!("| **Summary** | {} |\n", summary.trim()));
     }
@@ -83,10 +83,7 @@ fn render_frontmatter_table(doc: &SpecDocument, out: &mut String) {
         } => {
             out.push_str(&format!("| **Level** | {} |\n", level.as_str()));
             if !refines.is_empty() {
-                out.push_str(&format!(
-                    "| **Refines** | {} |\n",
-                    refines.join(", ")
-                ));
+                out.push_str(&format!("| **Refines** | {} |\n", refines.join(", ")));
             }
             if !categorized_under.is_empty() {
                 out.push_str(&format!(
@@ -109,10 +106,7 @@ fn render_frontmatter_table(doc: &SpecDocument, out: &mut String) {
                 ));
             }
             if !applies_to.is_empty() {
-                out.push_str(&format!(
-                    "| **Applies to** | {} |\n",
-                    applies_to.join(", ")
-                ));
+                out.push_str(&format!("| **Applies to** | {} |\n", applies_to.join(", ")));
             }
         }
         TypeSpecificFields::Interface {
@@ -132,20 +126,14 @@ fn render_frontmatter_table(doc: &SpecDocument, out: &mut String) {
                     provided_by.join(", ")
                 ));
             }
-            out.push_str(&format!(
-                "| **Stability** | {:?} |\n",
-                stability
-            ));
+            out.push_str(&format!("| **Stability** | {:?} |\n", stability));
         }
         TypeSpecificFields::Adr {
             decision_date,
             decided_by,
         } => {
             out.push_str(&format!("| **Decision date** | {decision_date} |\n"));
-            out.push_str(&format!(
-                "| **Decided by** | {} |\n",
-                decided_by.join(", ")
-            ));
+            out.push_str(&format!("| **Decided by** | {} |\n", decided_by.join(", ")));
         }
         _ => {}
     }

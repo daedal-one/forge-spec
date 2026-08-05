@@ -1,6 +1,7 @@
 use crate::model::frontmatter::Status;
 use crate::model::reference::SpecReference;
 use crate::model::registry::SpecRegistry;
+use crate::symbol::{SymbolError, SymbolService};
 
 use super::diagnostic::Diagnostic;
 
@@ -64,7 +65,7 @@ pub fn check_references(registry: &SpecRegistry) -> Vec<Diagnostic> {
                         }
                     }
                 }
-                SpecReference::Source { .. } => {
+                SpecReference::Source(_) => {
                     // Source references are not validated against the registry
                     // (they reference files in the working tree, not specs)
                 }
@@ -73,6 +74,53 @@ pub fn check_references(registry: &SpecRegistry) -> Vec<Diagnostic> {
     }
 
     diags
+}
+
+/// R020-R023: source paths, symbols, providers, and line ranges resolve.
+pub fn check_source_references(
+    registry: &SpecRegistry,
+    require_symbols: bool,
+    allow_custom_lsp: bool,
+) -> Vec<Diagnostic> {
+    let service = SymbolService::new(&registry.specs_dir, allow_custom_lsp);
+    let mut diagnostics = Vec::new();
+    for document in &registry.documents {
+        for located in &document.references {
+            let SpecReference::Source(source) = &located.reference else {
+                continue;
+            };
+            let outcome = match &service {
+                Ok(service) => service.resolve(source),
+                Err(error) => Err(error.clone()),
+            };
+            let Err(error) = outcome else {
+                continue;
+            };
+            let message = error.to_string();
+            let diagnostic = match error {
+                SymbolError::UnsafePath(_) | SymbolError::MissingPath(_) => {
+                    Diagnostic::error("R020", message, document.source_path.clone())
+                }
+                SymbolError::NotFound(_) => {
+                    Diagnostic::error("R021", message, document.source_path.clone())
+                }
+                SymbolError::InvalidRange { .. } => {
+                    Diagnostic::error("R023", message, document.source_path.clone())
+                }
+                SymbolError::ProviderUnavailable { .. }
+                | SymbolError::UnsupportedLanguage(_)
+                | SymbolError::Protocol(_) => {
+                    if require_symbols {
+                        Diagnostic::error("R022", message, document.source_path.clone())
+                    } else {
+                        Diagnostic::warning("R022", message, document.source_path.clone())
+                    }
+                }
+            };
+            diagnostics.push(diagnostic.at_line(located.line));
+        }
+    }
+    diagnostics
 }
 
 /// R011: Summary present on referenced specs.
