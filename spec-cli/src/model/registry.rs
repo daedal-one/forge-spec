@@ -16,7 +16,7 @@ pub struct Redirect {
 }
 
 /// The central registry holding all parsed spec documents and indexes.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SpecRegistry {
     pub documents: Vec<SpecDocument>,
     /// Map from spec ID string to document index.
@@ -45,7 +45,7 @@ impl SpecRegistry {
                     && e.path()
                         .file_name()
                         .and_then(|n| n.to_str())
-                        .map_or(false, |n| n.ends_with(".spec.md"))
+                        .is_some_and(|n| n.ends_with(".spec.md"))
             })
         {
             let path = entry.path();
@@ -65,21 +65,20 @@ impl SpecRegistry {
             }
         }
 
-        // Build indexes
-        let mut id_index = BTreeMap::new();
-        let mut anchor_index = BTreeMap::new();
+        Self::from_documents_with_config(specs_dir, documents, config)
+    }
 
-        for (idx, doc) in documents.iter().enumerate() {
-            let id_str = doc.id_str();
-            id_index.insert(id_str.clone(), idx);
+    /// Build a registry from documents already loaded by an incremental index.
+    pub fn from_documents(specs_dir: &Path, documents: Vec<SpecDocument>) -> Result<Self> {
+        let config = SpecConfig::load(specs_dir)?;
+        Self::from_documents_with_config(specs_dir, documents, config)
+    }
 
-            for anchor in doc.anchors() {
-                let key = format!("{id_str}#{anchor}");
-                anchor_index.insert(key, idx);
-            }
-        }
-
-        // Load redirects
+    fn from_documents_with_config(
+        specs_dir: &Path,
+        documents: Vec<SpecDocument>,
+        config: SpecConfig,
+    ) -> Result<Self> {
         let redirects_path = specs_dir.join("_redirects.toml");
         let redirects = if redirects_path.exists() {
             parse::redirects::load_redirects(&redirects_path)
@@ -88,20 +87,27 @@ impl SpecRegistry {
             Vec::new()
         };
 
-        Ok(Self {
+        let mut registry = Self {
             documents,
-            id_index,
-            anchor_index,
+            id_index: BTreeMap::new(),
+            anchor_index: BTreeMap::new(),
             redirects,
             specs_dir: specs_dir.to_path_buf(),
             config,
-        })
+        };
+        registry.rebuild_indexes();
+        Ok(registry)
     }
 
     /// Load the registry while replacing one document with unsaved editor
     /// content. Redirects and all indexes are rebuilt consistently.
     pub fn load_with_override(specs_dir: &Path, source_path: &Path, content: &str) -> Result<Self> {
-        let mut registry = Self::load(specs_dir)?;
+        Self::load(specs_dir)?.with_override(source_path, content)
+    }
+
+    /// Clone this registry and overlay one unsaved editor document.
+    pub fn with_override(&self, source_path: &Path, content: &str) -> Result<Self> {
+        let mut registry = self.clone();
         let document = crate::parse::parse_content(source_path, content)?;
         if let Some(index) = registry
             .documents

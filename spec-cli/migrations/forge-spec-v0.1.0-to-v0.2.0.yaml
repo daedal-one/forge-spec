@@ -1,0 +1,46 @@
+from: forge-spec-v0.1.0
+to: forge-spec-v0.2.0
+summary: Move format identity to the spec tree, derive document revisions from Git, and add source-symbol tooling.
+changes:
+  - id: baseline-location
+    kind: breaking
+    area: versioning
+    description: Per-file version fields are removed. The format baseline is declared once in .specs/_config.toml.
+  - id: git-revisions
+    kind: changed
+    area: versioning
+    description: Document revisions are derived from Git and rendered as rN or rN+dirty instead of being authored in frontmatter.
+  - id: source-symbols
+    kind: added
+    area: references
+    description: Source references may target language-server symbols with spec:src:path#symbol=Type/member.
+  - id: source-lines
+    kind: changed
+    area: references
+    description: Unpinned source line references resolve against the working tree instead of committed HEAD.
+  - id: source-tooling
+    kind: added
+    area: tooling
+    description: The CLI adds symbols, resolve, and lsp commands plus source-reference lint rules R020-R023.
+  - id: baseline-lint
+    kind: added
+    area: lint
+    description: R024 checks that the spec tree declares the baseline supported by the CLI.
+instructions:
+  - id: remove-derived-version-fields
+    actor: cli
+    action: Remove version, SpecBaseline, and spec_baseline keys from every .spec.md frontmatter block.
+    verification: No spec frontmatter contains a derived version or baseline key.
+  - id: declare-tree-baseline
+    actor: cli
+    action: Create or update .specs/_config.toml with baseline = "forge-spec-v0.2.0" after all transformations succeed.
+    verification: The configuration contains exactly the target forge-spec baseline.
+  - id: review-unpinned-line-references
+    actor: agent
+    when: The project relied on unpinned spec:src line references resolving against committed HEAD.
+    action: Review those references and add pinned_at where reproducibility must not follow working-tree changes.
+    verification: Every source reference that requires commit-stable resolution has a deliberate pinned_at value.
+validation:
+  - command: spec lint
+  - command: spec lint --require-symbols
+    when: Symbol references must be verified in CI.

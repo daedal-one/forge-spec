@@ -1,0 +1,115 @@
+{
+  "name": "forge-spec",
+  "displayName": "Forge Spec",
+  "description": "Explore forge-spec requirements from root specifications to source code.",
+  "version": "0.1.0",
+  "publisher": "daedal-one",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": ["Other", "Visualization"],
+  "activationEvents": [
+    "workspaceContains:**/.specs/_config.toml",
+    "onView:forgeSpec.explorer",
+    "onCustomEditor:forgeSpec.viewer"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "forgeSpec",
+          "title": "Forge Spec",
+          "icon": "media/forge-spec.svg"
+        }
+      ]
+    },
+    "views": {
+      "forgeSpec": [
+        {
+          "id": "forgeSpec.explorer",
+          "name": "Specifications"
+        }
+      ]
+    },
+    "customEditors": [
+      {
+        "viewType": "forgeSpec.viewer",
+        "displayName": "Forge Spec Viewer",
+        "selector": [
+          {
+            "filenamePattern": "*.spec.md"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "commands": [
+      {
+        "command": "forgeSpec.refresh",
+        "title": "Forge Spec: Refresh Index",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "forgeSpec.openSpec",
+        "title": "Forge Spec: Open Specification"
+      },
+      {
+        "command": "forgeSpec.openReference",
+        "title": "Forge Spec: Open Reference"
+      },
+      {
+        "command": "forgeSpec.openText",
+        "title": "Forge Spec: Open Raw Markdown"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "forgeSpec.refresh",
+          "when": "view == forgeSpec.explorer",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Forge Spec",
+      "properties": {
+        "forgeSpec.serverPath": {
+          "type": "string",
+          "default": "spec",
+          "scope": "resource",
+          "description": "Path to a forge-spec 0.2-compatible `spec` executable."
+        },
+        "forgeSpec.cache.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "Persist the parsed workspace index in VS Code workspace storage."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf out",
+    "compile": "tsc -p .",
+    "watch": "tsc -p . --watch",
+    "test": "vitest run",
+    "check": "npm run compile && npm test",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "markdown-it": "^14.1.0",
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.95.0",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.10"
+  }
+}

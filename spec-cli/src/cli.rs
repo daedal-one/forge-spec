@@ -15,6 +15,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Initialize a forge-spec tree in the current project
+    Init,
     /// Scaffold a new spec from a per-type template
     New {
         /// Entity type (req, inv, ifc, adr, glo, topic, scn)
@@ -88,8 +90,21 @@ pub enum Commands {
     },
     /// List specs with no refinement relationships
     Orphans,
-    /// Apply _redirects.toml, rewrite refs, update superseded_by
-    Migrate,
+    /// Explain or apply composable format migrations and reference redirects
+    Migrate {
+        /// Print the composed changelog and migration instructions without changing files
+        #[arg(long)]
+        guide: bool,
+        /// Guide render target
+        #[arg(long, default_value = "human", value_enum)]
+        target: RenderTarget,
+        /// Override the detected source baseline
+        #[arg(long)]
+        from: Option<String>,
+        /// Target baseline (default: latest supported by this CLI)
+        #[arg(long)]
+        to: Option<String>,
+    },
     /// List code symbols in a repository-relative source file
     Symbols {
         /// Repository-relative source path
@@ -116,7 +131,11 @@ pub enum Commands {
         allow_custom_lsp: bool,
     },
     /// Run the forge-spec language server over standard I/O
-    Lsp,
+    Lsp {
+        /// Compatibility flag supplied by standard editor language clients
+        #[arg(long, hide = true)]
+        stdio: bool,
+    },
     /// List open tasks (pending, in-progress, blocked).
     Todo {
         /// Filter by progress state (pending|in-progress|done|blocked|deferred)

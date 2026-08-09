@@ -1,8 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::id::{EntityType, SpecId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Status {
     Draft,
     Accepted,
@@ -31,7 +31,7 @@ impl Status {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Level {
     Must,
     Should,
@@ -60,7 +60,7 @@ impl Level {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Stability {
     Experimental,
     Stable,
@@ -90,7 +90,7 @@ impl Stability {
 ///   the parent REQ for traceability but the work will not happen unless
 ///   requirements change". Use `WontDo` when a task is rendered redundant by
 ///   another design choice or a working alternative.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Progress {
     Pending,
     InProgress,
@@ -130,7 +130,7 @@ impl Progress {
 }
 
 /// Universal frontmatter present on all spec documents.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UniversalFrontmatter {
     pub id: SpecId,
     pub entity_type: EntityType,
@@ -144,7 +144,7 @@ pub struct UniversalFrontmatter {
 }
 
 /// Type-specific frontmatter fields.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypeSpecificFields {
     Requirement {
         level: Level,

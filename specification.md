@@ -525,6 +525,7 @@ Subcommands:
 
 | command                             | purpose                                                       |
 |-------------------------------------|---------------------------------------------------------------|
+| `spec init`                         | initialize an empty project spec tree and declare its baseline |
 | `spec new <type> <slug>`            | scaffold a new spec from a per-type template                  |
 | `spec lint [--require-symbols]`     | validate specs and source references                          |
 | `spec render <id-or-query> [flags]` | produce render bundles                                        |
@@ -534,14 +535,55 @@ Subcommands:
 | `spec ancestors <id>`               | list direct refined-by parents                                |
 | `spec coverage <id>`                | clause-by-clause refinement-coverage report                   |
 | `spec orphans`                      | list referenceless leaf specs                                 |
-| `spec migrate`                      | apply `_redirects.toml`, rewrite refs, update `superseded_by` |
+| `spec migrate [--from B] [--to B]` | compose and apply format migrations, then rewrite redirects  |
+| `spec migrate --guide [--target agent]` | emit the composed changelog and migration instructions  |
 | `spec symbols <path> [--query Q]`   | list language-server symbols for a source file                |
 | `spec resolve <reference>`          | resolve a spec or source reference                            |
 | `spec lsp`                          | run the forge-spec language server over stdio                 |
 
 Recommended pre-commit hook chain: `spec lint && spec history --update`.
 
-### 10.1 Language-server integration
+`spec init` creates `.specs/_config.toml` at the current baseline. It reuses an
+existing `.specs/` or `specs/` directory in the current project and is
+idempotent for an already-current tree. It must not overwrite a different
+declared baseline or add a current baseline to an unconfigured tree that
+already contains spec documents; those trees must use the migration flow.
+
+### 10.1 Baseline migration
+
+The CLI embeds an append-only catalog of migration artifacts. Each artifact
+describes exactly one adjacent baseline transition and contains:
+
+- source and target baselines;
+- stable, categorized changelog entries;
+- ordered CLI and agent instructions with explicit verification conditions;
+- final validation commands; and
+- an idempotent mechanical transformation implemented by the CLI.
+
+Migration artifacts compose in release order. Given a tree at
+`forge-spec-v0.1.0` and a CLI supporting `forge-spec-v0.4.0`, the CLI plans and
+applies `v0.1 -> v0.2 -> v0.3 -> v0.4` in one invocation rather than requiring
+a direct migration for every version pair. Historical artifacts remain shipped
+with future CLIs.
+
+`spec migrate --guide` renders the combined changelog and instructions as
+Markdown. `spec migrate --guide --target agent` renders the same plan as a
+structured XML envelope. The source baseline is normally read from
+`.specs/_config.toml`; `--from` handles an unconfigured or explicitly selected
+source, and `--to` defaults to the newest baseline supported by the CLI.
+
+Applying a migration executes each mechanical transformation and its verifier
+in order, then applies `_redirects.toml`, and writes the target baseline last.
+Every transformation must be deterministic and idempotent so an interrupted
+migration can be rerun safely. A CLI must reject unknown baselines, downgrades,
+cycles, ambiguous routes, and a `--from` value that conflicts with a declared
+project baseline.
+
+Missing `_config.toml` is inferred as v0.1 only when legacy per-file version
+fields are present. Otherwise the tree is treated as current-but-undeclared and
+`spec migrate` repairs its configuration.
+
+### 10.2 Language-server integration
 
 `spec lsp` is a Language Server Protocol server for `.spec.md` files. It
 publishes lint diagnostics for unsaved buffers and provides completion, hover,
@@ -563,7 +605,8 @@ root_markers = ["Cargo.toml"]
 ```
 
 Source paths must be repository-relative and remain within the repository after
-canonicalization. Tolaria never opts into custom commands at its IPC boundary.
+canonicalization. Editor clients never opt into custom commands at their
+service boundary.
 
 Implementation language is open. A Rust binary using `tree-sitter-markdown`
 and `pulldown-cmark` is the recommended choice based on parsing throughput

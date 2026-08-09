@@ -1,5 +1,6 @@
 use super::id::QualifiedAnchor;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTROLS};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 const SYMBOL_SEGMENT_ENCODE_SET: &AsciiSet = &CONTROLS
@@ -14,7 +15,7 @@ const SYMBOL_SEGMENT_ENCODE_SET: &AsciiSet = &CONTROLS
     .add(b'`');
 
 /// A repository-relative source target.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceTarget {
     /// The complete file.
     File,
@@ -26,7 +27,7 @@ pub enum SourceTarget {
 }
 
 /// A source file and the selector used within it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceReference {
     pub path: String,
     pub target: SourceTarget,
@@ -63,7 +64,7 @@ impl SourceReference {
 }
 
 /// A parsed `spec:` URL reference.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpecReference {
     /// Reference to another spec or a clause within it.
     Spec(QualifiedAnchor),
@@ -120,7 +121,7 @@ pub fn decode_symbol_segments(value: &str) -> Option<Vec<String>> {
 }
 
 /// A reference with its location in the source file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocatedReference {
     pub reference: SpecReference,
     pub link_text: String,

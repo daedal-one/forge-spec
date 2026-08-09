@@ -1,7 +1,9 @@
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 /// Kinds of typed fenced divs recognized in spec bodies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockKind {
     Requirement,
     Invariant,
@@ -49,7 +51,7 @@ impl fmt::Display for BlockKind {
 }
 
 /// A clause anchor like `{#c-lifetime}` inside a typed block.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClauseAnchor {
     pub id: String,
     pub text: String,
@@ -57,7 +59,7 @@ pub struct ClauseAnchor {
 }
 
 /// A typed fenced div extracted from a spec body.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypedBlock {
     pub kind: BlockKind,
     pub id: String,

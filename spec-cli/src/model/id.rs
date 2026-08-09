@@ -97,7 +97,7 @@ impl FromStr for EntityType {
 }
 
 /// A full spec document ID: `<TYPE>:<namespace>/<slug>`
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SpecId {
     pub entity_type: EntityType,
     pub namespace: String,
@@ -105,7 +105,11 @@ pub struct SpecId {
 }
 
 impl SpecId {
-    pub fn new(entity_type: EntityType, namespace: impl Into<String>, slug: impl Into<String>) -> Self {
+    pub fn new(
+        entity_type: EntityType,
+        namespace: impl Into<String>,
+        slug: impl Into<String>,
+    ) -> Self {
         Self {
             entity_type,
             namespace: namespace.into(),
@@ -121,7 +125,13 @@ impl SpecId {
 
 impl fmt::Display for SpecId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}/{}", self.entity_type.prefix(), self.namespace, self.slug)
+        write!(
+            f,
+            "{}:{}/{}",
+            self.entity_type.prefix(),
+            self.namespace,
+            self.slug
+        )
     }
 }
 
@@ -149,7 +159,7 @@ impl FromStr for SpecId {
 }
 
 /// A qualified anchor: `<spec-id>#<anchor>` or just `<spec-id>`
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct QualifiedAnchor {
     pub spec_id: SpecId,
     pub anchor: Option<String>,
@@ -161,7 +171,10 @@ impl QualifiedAnchor {
     }
 
     pub fn doc_only(spec_id: SpecId) -> Self {
-        Self { spec_id, anchor: None }
+        Self {
+            spec_id,
+            anchor: None,
+        }
     }
 
     /// Key for the anchor index: `"TYPE:ns/slug#anchor"` or `"TYPE:ns/slug"`

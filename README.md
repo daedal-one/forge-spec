@@ -19,8 +19,27 @@ mechanically validated.
 - `AGENTS.md` — compact reference for AI coding agents
 - `example/` — a working `.specs/` tree demonstrating the format
 - `spec-cli/` — Rust implementation of the `spec` CLI
+- `skills/forge-spec/` — installable agent skill for adopting the format
 
-## Building the CLI
+## Install the CLI
+
+On macOS or Linux:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://raw.githubusercontent.com/daedal-one/forge-spec/master/install.sh | sh
+```
+
+The installer requires Git, Rust, and Cargo. It makes a temporary shallow
+checkout, installs the CLI, and verifies the resulting `spec` command.
+
+From an existing checkout on any platform, including Windows, run:
+
+```sh
+cargo install --path spec-cli --locked
+```
+
+To build a local checkout instead:
 
 ```sh
 cd spec-cli
@@ -28,9 +47,23 @@ cargo build --release
 # binary at target/release/spec
 ```
 
+## Install the agent skill
+
+Install the `forge-spec` skill into the current project for Codex, Claude Code,
+Cursor, OpenCode, or another supported coding agent:
+
+```sh
+npx skills add daedal-one/forge-spec --skill forge-spec
+```
+
+Add `--global` to make the skill available across projects. The skill inspects
+the target project, initializes or migrates its spec tree, authors a focused
+starting set of specs, connects them to source, and validates the result.
+
 ## Quick start
 
 ```sh
+spec init                           # create .specs/_config.toml
 spec new REQ auth/session-expiry    # scaffold a spec
 spec lint                           # validate .specs/
 spec render REQ:auth/session-expiry --target=agent
@@ -97,6 +130,24 @@ baseline = "forge-spec-v0.2.0"
 
 Per-file revisions are derived from Git (`rN`, or `rN+dirty` for working-tree
 changes), so spec files do not carry version bookkeeping.
+
+## Migrating format versions
+
+The CLI ships an append-only catalog of adjacent format migrations. It detects
+the baseline in `.specs/_config.toml` and composes every required step, so a
+repository can move from any supported historical baseline to the current one
+in a single invocation.
+
+```sh
+spec migrate --guide                  # combined changelog and human instructions
+spec migrate --guide --target agent   # structured XML context for an agent
+spec migrate                          # apply all mechanical steps and redirects
+spec lint                             # validate the migrated tree
+```
+
+Use `--from` when an unconfigured legacy tree cannot be inferred and `--to` to
+target a specific supported baseline. The baseline is updated only after every
+format transformation and reference redirect succeeds.
 
 Source symbols use the repository's language server. Built-in providers are
 `rust-analyzer`, `typescript-language-server --stdio`,

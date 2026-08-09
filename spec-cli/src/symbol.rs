@@ -158,7 +158,7 @@ impl ServerConfig {
     }
 }
 
-/// Stateless facade used by the CLI, language server, and Tolaria IPC layer.
+/// Stateless facade used by the CLI, language server, and editor clients.
 /// A downstream server is short-lived for now; callers can safely share this
 /// value, and process pooling can be added without changing the public API.
 #[derive(Debug, Clone)]

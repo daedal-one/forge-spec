@@ -103,7 +103,7 @@ fn fish_script() -> String {
         ("ancestors", "List direct refined-by parents"),
         ("coverage", "Clause-by-clause refinement coverage"),
         ("orphans", "List specs with no refinement relationships"),
-        ("migrate", "Apply _redirects.toml"),
+        ("migrate", "Explain or apply format migrations"),
         ("symbols", "List source symbols through a language server"),
         ("resolve", "Resolve a spec: URL"),
         ("lsp", "Run the forge-spec language server"),

@@ -89,6 +89,7 @@ refines:
 ## Common commands
 
 ```sh
+spec init                                  # initialize a new .specs tree
 spec new REQ auth/foo                     # scaffold from template
 spec lint                                  # validate (use as pre-commit)
 spec render REQ:auth/foo                   # human-target Markdown bundle
@@ -101,7 +102,8 @@ spec resolve 'spec:src:src/lib.rs#symbol=Resolver/resolve'
 spec lsp                                   # forge-spec editor language server
 spec graph --refinement                    # DOT of the refinement DAG
 spec history --update                      # rebuild .specs/_history/
-spec migrate                               # apply _redirects.toml
+spec migrate --guide --target agent        # composed changelog + agent instructions
+spec migrate                               # migrate format + apply _redirects.toml
 spec orphans                               # leaf specs with no children
 ```
 

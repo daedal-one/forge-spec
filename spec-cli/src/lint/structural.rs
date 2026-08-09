@@ -1,6 +1,6 @@
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::BTreeMap;
-use once_cell::sync::Lazy;
 
 use crate::model::config::CURRENT_SPEC_BASELINE;
 use crate::model::document::SpecDocument;
@@ -68,7 +68,9 @@ pub fn check_spec_config(registry: &SpecRegistry) -> Vec<Diagnostic> {
     if !registry.config.declared {
         return vec![Diagnostic::warning(
             "R024",
-            format!("missing _config.toml; add `baseline = \"{CURRENT_SPEC_BASELINE}\"`"),
+            format!(
+                "missing _config.toml; run `spec migrate --guide --target agent`, then `spec migrate` to {CURRENT_SPEC_BASELINE}"
+            ),
             path,
         )];
     }
@@ -76,7 +78,7 @@ pub fn check_spec_config(registry: &SpecRegistry) -> Vec<Diagnostic> {
         return vec![Diagnostic::error(
             "R024",
             format!(
-                "unsupported baseline '{}'; this CLI supports {CURRENT_SPEC_BASELINE}",
+                "baseline '{}' is not the active baseline {CURRENT_SPEC_BASELINE}; run `spec migrate --guide --target agent` or upgrade the CLI",
                 registry.config.baseline
             ),
             path,

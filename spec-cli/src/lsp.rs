@@ -14,6 +14,7 @@ use crate::model::reference::SpecReference;
 use crate::model::registry::SpecRegistry;
 use crate::parse::references::parse_spec_url;
 use crate::symbol::SymbolService;
+use crate::workspace::WorkspaceIndex;
 
 #[derive(Debug, Clone)]
 struct OpenDocument {
@@ -32,6 +33,8 @@ pub fn run_stdio(specs_dir: &Path) -> Result<()> {
 }
 
 fn run_connection(connection: Connection, specs_dir: &Path) -> Result<()> {
+    let cache_path = std::env::var_os("FORGE_SPEC_CACHE_PATH").map(PathBuf::from);
+    let mut workspace = WorkspaceIndex::open(specs_dir, cache_path.as_deref())?;
     let (initialize_id, _) = connection.initialize_start()?;
     connection.initialize_finish(
         initialize_id,
@@ -58,11 +61,16 @@ fn run_connection(connection: Connection, specs_dir: &Path) -> Result<()> {
                 if connection.handle_shutdown(&request)? {
                     break;
                 }
-                let response = handle_request(request, specs_dir, &open_documents);
+                let response = handle_request(request, &mut workspace, &open_documents);
                 connection.sender.send(Message::Response(response))?;
             }
             Message::Notification(notification) => {
-                handle_notification(notification, specs_dir, &mut open_documents, &connection)?;
+                handle_notification(
+                    notification,
+                    &mut workspace,
+                    &mut open_documents,
+                    &connection,
+                )?;
             }
             Message::Response(_) => {}
         }
@@ -72,7 +80,7 @@ fn run_connection(connection: Connection, specs_dir: &Path) -> Result<()> {
 
 fn handle_notification(
     notification: Notification,
-    specs_dir: &Path,
+    workspace: &mut WorkspaceIndex,
     documents: &mut HashMap<String, OpenDocument>,
     connection: &Connection,
 ) -> Result<()> {
@@ -94,7 +102,7 @@ fn handle_notification(
                     version,
                 },
             );
-            publish_diagnostics(connection, specs_dir, &uri, documents.get(&uri).unwrap())?;
+            publish_diagnostics(connection, workspace, &uri, documents.get(&uri).unwrap())?;
         }
         "textDocument/didChange" => {
             let uri = value_string(&notification.params, "/textDocument/uri")?;
@@ -111,13 +119,15 @@ fn handle_notification(
                     .pointer("/textDocument/version")
                     .and_then(Value::as_i64)
                     .unwrap_or(document.version);
-                publish_diagnostics(connection, specs_dir, &uri, document)?;
+                publish_diagnostics(connection, workspace, &uri, document)?;
             }
         }
         "textDocument/didSave" => {
             let uri = value_string(&notification.params, "/textDocument/uri")?;
             if let Some(document) = documents.get(&uri) {
-                publish_diagnostics(connection, specs_dir, &uri, document)?;
+                workspace.refresh_paths([document.path.clone()])?;
+                publish_diagnostics(connection, workspace, &uri, document)?;
+                notify_index_changed(connection, workspace)?;
             }
         }
         "textDocument/didClose" => {
@@ -132,6 +142,21 @@ fn handle_notification(
                 }),
             )?;
         }
+        "workspace/didChangeWatchedFiles" => {
+            let paths = notification
+                .params
+                .pointer("/changes")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|change| change.get("uri").and_then(Value::as_str))
+                .filter_map(|uri| uri_to_path(uri).ok())
+                .collect::<Vec<_>>();
+            if !paths.is_empty() {
+                workspace.refresh_paths(paths)?;
+                notify_index_changed(connection, workspace)?;
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -139,15 +164,11 @@ fn handle_notification(
 
 fn publish_diagnostics(
     connection: &Connection,
-    specs_dir: &Path,
+    workspace: &WorkspaceIndex,
     uri: &str,
     document: &OpenDocument,
 ) -> Result<()> {
-    let diagnostics = match SpecRegistry::load_with_override(
-        specs_dir,
-        &document.path,
-        &document.text,
-    ) {
+    let diagnostics = match workspace.registry_with_override(&document.path, &document.text) {
         Ok(registry) => crate::lint::lint_all(&registry)
             .into_iter()
             .filter(|diagnostic| diagnostic.file == document.path)
@@ -195,16 +216,23 @@ fn publish_diagnostics(
 
 fn handle_request(
     request: Request,
-    specs_dir: &Path,
+    workspace: &mut WorkspaceIndex,
     documents: &HashMap<String, OpenDocument>,
 ) -> Response {
     let id = request.id.clone();
     let result = match request.method.as_str() {
-        "textDocument/completion" => completion(specs_dir, documents, &request.params),
-        "textDocument/hover" => hover(specs_dir, documents, &request.params),
-        "textDocument/definition" => definition(specs_dir, documents, &request.params),
-        "textDocument/references" => references(specs_dir, documents, &request.params),
-        "textDocument/documentSymbol" => document_symbols(specs_dir, documents, &request.params),
+        "textDocument/completion" => completion(workspace, documents, &request.params),
+        "textDocument/hover" => hover(workspace, documents, &request.params),
+        "textDocument/definition" => definition(workspace, documents, &request.params),
+        "textDocument/references" => references(workspace, documents, &request.params),
+        "textDocument/documentSymbol" => document_symbols(workspace, documents, &request.params),
+        "forgeSpec/explorerSnapshot" => {
+            serde_json::to_value(workspace.snapshot()).map_err(Into::into)
+        }
+        "forgeSpec/reconcile" => workspace
+            .reconcile()
+            .and_then(|_| serde_json::to_value(workspace.snapshot()).map_err(Into::into)),
+        "forgeSpec/resolveReference" => resolve_reference(workspace, &request.params),
         _ => {
             return Response::new_err(
                 id,
@@ -220,16 +248,16 @@ fn handle_request(
 }
 
 fn completion(
-    specs_dir: &Path,
+    workspace: &WorkspaceIndex,
     documents: &HashMap<String, OpenDocument>,
     params: &Value,
 ) -> Result<Value> {
     let (document, line, character) = request_document(documents, params)?;
-    let registry = registry_for(specs_dir, document)?;
+    let registry = registry_for(workspace, document)?;
     let prefix = line_prefix(&document.text, line, character).unwrap_or_default();
 
     if let Some((path, query)) = source_symbol_context(prefix) {
-        let service = SymbolService::new(specs_dir, false)?;
+        let service = SymbolService::new(workspace.specs_dir(), false)?;
         let symbols = service.list_symbols(path, Some(query))?;
         return Ok(Value::Array(
             symbols
@@ -278,7 +306,7 @@ fn completion(
 }
 
 fn hover(
-    specs_dir: &Path,
+    workspace: &WorkspaceIndex,
     documents: &HashMap<String, OpenDocument>,
     params: &Value,
 ) -> Result<Value> {
@@ -291,7 +319,7 @@ fn hover(
     };
     let markdown = match reference {
         SpecReference::Spec(target) => {
-            let registry = registry_for(specs_dir, document)?;
+            let registry = registry_for(workspace, document)?;
             let qualified = target.to_string();
             let id = target.spec_id.to_string();
             let Some(spec) = registry.get_by_id(&id) else {
@@ -306,7 +334,7 @@ fn hover(
             )
         }
         SpecReference::Source(source) => {
-            let resolved = SymbolService::new(specs_dir, false)?.resolve(&source)?;
+            let resolved = SymbolService::new(workspace.specs_dir(), false)?.resolve(&source)?;
             format!(
                 "**{}**\n\n```\n{}\n```",
                 resolved.reference, resolved.snippet
@@ -317,7 +345,7 @@ fn hover(
 }
 
 fn definition(
-    specs_dir: &Path,
+    workspace: &WorkspaceIndex,
     documents: &HashMap<String, OpenDocument>,
     params: &Value,
 ) -> Result<Value> {
@@ -330,7 +358,7 @@ fn definition(
     };
     match reference {
         SpecReference::Spec(target) => {
-            let registry = registry_for(specs_dir, document)?;
+            let registry = registry_for(workspace, document)?;
             let id = target.spec_id.to_string();
             let Some(spec) = registry.get_by_id(&id) else {
                 return Ok(Value::Null);
@@ -339,7 +367,7 @@ fn definition(
             Ok(location(&spec.source_path, target_line, 0, target_line, 0))
         }
         SpecReference::Source(source) => {
-            let service = SymbolService::new(specs_dir, false)?;
+            let service = SymbolService::new(workspace.specs_dir(), false)?;
             let path = service.resolve_safe_path(&source.path)?;
             let resolved = service.resolve(&source)?;
             let Some(range) = resolved.locations.first() else {
@@ -357,7 +385,7 @@ fn definition(
 }
 
 fn references(
-    specs_dir: &Path,
+    workspace: &WorkspaceIndex,
     documents: &HashMap<String, OpenDocument>,
     params: &Value,
 ) -> Result<Value> {
@@ -368,7 +396,7 @@ fn references(
     let Some(SpecReference::Spec(target)) = parse_spec_url(token) else {
         return Ok(json!([]));
     };
-    let registry = registry_for(specs_dir, document)?;
+    let registry = registry_for(workspace, document)?;
     let target = target.to_string();
     let mut locations = Vec::new();
     for spec in &registry.documents {
@@ -384,13 +412,13 @@ fn references(
 }
 
 fn document_symbols(
-    specs_dir: &Path,
+    workspace: &WorkspaceIndex,
     documents: &HashMap<String, OpenDocument>,
     params: &Value,
 ) -> Result<Value> {
     let uri = value_string(params, "/textDocument/uri")?;
     let document = documents.get(&uri).context("document is not open")?;
-    let registry = registry_for(specs_dir, document)?;
+    let registry = registry_for(workspace, document)?;
     let Some(spec) = registry
         .documents
         .iter()
@@ -433,8 +461,38 @@ fn document_symbols(
     }]))
 }
 
-fn registry_for(specs_dir: &Path, document: &OpenDocument) -> Result<SpecRegistry> {
-    SpecRegistry::load_with_override(specs_dir, &document.path, &document.text)
+fn resolve_reference(workspace: &WorkspaceIndex, params: &Value) -> Result<Value> {
+    let reference = value_string(params, "/reference")?;
+    let reference = parse_spec_url(&reference).context("invalid spec reference")?;
+    match reference {
+        SpecReference::Spec(target) => {
+            let id = target.spec_id.to_string();
+            let Some(spec) = workspace.registry().get_by_id(&id) else {
+                return Ok(Value::Null);
+            };
+            let target_line = definition_line(spec, target.anchor.as_deref());
+            Ok(location(&spec.source_path, target_line, 0, target_line, 0))
+        }
+        SpecReference::Source(source) => {
+            let service = SymbolService::new(workspace.specs_dir(), false)?;
+            let path = service.resolve_safe_path(&source.path)?;
+            let resolved = service.resolve(&source)?;
+            let Some(range) = resolved.locations.first() else {
+                return Ok(location(&path, 0, 0, 0, 0));
+            };
+            Ok(location(
+                &path,
+                range.start.line,
+                range.start.character,
+                range.end.line,
+                range.end.character,
+            ))
+        }
+    }
+}
+
+fn registry_for(workspace: &WorkspaceIndex, document: &OpenDocument) -> Result<SpecRegistry> {
+    workspace.registry_with_override(&document.path, &document.text)
 }
 
 fn request_document<'a>(
@@ -606,6 +664,14 @@ fn send_notification(connection: &Connection, method: &str, params: Value) -> Re
             params,
         )))?;
     Ok(())
+}
+
+fn notify_index_changed(connection: &Connection, workspace: &WorkspaceIndex) -> Result<()> {
+    send_notification(
+        connection,
+        "forgeSpec/indexChanged",
+        json!({ "generation": workspace.generation() }),
+    )
 }
 
 #[cfg(test)]

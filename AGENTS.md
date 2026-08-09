@@ -7,6 +7,7 @@ This repo uses the **Specs Format v0.2** to capture requirements, invariants, in
 - Specs live in `.specs/` as `.spec.md` files with YAML frontmatter + CommonMark body.
 - Every spec has an `id` of the form `TYPE:namespace/slug` (e.g. `REQ:auth/session-expiry`).
 - `.specs/_config.toml` declares `baseline = "forge-spec-v0.2.0"` once; per-file revisions are derived from Git.
+- Before changing an older tree, run `spec migrate --guide --target agent`; then run `spec migrate` and `spec lint`.
 - Types: `REQ` requirement, `INV` invariant, `IFC` interface, `ADR` decision record, `GLO` glossary, `TOPIC` grouping, `SCN` scenario.
 - Cross-reference with `[text](spec:REQ:auth/session-expiry)` links. Source refs: `spec:src:path/file.ts:42-78` or `spec:src:path/file.ts#symbol=Type/method`.
 - Requirements use typed blocks: `:::{requirement id="name" level="MUST"} ... :::`.
@@ -20,12 +21,14 @@ Add a `Spec-Ref:` trailer: `Spec-Ref: REQ:auth/session-expiry (implements)`. Kin
 ## CLI cheatsheet
 
 ```
+spec init                      # initialize a new .specs tree
 spec new REQ auth/foo          # scaffold
 spec lint                      # validate all rules (pre-commit)
 spec render REQ:auth/foo --target=agent   # XML envelope for LLM context
 spec children REQ:auth/foo     # who refines this?
 spec coverage REQ:auth/foo     # clause-by-clause coverage
 spec graph --refinement        # DOT output of refinement DAG
+spec migrate --guide --target agent   # composed migration context
 ```
 
 ## Specification reference
@@ -42,5 +45,5 @@ Full spec: `specification.md`. Key sections by line number:
 | Git trailers & history | 348-402 | 7 |
 | Render targets (human & agent XML) | 403-479 | 8 |
 | Lint rules R001-R024 | 480-518 | 9 |
-| CLI and LSP integration | 519-573 | 10-10.1 |
-| Worked file template | 574-626 | 11 |
+| CLI initialization, migration, and LSP integration | 519-615 | 10-10.2 |
+| Worked file template | 616-668 | 11 |

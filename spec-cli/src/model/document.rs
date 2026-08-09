@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use super::block::TypedBlock;
 use super::frontmatter::{TypeSpecificFields, UniversalFrontmatter};
 use super::reference::LocatedReference;
 
 /// A fully parsed spec document.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpecDocument {
     pub universal: UniversalFrontmatter,
     pub type_fields: TypeSpecificFields,

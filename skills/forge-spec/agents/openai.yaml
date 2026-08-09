@@ -1,0 +1,4 @@
+interface:
+  display_name: "Forge Spec"
+  short_description: "Adopt and maintain versioned project specs"
+  default_prompt: "Use $forge-spec to introduce forge-spec in this project and capture its important contracts."

@@ -59,6 +59,29 @@ fn find_specs_dir(explicit: Option<PathBuf>) -> Result<PathBuf> {
     )
 }
 
+fn find_init_specs_dir(explicit: Option<PathBuf>) -> Result<PathBuf> {
+    find_init_specs_dir_at(explicit, &std::env::current_dir()?)
+}
+
+fn find_init_specs_dir_at(explicit: Option<PathBuf>, cwd: &Path) -> Result<PathBuf> {
+    if let Some(dir) = explicit {
+        return Ok(dir);
+    }
+
+    let dot_specs = cwd.join(".specs");
+    let plain_specs = cwd.join("specs");
+    match (dot_specs.is_dir(), plain_specs.is_dir()) {
+        (true, true) if !same_location(&dot_specs, &plain_specs) => anyhow::bail!(
+            "both {} and {} exist; use --specs-dir to choose one",
+            dot_specs.display(),
+            plain_specs.display()
+        ),
+        (true, _) => Ok(dot_specs),
+        (_, true) => Ok(plain_specs),
+        _ => Ok(dot_specs),
+    }
+}
+
 fn same_location(a: &Path, b: &Path) -> bool {
     match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
         (Ok(ca), Ok(cb)) => ca == cb,
@@ -92,6 +115,10 @@ fn main() {
 
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Commands::Init => {
+            let specs_dir = find_init_specs_dir(cli.specs_dir)?;
+            commands::init::run(&specs_dir)
+        }
         Commands::New { entity_type, slug } => {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             commands::new::run(&specs_dir, &entity_type, &slug)
@@ -154,9 +181,14 @@ fn run(cli: Cli) -> Result<()> {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             commands::query::orphans(&specs_dir)
         }
-        Commands::Migrate => {
+        Commands::Migrate {
+            guide,
+            target,
+            from,
+            to,
+        } => {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
-            commands::migrate::run(&specs_dir)
+            commands::migrate::run(&specs_dir, guide, &target, from.as_deref(), to.as_deref())
         }
         Commands::Symbols {
             path,
@@ -175,7 +207,7 @@ fn run(cli: Cli) -> Result<()> {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             commands::source::resolve(&specs_dir, &reference, json, allow_custom_lsp)
         }
-        Commands::Lsp => {
+        Commands::Lsp { stdio: _ } => {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             spec_cli::lsp::run_stdio(&specs_dir)
         }
@@ -229,5 +261,55 @@ fn run(cli: Cli) -> Result<()> {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             commands::complete::run(&specs_dir, &what)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_defaults_to_dot_specs() {
+        let temp = tempfile::tempdir().unwrap();
+
+        assert_eq!(
+            find_init_specs_dir_at(None, temp.path()).unwrap(),
+            temp.path().join(".specs")
+        );
+    }
+
+    #[test]
+    fn init_reuses_plain_specs_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("specs")).unwrap();
+
+        assert_eq!(
+            find_init_specs_dir_at(None, temp.path()).unwrap(),
+            temp.path().join("specs")
+        );
+    }
+
+    #[test]
+    fn init_requires_a_choice_when_both_directories_exist() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join(".specs")).unwrap();
+        std::fs::create_dir(temp.path().join("specs")).unwrap();
+
+        let error = find_init_specs_dir_at(None, temp.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("use --specs-dir to choose one"));
+    }
+
+    #[test]
+    fn init_honors_explicit_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let explicit = temp.path().join("custom");
+
+        assert_eq!(
+            find_init_specs_dir_at(Some(explicit.clone()), temp.path()).unwrap(),
+            explicit
+        );
     }
 }
