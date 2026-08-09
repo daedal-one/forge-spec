@@ -7,8 +7,10 @@ use walkdir::WalkDir;
 
 use crate::model::config::{SpecConfig, CURRENT_SPEC_BASELINE};
 use crate::parse::frontmatter::split_frontmatter;
+use crate::project::{ensure_project_document, existing_project, write_project_config};
 
 pub const LEGACY_SPEC_BASELINE: &str = "forge-spec-v0.1.0";
+pub const V0_2_SPEC_BASELINE: &str = "forge-spec-v0.2.0";
 
 type ApplyMigration = fn(&Path) -> Result<MigrationStepReport>;
 type VerifyMigration = fn(&Path) -> Result<()>;
@@ -19,11 +21,18 @@ struct MigrationDefinition {
     verify: VerifyMigration,
 }
 
-const MIGRATIONS: &[MigrationDefinition] = &[MigrationDefinition {
-    guide: include_str!("../../migrations/forge-spec-v0.1.0-to-v0.2.0.yaml"),
-    apply: apply_v0_1_to_v0_2,
-    verify: verify_v0_1_to_v0_2,
-}];
+const MIGRATIONS: &[MigrationDefinition] = &[
+    MigrationDefinition {
+        guide: include_str!("../../migrations/forge-spec-v0.1.0-to-v0.2.0.yaml"),
+        apply: apply_v0_1_to_v0_2,
+        verify: verify_v0_1_to_v0_2,
+    },
+    MigrationDefinition {
+        guide: include_str!("../../migrations/forge-spec-v0.2.0-to-v0.3.0.yaml"),
+        apply: apply_v0_2_to_v0_3,
+        verify: verify_v0_2_to_v0_3,
+    },
+];
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct MigrationGuide {
@@ -314,8 +323,10 @@ pub fn detect_baseline(specs_dir: &Path) -> Result<DetectedBaseline> {
 
     let baseline = if has_legacy_version_fields(specs_dir)? {
         LEGACY_SPEC_BASELINE
-    } else {
+    } else if existing_project(specs_dir)?.is_some() {
         CURRENT_SPEC_BASELINE
+    } else {
+        V0_2_SPEC_BASELINE
     };
     Ok(DetectedBaseline {
         baseline: baseline.to_string(),
@@ -516,6 +527,34 @@ fn verify_v0_1_to_v0_2(specs_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+fn apply_v0_2_to_v0_3(specs_dir: &Path) -> Result<MigrationStepReport> {
+    let project = ensure_project_document(specs_dir, None)?;
+    if !specs_dir.join("_config.toml").exists() {
+        // Preserve the source baseline if migration is interrupted. The
+        // command writes the target baseline only after every verifier passes.
+        write_baseline(specs_dir, V0_2_SPEC_BASELINE)?;
+    }
+    write_project_config(specs_dir, &project.id)?;
+    Ok(MigrationStepReport {
+        documents_changed: usize::from(project.created),
+    })
+}
+
+fn verify_v0_2_to_v0_3(specs_dir: &Path) -> Result<()> {
+    let config = SpecConfig::load(specs_dir)?;
+    let configured = config
+        .project
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("project is not configured after migration"))?;
+    let Some((document_id, _)) = existing_project(specs_dir)? else {
+        bail!("PROJECT document is missing after migration");
+    };
+    if configured != document_id {
+        bail!("configured project '{configured}' does not match migrated document '{document_id}'");
+    }
+    Ok(())
+}
+
 fn remove_derived_frontmatter(content: &str) -> Result<String> {
     let close = content
         .strip_prefix("---")
@@ -620,15 +659,21 @@ mod tests {
     }
 
     #[test]
-    fn detects_legacy_and_current_trees_without_config() {
+    fn detects_unconfigured_baselines_from_document_shape() {
         let legacy = tempfile::tempdir().unwrap();
         write_spec(legacy.path(), "version: 0.1.0\n");
         let detected = detect_baseline(legacy.path()).unwrap();
         assert_eq!(detected.baseline, LEGACY_SPEC_BASELINE);
         assert!(!detected.declared);
 
+        let v0_2 = tempfile::tempdir().unwrap();
+        write_spec(v0_2.path(), "");
+        let detected = detect_baseline(v0_2.path()).unwrap();
+        assert_eq!(detected.baseline, V0_2_SPEC_BASELINE);
+        assert!(!detected.declared);
+
         let current = tempfile::tempdir().unwrap();
-        write_spec(current.path(), "");
+        ensure_project_document(current.path(), Some("PROJECT:current")).unwrap();
         let detected = detect_baseline(current.path()).unwrap();
         assert_eq!(detected.baseline, CURRENT_SPEC_BASELINE);
         assert!(!detected.declared);
@@ -646,6 +691,8 @@ mod tests {
         let second = plan.apply(temp.path()).unwrap();
         assert_eq!(first[0].documents_changed, 1);
         assert_eq!(second[0].documents_changed, 0);
+        assert_eq!(first[1].documents_changed, 1);
+        assert_eq!(second[1].documents_changed, 0);
         let content = std::fs::read_to_string(path).unwrap();
         assert!(!content.contains("version:"));
         assert!(!content.contains("SpecBaseline:"));
@@ -662,7 +709,30 @@ mod tests {
         .unwrap();
         assert!(write_baseline(temp.path(), CURRENT_SPEC_BASELINE).unwrap());
         let content = std::fs::read_to_string(path).unwrap();
-        assert!(content.contains("baseline = \"forge-spec-v0.2.0\""));
+        assert!(content.contains(&format!("baseline = \"{CURRENT_SPEC_BASELINE}\"")));
         assert!(content.contains("owner = \"team\""));
+    }
+
+    #[test]
+    fn project_migration_never_overwrites_a_colliding_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let collision = temp.path().join("_project.spec.md");
+        let original = "not a project document\n";
+        std::fs::write(&collision, original).unwrap();
+        std::fs::write(
+            temp.path().join("_config.toml"),
+            format!("baseline = \"{V0_2_SPEC_BASELINE}\"\n"),
+        )
+        .unwrap();
+
+        let plan = MigrationPlan::build(V0_2_SPEC_BASELINE, CURRENT_SPEC_BASELINE).unwrap();
+        let error = plan.apply(temp.path()).unwrap_err();
+
+        assert!(format!("{error:#}").contains("already exists"));
+        assert_eq!(std::fs::read_to_string(collision).unwrap(), original);
+        assert_eq!(
+            SpecConfig::load(temp.path()).unwrap().baseline,
+            V0_2_SPEC_BASELINE
+        );
     }
 }

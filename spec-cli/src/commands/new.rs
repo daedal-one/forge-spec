@@ -1,16 +1,24 @@
 use std::path::Path;
 
-use crate::model::config::CURRENT_SPEC_BASELINE;
+use crate::model::config::{SpecConfig, CURRENT_SPEC_BASELINE};
 use anyhow::{bail, Result};
 
 pub fn run(specs_dir: &Path, entity_type: &str, slug: &str) -> Result<()> {
-    std::fs::create_dir_all(specs_dir)?;
     let config_path = specs_dir.join("_config.toml");
     if !config_path.exists() {
-        std::fs::write(
-            &config_path,
-            format!("baseline = \"{CURRENT_SPEC_BASELINE}\"\n"),
-        )?;
+        super::init::run(specs_dir)?;
+    } else {
+        let config = SpecConfig::load(specs_dir)?;
+        if config.baseline != CURRENT_SPEC_BASELINE {
+            bail!(
+                "{} declares baseline '{}'; run `spec migrate --guide --target agent`, then `spec migrate`",
+                config_path.display(),
+                config.baseline
+            );
+        }
+        if config.project.is_none() || crate::project::existing_project(specs_dir)?.is_none() {
+            super::init::run(specs_dir)?;
+        }
     }
     let id = format!("{entity_type}:{slug}");
     let type_name = match entity_type {

@@ -1,7 +1,7 @@
 {
   "name": "forge-spec",
   "displayName": "Forge Spec",
-  "description": "Explore forge-spec requirements from root specifications to source code.",
+  "description": "Explore forge-spec from project intent through specifications to source code.",
   "version": "0.1.0",
   "publisher": "daedal-one",
   "license": "MIT",
@@ -80,7 +80,7 @@
           "type": "string",
           "default": "spec",
           "scope": "resource",
-          "description": "Path to a forge-spec 0.2-compatible `spec` executable."
+          "description": "Path to a forge-spec 0.3-compatible `spec` executable."
         },
         "forgeSpec.cache.enabled": {
           "type": "boolean",

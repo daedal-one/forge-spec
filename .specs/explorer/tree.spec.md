@@ -4,8 +4,8 @@ type: requirement
 status: accepted
 level: MUST
 summary: >
-  A native editor tree presents the refinement DAG from root specifications to
-  clauses, refining specs, tasks, and explicit code relationships.
+  A native editor tree presents the configured project root and its hierarchy
+  through clauses, refining specs, tasks, and explicit code relationships.
 owners: [carlo]
 refines:
   - REQ:explorer/workbench#tree
@@ -18,8 +18,9 @@ related: [REQ:explorer/spec-viewer]
 # Root-to-code tree
 
 :::{requirement id="roots" level="MUST"}
-The tree MUST place TOPIC documents and specifications without a refinement or
-categorization parent at its root.
+The tree MUST place the configured PROJECT document at its sole root and MUST
+place specifications without a resolvable refinement or categorization parent
+as implicit children of that project.
 :::
 
 :::{requirement id="dag" level="MUST"}

@@ -1,4 +1,4 @@
-# Specs Format v0.2 — Specification
+# Specs Format v0.3 — Specification
 
 A file format and toolchain for project specifications, designed to be:
 
@@ -18,8 +18,8 @@ forced into a closed grammar.
 
 In scope:
 
-- Capturing requirements, invariants, interface contracts, architecture
-  decisions, and glossary entries as first-class entities.
+- Capturing project intent, requirements, invariants, interface contracts,
+  architecture decisions, tasks, and glossary entries as first-class entities.
 - Cross-referencing entities both within the spec graph and to source code.
 - Tracking refinement (a high-level requirement decomposed into
   sub-requirements) at clause-level granularity.
@@ -34,7 +34,7 @@ Not in scope:
 - Replacing API documentation generators (OpenAPI etc.). Specs reference
   contracts but do not enumerate every field.
 - Symbolic / formal verification. The format is designed to be amenable to
-it later; v0.2 produces no proofs.
+  it later; v0.3 produces no proofs.
 
 ---
 
@@ -47,6 +47,7 @@ mirrors ID namespaces by convention but is not enforced by the toolchain.
 
 ```
 .specs/
+├── _project.spec.md
 ├── auth/
 │   ├── session-management.spec.md
 │   ├── session-expiry.spec.md
@@ -59,6 +60,7 @@ mirrors ID namespaces by convention but is not enforced by the toolchain.
 ├── _adrs/
 │   ├── 0001-storage-engine.spec.md
 │   └── 0002-auth-provider.spec.md
+├── _config.toml
 ├── _redirects.toml
 └── _history/                 # generated; tracked
     └── REQ_auth_session-expiry.json
@@ -69,17 +71,25 @@ editors and lets ordinary `*.md` tooling skip them when desired.
 
 ### 2.2 Identity
 
-Each document declares an `id` in frontmatter of the form:
+The singleton project document declares an ID of the form:
+
+```
+PROJECT:<slug>
+```
+
+Every other document declares an `id` in frontmatter of the form:
 
 ```
 <TYPE>:<namespace>/<slug>
 ```
 
-`TYPE` is one of the registered prefixes (§4). `namespace/slug` is kebab-case;
-the slash is a naming convention, not a structural pointer to a parent.
+`TYPE` is one of the registered prefixes (§4). Slugs and `namespace/slug` are
+kebab-case. The slash in non-project IDs is a naming convention, not a
+structural pointer to a parent.
 
 Examples:
 
+- `PROJECT:forge-spec`
 - `REQ:auth/session-expiry`
 - `INV:auth/no-stale-tokens`
 - `ADR:auth/0002-auth-provider`
@@ -135,11 +145,12 @@ Tools render it as `rN`; a changed or untracked working-tree file is rendered
 as `rN+dirty`. This value is informational and may change when history is
 rebased.
 
-The format baseline is declared once for the entire spec tree in
-`.specs/_config.toml`:
+The format baseline and singleton project root are declared once for the entire
+spec tree in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.2.0"
+baseline = "forge-spec-v0.3.0"
+project = "PROJECT:forge-spec"
 ```
 
 ### 3.2 Body
@@ -190,8 +201,9 @@ anchors. All addressable IDs come from typed blocks and clause anchors.
 
 Registered prefixes for full document IDs:
 
-| prefix  | name                            | purpose                                                |
-|---------|---------------------------------|--------------------------------------------------------|
+| prefix    | name                            | purpose                                              |
+|-----------|---------------------------------|------------------------------------------------------|
+| `PROJECT` | project                         | purpose, scope, non-goals, and governing principles |
 | `REQ`   | requirement                     | a property the system exhibits                         |
 | `INV`   | invariant                       | a property that always holds                           |
 | `IFC`   | interface                       | API surface contract                                   |
@@ -199,6 +211,7 @@ Registered prefixes for full document IDs:
 | `GLO`   | glossary                        | term definitions                                       |
 | `TOPIC` | topic                           | informal grouping for navigation                       |
 | `SCN`   | scenario                        | example walkthrough                                    |
+| `TASK`  | task                            | traceable implementation work                          |
 
 Plus one virtual prefix used only inside reference URLs:
 
@@ -206,6 +219,14 @@ Plus one virtual prefix used only inside reference URLs:
   resolved against `pinned_at` if set, else HEAD.
 
 ### 4.1 Type-specific frontmatter
+
+**`PROJECT` (project)**
+
+Exactly one `PROJECT:` document exists per spec tree and its ID is selected by
+`.specs/_config.toml`. It has no fields beyond universal frontmatter. Its body
+describes the project's purpose, scope, non-goals, and durable principles.
+Project prose provides context; it is not itself a requirement and is never a
+target of `refines`.
 
 **`REQ` (requirement)**
 
@@ -252,6 +273,18 @@ addressed via anchors:
 
 No fields beyond universal. Body contains prose describing the topic.
 
+**`TASK` (task)**
+
+| field               | description                                                   |
+|---------------------|---------------------------------------------------------------|
+| `progress`          | `pending`, `in-progress`, `done`, `blocked`, `deferred`, or `wontdo` |
+| `refines`           | list of `REQ:.../#clause` references                          |
+| `aspects`           | strings; required when `refines` has more than one parent     |
+| `assignee`          | optional responsible identifier                               |
+| `eta`               | optional planned completion date                              |
+| `blocked_by`        | list of upstream `TASK:` IDs                                  |
+| `categorized_under` | list of `TOPIC:` IDs                                           |
+
 ---
 
 ## 5. References
@@ -296,15 +329,33 @@ The linter:
 
 ## 6. Hierarchy and refinement
 
-Three independent relations, each declared in frontmatter on the child:
+Three semantic relations remain independent. Project containment is
+synthesized by the toolchain; the others are declared in frontmatter on the
+child:
 
 | relation             | shape  | semantics                                                              |
 |----------------------|--------|------------------------------------------------------------------------|
+| project containment  | rooted | otherwise-unplaced documents belong to the configured project          |
 | `refines`            | DAG    | child's content jointly contributes to parent's satisfaction           |
 | `categorized_under`  | tree   | navigational grouping only; no claim about content                     |
 | `applies_to`         | n-to-n | child concerns these components / interfaces                           |
 
-### 6.1 Refinement
+### 6.1 Project containment
+
+The configured `PROJECT:` document is the sole root of the navigational
+hierarchy. A non-project document with no resolvable `refines` or
+`categorized_under` parent receives an implicit containment edge to PROJECT.
+Documents with explicit parents reach PROJECT transitively through those
+parents. No containment field is repeated in document frontmatter.
+
+Containment means “belongs to this project.” It does not mean that an ADR,
+interface, glossary, scenario, topic, or requirement satisfies the project
+description. The refinement and categorization graphs therefore remain
+available independently. `spec graph` renders the synthesized project
+hierarchy by default; `--refinement` and `--categorization` render only their
+respective semantic relations.
+
+### 6.2 Refinement
 
 A child requirement names which clauses of which parents it refines:
 
@@ -327,21 +378,21 @@ Rules enforced by the linter:
 - `aspects:` is required when `refines` lists more than one parent, or
   more than one clause across different parents. (`R012`)
 
-### 6.2 Categorization
+### 6.3 Categorization
 
 Soft. A document can declare `categorized_under: [TOPIC:auth, TOPIC:security]`.
 Topics themselves are documents (`TOPIC:` prefix). The categorization graph
 is independent of the refinement graph.
 
-### 6.3 Composition (deferred)
+### 6.4 Composition (deferred)
 
-v0.2 does not have a first-class `COMP:` type. If a requirement describes a
+v0.3 does not have a first-class `COMP:` type. If a requirement describes a
 component, set `kind: component` on the requirement. Future v2 work may
 introduce `COMP:` and migrate `kind: component` requirements to it.
 
 `applies_to:` exists today as a free-form list of component identifiers
 (e.g., `[auth-service, gateway]`). It is not validated against any registry
-in v0.2.
+in v0.3.
 
 ---
 
@@ -422,6 +473,11 @@ suitable for further rendering by Pandoc, Typst, or any static-site tool.
 Same content, structured envelope optimized for LLM consumption:
 
 ```xml
+<specs project="PROJECT:example">
+<project id="PROJECT:example" type="project" status="accepted">
+  <summary>Example project intent.</summary>
+  <body>...</body>
+</project>
 <spec id="REQ:auth/session-expiry" type="requirement" status="accepted" level="MUST">
   <summary>Session tokens expire after bounded wall-clock and idle intervals.</summary>
   <body>
@@ -440,6 +496,7 @@ Same content, structured envelope optimized for LLM consumption:
     ...
   </referenced-source>
 </spec>
+</specs>
 ```
 
 Tag boundaries are stable; current-generation LLMs key on them more
@@ -450,12 +507,14 @@ Markdown source; only the surrounding envelope is structural.
 
 ```sh
 spec render REQ:auth/session-expiry --depth=2 --target=agent
+spec render project                    --target=agent
 spec render --query 'REQ:auth/*'    --target=human
 spec render --since=HEAD~10         --target=agent
 ```
 
 Default scope:
 
+- The configured project description, in full and first.
 - The focal spec(s), in full.
 - Direct ancestors in full.
 - Direct descendants summarized (frontmatter `summary:` + ID only).
@@ -485,7 +544,7 @@ config in `.specs/_lint.toml`.
 
 | code        | severity | check                                                                |
 |-------------|----------|----------------------------------------------------------------------|
-| `R001`      | error    | ID matches `<TYPE>:namespace/slug` pattern                           |
+| `R001`      | error    | ID matches `PROJECT:<slug>` or `<TYPE>:namespace/slug`               |
 | `R002`      | error    | Type matches ID prefix                                               |
 | `R003`      | error    | All universal frontmatter fields present                             |
 | `R004`      | error    | Type-specific frontmatter fields present                             |
@@ -509,6 +568,7 @@ config in `.specs/_lint.toml`.
 | `R022`      | warning  | Source language server unavailable (`--require-symbols` makes it an error) |
 | `R023`      | error    | Source line range is valid                                           |
 | `R024`      | warning  | `.specs/_config.toml` declares the supported format baseline        |
+| `R025`      | error    | Exactly one configured PROJECT with a summary exists and is not refined |
 | `R-redir`   | info     | Reference traverses a redirect                                       |
 
 `status: draft` downgrades `R002`–`R012` from error to warning. This is the
@@ -525,11 +585,11 @@ Subcommands:
 
 | command                             | purpose                                                       |
 |-------------------------------------|---------------------------------------------------------------|
-| `spec init`                         | initialize an empty project spec tree and declare its baseline |
+| `spec init`                         | initialize config and a draft singleton PROJECT document       |
 | `spec new <type> <slug>`            | scaffold a new spec from a per-type template                  |
 | `spec lint [--require-symbols]`     | validate specs and source references                          |
 | `spec render <id-or-query> [flags]` | produce render bundles                                        |
-| `spec graph [--refinement\|--categorization]` | emit DOT for the requested graph                    |
+| `spec graph [--hierarchy\|--refinement\|--categorization]` | emit DOT for the requested graph       |
 | `spec history [--update\|<id>]`     | regenerate or query commit history per spec                   |
 | `spec children <id>`                | list direct refining children                                 |
 | `spec ancestors <id>`               | list direct refined-by parents                                |
@@ -543,8 +603,9 @@ Subcommands:
 
 Recommended pre-commit hook chain: `spec lint && spec history --update`.
 
-`spec init` creates `.specs/_config.toml` at the current baseline. It reuses an
-existing `.specs/` or `specs/` directory in the current project and is
+`spec init` creates `.specs/_config.toml` at the current baseline and a draft
+`.specs/_project.spec.md`, deriving its `PROJECT:<slug>` ID from the repository
+directory. It reuses an existing `.specs/` or `specs/` directory and is
 idempotent for an already-current tree. It must not overwrite a different
 declared baseline or add a current baseline to an unconfigured tree that
 already contains spec documents; those trees must use the migration flow.
@@ -579,9 +640,14 @@ migration can be rerun safely. A CLI must reject unknown baselines, downgrades,
 cycles, ambiguous routes, and a `--from` value that conflicts with a declared
 project baseline.
 
-Missing `_config.toml` is inferred as v0.1 only when legacy per-file version
-fields are present. Otherwise the tree is treated as current-but-undeclared and
-`spec migrate` repairs its configuration.
+Missing `_config.toml` is inferred as v0.1 when legacy per-file version fields
+are present, as v0.3 when a valid PROJECT document exists, and as v0.2
+otherwise. The v0.2→v0.3 migration creates a deterministic draft project
+document, reuses existing owners, and records the source baseline before the
+target baseline so interrupted migrations remain recoverable. Migration
+guidance requires the generated purpose, scope, non-goals, principles,
+summary, and owners to be reviewed; mechanical migration does not invent
+project intent.
 
 ### 10.2 Language-server integration
 
@@ -667,7 +733,7 @@ Symbolic enforcement point:
 
 ---
 
-## 12. Open issues for v0.2 → v1
+## 12. Open issues for v0.3 → v1
 
 - **Component first-class type (`COMP:`).** Deferred. Trigger condition for
   introducing it: more than ~5 requirements with `kind: component` and a
@@ -679,11 +745,11 @@ Symbolic enforcement point:
 
 - **Cross-repo references.** Useful for monorepo / multi-repo organizations.
   The `spec:` URL scheme is extensible (`spec:other-repo/REQ:foo`); resolution
-  needs a registry. Out of scope for v0.2.
+  needs a registry. Out of scope for v0.3.
 
 - **Symbolic clause-coverage proof.** The current coverage check is
   syntactic: every clause has at least one refining child. A semantic check
-  — children jointly imply parent — is not feasible in v0.2.
+  — children jointly imply parent — is not feasible in v0.3.
 
 - **Concurrent edits and merge.** No special handling. Standard git merge
   with line-level conflict resolution. Frontmatter is small and conflict-

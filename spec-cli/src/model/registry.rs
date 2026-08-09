@@ -6,6 +6,7 @@ use walkdir::WalkDir;
 
 use super::config::SpecConfig;
 use super::document::SpecDocument;
+use super::id::EntityType;
 use crate::parse;
 
 /// A redirect entry from `_redirects.toml`.
@@ -137,6 +138,20 @@ impl SpecRegistry {
     /// Look up a document by its ID string.
     pub fn get_by_id(&self, id: &str) -> Option<&SpecDocument> {
         self.id_index.get(id).map(|&idx| &self.documents[idx])
+    }
+
+    /// Return the singleton project document selected by `_config.toml`.
+    pub fn project(&self) -> Option<&SpecDocument> {
+        self.config
+            .project
+            .as_deref()
+            .and_then(|id| self.get_by_id(id))
+            .filter(|document| document.universal.entity_type == EntityType::Project)
+    }
+
+    /// Return the configured project ID when it resolves to a PROJECT document.
+    pub fn project_id(&self) -> Option<String> {
+        self.project().map(SpecDocument::id_str)
     }
 
     /// Look up a document by a qualified anchor string (`"ID#anchor"`).

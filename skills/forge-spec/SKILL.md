@@ -23,7 +23,7 @@ Use the `spec` CLI to create a small, coherent specification tree that is readab
 
 3. Inspect the project before writing specifications. Read its agent instructions, primary documentation, public interfaces, important implementation paths, and relevant tests. Treat current behavior as evidence, not automatically as intended behavior.
 4. Locate `.specs/` or `specs/`:
-   - If neither exists, run `spec init` from the project root.
+   - If neither exists, run `spec init` from the project root, then replace the generated PROJECT placeholders with evidence-backed purpose, scope, non-goals, principles, summary, and owners.
    - If both exist, stop and resolve the intended tree or pass `--specs-dir` explicitly.
    - If a tree lacks `_config.toml` or declares an older baseline, run `spec migrate --guide --target agent`, review the composed guidance, run `spec migrate`, then run `spec lint`. Never stamp the current baseline onto legacy content manually.
 
@@ -31,6 +31,7 @@ Use the `spec` CLI to create a small, coherent specification tree that is readab
 
 Create only specifications that improve an engineering decision or verification boundary. Avoid mirroring every source file.
 
+- Maintain exactly one configured `PROJECT:<slug>` description as the tree's purpose and boundary. Everything else implicitly belongs beneath it, but containment does not mean refinement.
 - Use `TOPIC` to group a durable domain.
 - Use `REQ` for observable behavior and constraints.
 - Use `INV` for a property that must always hold.
@@ -67,7 +68,7 @@ spec lint
 spec render <relevant-id> --target=agent --include-source
 ```
 
-Use `spec coverage <parent-id>` for clause refinement, `spec graph --refinement` for a non-trivial hierarchy, and `spec lint --require-symbols` when language-server availability is an enforced requirement. Fix errors before handoff and state warnings or unavailable source-symbol validation plainly.
+Use `spec coverage <parent-id>` for clause refinement, `spec graph` for the project hierarchy, `spec graph --refinement` for refinement alone, and `spec lint --require-symbols` when language-server availability is an enforced requirement. Fix errors before handoff and state warnings or unavailable source-symbol validation plainly.
 
 When implementing from specs, render the relevant scope before editing code and update specs when the agreed contract changes. For commits touching a spec or its implementation, add a trailer such as:
 

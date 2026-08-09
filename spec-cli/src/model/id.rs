@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum EntityType {
+    #[serde(alias = "project")]
+    Project,
     #[serde(alias = "requirement")]
     Req,
     #[serde(alias = "invariant")]
@@ -27,6 +29,7 @@ pub enum EntityType {
 impl EntityType {
     pub fn prefix(&self) -> &'static str {
         match self {
+            Self::Project => "PROJECT",
             Self::Req => "REQ",
             Self::Inv => "INV",
             Self::Ifc => "IFC",
@@ -40,6 +43,7 @@ impl EntityType {
 
     pub fn type_name(&self) -> &'static str {
         match self {
+            Self::Project => "project",
             Self::Req => "requirement",
             Self::Inv => "invariant",
             Self::Ifc => "interface",
@@ -53,6 +57,7 @@ impl EntityType {
 
     pub fn from_prefix(s: &str) -> Option<Self> {
         match s {
+            "PROJECT" => Some(Self::Project),
             "REQ" => Some(Self::Req),
             "INV" => Some(Self::Inv),
             "IFC" => Some(Self::Ifc),
@@ -67,6 +72,7 @@ impl EntityType {
 
     pub fn from_type_name(s: &str) -> Option<Self> {
         match s {
+            "project" => Some(Self::Project),
             "requirement" => Some(Self::Req),
             "invariant" => Some(Self::Inv),
             "interface" => Some(Self::Ifc),
@@ -96,7 +102,8 @@ impl FromStr for EntityType {
     }
 }
 
-/// A full spec document ID: `<TYPE>:<namespace>/<slug>`
+/// A full spec document ID: `PROJECT:<slug>` for the singleton project root,
+/// or `<TYPE>:<namespace>/<slug>` for every other document.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SpecId {
     pub entity_type: EntityType,
@@ -119,19 +126,27 @@ impl SpecId {
 
     /// Returns `namespace/slug`
     pub fn path(&self) -> String {
-        format!("{}/{}", self.namespace, self.slug)
+        if self.entity_type == EntityType::Project {
+            self.slug.clone()
+        } else {
+            format!("{}/{}", self.namespace, self.slug)
+        }
     }
 }
 
 impl fmt::Display for SpecId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}:{}/{}",
-            self.entity_type.prefix(),
-            self.namespace,
-            self.slug
-        )
+        if self.entity_type == EntityType::Project {
+            write!(f, "PROJECT:{}", self.slug)
+        } else {
+            write!(
+                f,
+                "{}:{}/{}",
+                self.entity_type.prefix(),
+                self.namespace,
+                self.slug
+            )
+        }
     }
 }
 
@@ -144,6 +159,16 @@ impl FromStr for SpecId {
             .ok_or_else(|| format!("invalid spec ID (missing ':'): {s}"))?;
         let entity_type = EntityType::from_prefix(prefix)
             .ok_or_else(|| format!("unknown entity type prefix: {prefix}"))?;
+        if entity_type == EntityType::Project {
+            if rest.is_empty() || rest.contains('/') {
+                return Err(format!("invalid PROJECT ID (expected PROJECT:<slug>): {s}"));
+            }
+            return Ok(Self {
+                entity_type,
+                namespace: String::new(),
+                slug: rest.to_string(),
+            });
+        }
         let (namespace, slug) = rest
             .split_once('/')
             .ok_or_else(|| format!("invalid spec ID (missing '/'): {s}"))?;
@@ -232,6 +257,7 @@ mod tests {
     #[test]
     fn parse_all_prefixes() {
         for (s, expected) in [
+            ("PROJECT:demo", EntityType::Project),
             ("REQ:a/b", EntityType::Req),
             ("INV:a/b", EntityType::Inv),
             ("IFC:a/b", EntityType::Ifc),
@@ -239,6 +265,7 @@ mod tests {
             ("GLO:a/b", EntityType::Glo),
             ("TOPIC:a/b", EntityType::Topic),
             ("SCN:a/b", EntityType::Scn),
+            ("TASK:a/b", EntityType::Task),
         ] {
             let id: SpecId = s.parse().unwrap();
             assert_eq!(id.entity_type, expected);
@@ -263,7 +290,18 @@ mod tests {
         assert!("BAD:auth/foo".parse::<SpecId>().is_err());
         assert!("REQ:".parse::<SpecId>().is_err());
         assert!("REQ:auth".parse::<SpecId>().is_err());
+        assert!("PROJECT:demo/root".parse::<SpecId>().is_err());
         assert!("noprefix".parse::<SpecId>().is_err());
+    }
+
+    #[test]
+    fn project_id_roundtrips_without_a_namespace() {
+        let id: SpecId = "PROJECT:forge-spec".parse().unwrap();
+        assert_eq!(id.entity_type, EntityType::Project);
+        assert!(id.namespace.is_empty());
+        assert_eq!(id.slug, "forge-spec");
+        assert_eq!(id.path(), "forge-spec");
+        assert_eq!(id.to_string(), "PROJECT:forge-spec");
     }
 
     #[test]

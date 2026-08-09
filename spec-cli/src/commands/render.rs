@@ -144,6 +144,13 @@ fn escape_xml(value: &str) -> String {
 }
 
 fn resolve_query(registry: &SpecRegistry, query: &str) -> Result<Vec<String>> {
+    if query == "project" {
+        return registry
+            .project_id()
+            .map(|id| vec![id])
+            .ok_or_else(|| anyhow::anyhow!("configured project not found"));
+    }
+
     // Exact ID match
     if registry.get_by_id(query).is_some() {
         return Ok(vec![query.to_string()]);

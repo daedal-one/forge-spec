@@ -38,6 +38,22 @@ pub fn ancestors(registry: &SpecRegistry, id: &str) -> Vec<String> {
     result
 }
 
+/// List direct children in the synthesized project hierarchy.
+pub fn hierarchy_children(registry: &SpecRegistry, id: &str) -> Vec<String> {
+    let graph = SpecGraph::hierarchy(registry);
+    let Some(&node) = graph.node_map.get(id) else {
+        return vec![];
+    };
+    let mut result = graph
+        .graph
+        .neighbors_directed(node, Direction::Incoming)
+        .map(|index| graph.graph[index].clone())
+        .collect::<Vec<_>>();
+    result.sort();
+    result.dedup();
+    result
+}
+
 /// List specs with no refinement relationships (no parents and no children).
 pub fn orphans(registry: &SpecRegistry) -> Vec<String> {
     let graph = SpecGraph::refinement(registry);

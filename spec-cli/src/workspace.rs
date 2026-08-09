@@ -15,7 +15,7 @@ use crate::model::frontmatter::TypeSpecificFields;
 use crate::model::reference::{SourceTarget, SpecReference};
 use crate::model::registry::SpecRegistry;
 
-const CACHE_SCHEMA_VERSION: &str = "2";
+const CACHE_SCHEMA_VERSION: &str = "3";
 
 #[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +30,7 @@ pub struct IndexStats {
 pub struct ExplorerSnapshot {
     pub generation: u64,
     pub stats: IndexStats,
+    pub project_id: Option<String>,
     pub documents: Vec<ExplorerDocument>,
 }
 
@@ -153,12 +154,13 @@ impl WorkspaceIndex {
             .registry
             .documents
             .iter()
-            .map(explorer_document)
+            .map(|document| explorer_document(document, &self.registry))
             .collect::<Vec<_>>();
         documents.sort_by(|left, right| left.id.cmp(&right.id));
         ExplorerSnapshot {
             generation: self.generation,
             stats: self.stats,
+            project_id: self.registry.project_id(),
             documents,
         }
     }
@@ -255,12 +257,13 @@ impl WorkspaceIndex {
              );",
         )?;
 
-        let baseline = crate::model::config::SpecConfig::load(&self.specs_dir)?.baseline;
+        let config = crate::model::config::SpecConfig::load(&self.specs_dir)?;
         let repository_identity = self.repository_root.to_string_lossy().into_owned();
         let expected = [
             ("schema", CACHE_SCHEMA_VERSION),
             ("parser", env!("CARGO_PKG_VERSION")),
-            ("baseline", baseline.as_str()),
+            ("baseline", config.baseline.as_str()),
+            ("project", config.project.as_deref().unwrap_or("")),
             ("repository", repository_identity.as_str()),
         ];
         let invalid = expected.iter().any(|(key, value)| {
@@ -391,7 +394,7 @@ impl WorkspaceIndex {
     }
 }
 
-fn explorer_document(document: &SpecDocument) -> ExplorerDocument {
+fn explorer_document(document: &SpecDocument, registry: &SpecRegistry) -> ExplorerDocument {
     let (progress, level, refines, categorized_under) = match &document.type_fields {
         TypeSpecificFields::Requirement {
             level,
@@ -401,8 +404,8 @@ fn explorer_document(document: &SpecDocument) -> ExplorerDocument {
         } => (
             None,
             Some(level.as_str().to_string()),
-            refines.clone(),
-            categorized_under.clone(),
+            canonical_hierarchy_refs(registry, refines),
+            canonical_hierarchy_refs(registry, categorized_under),
         ),
         TypeSpecificFields::Task {
             progress,
@@ -412,8 +415,8 @@ fn explorer_document(document: &SpecDocument) -> ExplorerDocument {
         } => (
             Some(progress.as_str().to_string()),
             None,
-            refines.clone(),
-            categorized_under.clone(),
+            canonical_hierarchy_refs(registry, refines),
+            canonical_hierarchy_refs(registry, categorized_under),
         ),
         _ => (None, None, Vec::new(), Vec::new()),
     };
@@ -481,6 +484,13 @@ fn explorer_document(document: &SpecDocument) -> ExplorerDocument {
         blocks,
         sources,
     }
+}
+
+fn canonical_hierarchy_refs(registry: &SpecRegistry, references: &[String]) -> Vec<String> {
+    references
+        .iter()
+        .map(|reference| registry.resolve_redirect(reference).0)
+        .collect()
 }
 
 fn first_nonempty_line(body: &str) -> String {
@@ -640,5 +650,25 @@ mod tests {
             index.snapshot().documents[0].summary.as_deref(),
             Some("First changed and longer")
         );
+    }
+
+    #[test]
+    fn snapshot_exposes_the_configured_project_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let specs = temp.path().join(".specs");
+        std::fs::create_dir_all(&specs).unwrap();
+        std::fs::write(
+            specs.join("_config.toml"),
+            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            specs.join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [dev]\n---\n\n# Demo\n",
+        )
+        .unwrap();
+
+        let index = WorkspaceIndex::open(&specs, None).unwrap();
+        assert_eq!(index.snapshot().project_id.as_deref(), Some("PROJECT:demo"));
     }
 }

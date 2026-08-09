@@ -3,9 +3,10 @@ use std::path::Path;
 use anyhow::{bail, Result};
 
 use crate::cli::RenderTarget;
-use crate::migration::{detect_baseline, write_baseline, MigrationPlan};
-use crate::model::config::CURRENT_SPEC_BASELINE;
+use crate::migration::{detect_baseline, write_baseline, MigrationPlan, V0_2_SPEC_BASELINE};
+use crate::model::config::{SpecConfig, CURRENT_SPEC_BASELINE};
 use crate::model::registry::SpecRegistry;
+use crate::project::{ensure_project_document, write_project_config};
 
 pub fn run(
     specs_dir: &Path,
@@ -45,11 +46,34 @@ pub fn run(
         );
     }
 
-    let redirect_rewrites = apply_redirects(specs_dir)?;
-    let config_updated = write_baseline(specs_dir, destination)?;
+    // A tree with an existing PROJECT document but no config is already v0.3
+    // by shape, so its migration plan is empty. Finalize the singleton and its
+    // config here as well as in the adjacent v0.2 -> v0.3 transformation.
+    let (project_documents_changed, project_config_updated) =
+        if destination == CURRENT_SPEC_BASELINE {
+            if !specs_dir.join("_config.toml").exists() {
+                // Keep an interruption recoverable before the target baseline
+                // is written last.
+                write_baseline(specs_dir, V0_2_SPEC_BASELINE)?;
+            }
+            let config = SpecConfig::load(specs_dir)?;
+            let project = ensure_project_document(specs_dir, config.project.as_deref())?;
+            let config_updated = write_project_config(specs_dir, &project.id)?;
+            (usize::from(project.created), config_updated)
+        } else {
+            (0, false)
+        };
 
-    let format_updates: usize = reports.iter().map(|report| report.documents_changed).sum();
-    if format_updates == 0 && redirect_rewrites == 0 && !config_updated {
+    let redirect_rewrites = apply_redirects(specs_dir)?;
+    let baseline_updated = write_baseline(specs_dir, destination)?;
+
+    let format_updates: usize = reports
+        .iter()
+        .map(|report| report.documents_changed)
+        .sum::<usize>()
+        + project_documents_changed;
+    if format_updates == 0 && redirect_rewrites == 0 && !project_config_updated && !baseline_updated
+    {
         println!("No format or redirect migrations needed.");
     } else {
         println!(
@@ -135,10 +159,10 @@ mod tests {
 
         run(temp.path(), false, &RenderTarget::Human, None, None).unwrap();
         assert!(!std::fs::read_to_string(&path).unwrap().contains("version:"));
-        assert_eq!(
-            std::fs::read_to_string(temp.path().join("_config.toml")).unwrap(),
-            format!("baseline = \"{CURRENT_SPEC_BASELINE}\"\n")
-        );
+        let config = std::fs::read_to_string(temp.path().join("_config.toml")).unwrap();
+        assert!(config.contains(&format!("baseline = \"{CURRENT_SPEC_BASELINE}\"")));
+        assert!(config.contains("project = \"PROJECT:"));
+        assert!(temp.path().join("_project.spec.md").is_file());
 
         run(temp.path(), false, &RenderTarget::Human, None, None).unwrap();
     }
@@ -163,5 +187,21 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains("does not match the declared baseline"));
+    }
+
+    #[test]
+    fn configures_an_unconfigured_current_project_tree() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: draft\nsummary: Demo.\nowners: []\n---\n\n# Demo\n",
+        )
+        .unwrap();
+
+        run(temp.path(), false, &RenderTarget::Human, None, None).unwrap();
+
+        let config = std::fs::read_to_string(temp.path().join("_config.toml")).unwrap();
+        assert!(config.contains(&format!("baseline = \"{CURRENT_SPEC_BASELINE}\"")));
+        assert!(config.contains("project = \"PROJECT:demo\""));
     }
 }

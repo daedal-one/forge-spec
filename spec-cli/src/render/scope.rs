@@ -42,13 +42,22 @@ pub fn compute_scope(
     let mut entries = Vec::new();
     let mut included: BTreeSet<String> = BTreeSet::new();
 
+    // Project intent is ambient context, independent of refinement depth and
+    // ancestor flags. Include it once before the focal specification.
+    if let Some(project_id) = registry.project_id() {
+        entries.push(ScopedEntry {
+            id: project_id.clone(),
+            detail: DetailLevel::Full,
+        });
+        included.insert(project_id);
+    }
+
     // The focal spec in full
-    if registry.get_by_id(focal_id).is_some() {
+    if registry.get_by_id(focal_id).is_some() && included.insert(focal_id.to_string()) {
         entries.push(ScopedEntry {
             id: focal_id.to_string(),
             detail: DetailLevel::Full,
         });
-        included.insert(focal_id.to_string());
     }
 
     // Direct ancestors
@@ -107,4 +116,52 @@ fn collect_glossary_refs(registry: &SpecRegistry, included_ids: &BTreeSet<String
     }
 
     glossary_ids.into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_context_is_first_even_when_ancestors_are_disabled() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("_config.toml"),
+            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [dev]\n---\n\n# Demo\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("req.spec.md"),
+            "---\nid: REQ:demo/work\ntype: requirement\nstatus: accepted\nsummary: Work.\nowners: [dev]\nlevel: MUST\nrefines: []\n---\n\n# Work\n",
+        )
+        .unwrap();
+        let registry = SpecRegistry::load(temp.path()).unwrap();
+
+        let scope = compute_scope(
+            &registry,
+            "REQ:demo/work",
+            DetailLevel::None,
+            DetailLevel::None,
+            None,
+        );
+        assert_eq!(scope.len(), 2);
+        assert_eq!(scope[0].id, "PROJECT:demo");
+        assert_eq!(scope[0].detail, DetailLevel::Full);
+        assert_eq!(scope[1].id, "REQ:demo/work");
+
+        let project_scope = compute_scope(
+            &registry,
+            "PROJECT:demo",
+            DetailLevel::None,
+            DetailLevel::None,
+            None,
+        );
+        assert_eq!(project_scope.len(), 1);
+        assert_eq!(project_scope[0].id, "PROJECT:demo");
+    }
 }

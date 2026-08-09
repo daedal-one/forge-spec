@@ -19,7 +19,7 @@ pub enum Commands {
     Init,
     /// Scaffold a new spec from a per-type template
     New {
-        /// Entity type (req, inv, ifc, adr, glo, topic, scn)
+        /// Entity type (req, inv, ifc, adr, glo, topic, scn, task)
         #[arg(value_parser = parse_entity_type)]
         entity_type: String,
         /// Namespace/slug (e.g. auth/session-expiry)
@@ -38,7 +38,7 @@ pub enum Commands {
     },
     /// Produce render bundles
     Render {
-        /// Spec ID or query
+        /// Spec ID, `project`, or query
         id_or_query: String,
         /// Render target
         #[arg(long, default_value = "human", value_enum)]
@@ -58,6 +58,9 @@ pub enum Commands {
     },
     /// Emit DOT for the requested graph
     Graph {
+        /// Show the synthesized project hierarchy
+        #[arg(long)]
+        hierarchy: bool,
         /// Show the refinement graph
         #[arg(long)]
         refinement: bool,
@@ -182,7 +185,7 @@ pub enum Commands {
         /// TASK spec id
         id: String,
     },
-    /// Print a tree of all specs grouped by namespace, then type.
+    /// Print the project root and specs grouped by namespace, then type.
     Tree {
         /// Restrict to a single namespace prefix (e.g. `auth`)
         #[arg(long)]
@@ -194,7 +197,7 @@ pub enum Commands {
         #[arg(long)]
         no_color: bool,
     },
-    /// Interactive TUI to browse specs (ratatui).
+    /// Interactive TUI to browse specs from the project root.
     Explore,
     /// Print a shell completion script (bash, zsh, fish).
     Completions {
@@ -227,6 +230,7 @@ pub enum RenderTarget {
 pub fn parse_entity_type(s: &str) -> Result<String, String> {
     let normalized = s.to_lowercase();
     match normalized.as_str() {
+        "project" => Err("PROJECT is the singleton root created by `spec init`".to_string()),
         "req" | "requirement" => Ok("REQ".to_string()),
         "inv" | "invariant" => Ok("INV".to_string()),
         "ifc" | "interface" => Ok("IFC".to_string()),

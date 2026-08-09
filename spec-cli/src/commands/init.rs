@@ -4,6 +4,7 @@ use anyhow::{bail, Context, Result};
 use walkdir::WalkDir;
 
 use crate::model::config::{SpecConfig, CURRENT_SPEC_BASELINE};
+use crate::project::{ensure_project_document, write_project_config};
 
 pub fn run(specs_dir: &Path) -> Result<()> {
     if specs_dir.exists() && !specs_dir.is_dir() {
@@ -21,11 +22,17 @@ pub fn run(specs_dir: &Path) -> Result<()> {
             );
         }
 
-        println!(
-            "Already initialized {} at {}",
-            specs_dir.display(),
-            CURRENT_SPEC_BASELINE
-        );
+        let project = ensure_project_document(specs_dir, config.project.as_deref())?;
+        let config_changed = write_project_config(specs_dir, &project.id)?;
+        if project.created || config_changed {
+            println!("Completed project root {}", project.id);
+        } else {
+            println!(
+                "Already initialized {} at {}",
+                specs_dir.display(),
+                CURRENT_SPEC_BASELINE
+            );
+        }
         return Ok(());
     }
 
@@ -38,13 +45,19 @@ pub fn run(specs_dir: &Path) -> Result<()> {
 
     std::fs::create_dir_all(specs_dir)
         .with_context(|| format!("creating {}", specs_dir.display()))?;
+    let project = ensure_project_document(specs_dir, None)?;
     std::fs::write(
         &config_path,
-        format!("baseline = \"{CURRENT_SPEC_BASELINE}\"\n"),
+        format!(
+            "baseline = \"{CURRENT_SPEC_BASELINE}\"\nproject = {:?}\n",
+            project.id
+        ),
     )
     .with_context(|| format!("writing {}", config_path.display()))?;
 
     println!("Initialized {}", specs_dir.display());
+    println!("Project root: {}", project.id);
+    println!("Next: edit {}", project.path.display());
     println!("Next: spec new REQ <namespace/slug> && spec lint");
     Ok(())
 }
@@ -79,8 +92,12 @@ mod tests {
 
         assert_eq!(
             std::fs::read_to_string(specs_dir.join("_config.toml")).unwrap(),
-            format!("baseline = \"{CURRENT_SPEC_BASELINE}\"\n")
+            format!(
+                "baseline = \"{CURRENT_SPEC_BASELINE}\"\nproject = {:?}\n",
+                SpecConfig::load(&specs_dir).unwrap().project.unwrap()
+            )
         );
+        assert!(specs_dir.join("_project.spec.md").is_file());
     }
 
     #[test]
@@ -93,7 +110,10 @@ mod tests {
 
         assert_eq!(
             std::fs::read_to_string(specs_dir.join("_config.toml")).unwrap(),
-            format!("baseline = \"{CURRENT_SPEC_BASELINE}\"\n")
+            format!(
+                "baseline = \"{CURRENT_SPEC_BASELINE}\"\nproject = {:?}\n",
+                SpecConfig::load(&specs_dir).unwrap().project.unwrap()
+            )
         );
     }
 

@@ -1,12 +1,17 @@
 # Specs Format — Hands-on Memo
 
-One-page reference for Specs Format v0.2. For the full spec, see `specification.md`.
+One-page reference for Specs Format v0.3. For the full spec, see `specification.md`.
 
 ## File layout
 
 ```
 .specs/<namespace>/<slug>.spec.md
+.specs/_project.spec.md
 ```
+
+Every tree has one `PROJECT:<slug>` document. All other documents implicitly
+descend from it when they do not have an explicit refinement or categorization
+parent.
 
 ## Minimal frontmatter
 
@@ -26,7 +31,8 @@ aspects: [duration]     # required if refines has multiple parents
 Declare the format once in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.2.0"
+baseline = "forge-spec-v0.3.0"
+project = "PROJECT:example"
 ```
 
 File revisions are computed from Git history and shown as `rN` or `rN+dirty`.
@@ -75,8 +81,9 @@ refines:
 
 ## Entity prefixes
 
-| prefix  | meaning                          |
-|---------|----------------------------------|
+| prefix    | meaning                          |
+|-----------|----------------------------------|
+| `PROJECT` | singleton project description    |
 | `REQ`   | requirement                      |
 | `INV`   | invariant                        |
 | `IFC`   | interface contract               |
@@ -84,6 +91,7 @@ refines:
 | `GLO`   | glossary                         |
 | `TOPIC` | informal grouping                |
 | `SCN`   | scenario                         |
+| `TASK`  | implementation task              |
 | `src:`  | (virtual) source-tree reference  |
 
 ## Common commands
@@ -94,13 +102,15 @@ spec new REQ auth/foo                     # scaffold from template
 spec lint                                  # validate (use as pre-commit)
 spec render REQ:auth/foo                   # human-target Markdown bundle
 spec render REQ:auth/foo --target=agent    # structured envelope for LLMs
+spec render project --target=agent         # configured project description
 spec children REQ:auth/foo                 # direct refining children
 spec ancestors REQ:auth/foo                # direct refined-by parents
 spec coverage REQ:auth/foo                 # clause-by-clause coverage
 spec symbols src/lib.rs --query Resolver   # discover source symbols via LSP
 spec resolve 'spec:src:src/lib.rs#symbol=Resolver/resolve'
 spec lsp                                   # forge-spec editor language server
-spec graph --refinement                    # DOT of the refinement DAG
+spec graph                                 # DOT of the project hierarchy
+spec graph --refinement                    # DOT of the refinement DAG only
 spec history --update                      # rebuild .specs/_history/
 spec migrate --guide --target agent        # composed changelog + agent instructions
 spec migrate                               # migrate format + apply _redirects.toml
@@ -128,6 +138,7 @@ referencing an `ADR:` in the same commit.
 | `R010`   | clause has no refining child (warning)                             | add a child or remove the clause          |
 | `R011`   | referenced spec missing `summary:`                                 | add `summary:` to the target              |
 | `R012`   | multi-parent refinement without `aspects:`                         | add `aspects:` justifying the split       |
+| `R025`   | missing, duplicate, misconfigured, or refined PROJECT root          | repair config/containment, then review `_project.spec.md` |
 | `R-redir`| reference traversed a redirect (info)                              | rewrite to the canonical target           |
 
 ## Status escape hatch

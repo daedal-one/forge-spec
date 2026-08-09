@@ -4,9 +4,9 @@ type: requirement
 status: accepted
 level: MUST
 summary: >
-  Forge-spec users can navigate from root specifications to code, inspect and
-  edit individual specifications, and receive incremental updates without a
-  full repository reload.
+  Forge-spec users can navigate from project intent to specifications and code,
+  inspect and edit individual documents, and receive incremental updates
+  without a full repository reload.
 owners: [carlo]
 refines: []
 categorized_under: [TOPIC:explorer/forge-spec]
@@ -24,9 +24,9 @@ introducing a general-purpose notes vault or a second interpretation of the
 format.
 
 :::{requirement id="tree" level="MUST"}
-The workbench MUST expose a collapsible tree that begins with root
-specifications and can be expanded through clauses, refining specifications,
-tasks, and related code.
+The workbench MUST expose a collapsible tree that begins with the configured
+PROJECT description and can be expanded through clauses, refining
+specifications, tasks, and related code.
 :::
 
 :::{requirement id="viewer" level="MUST"}
@@ -55,4 +55,3 @@ The forge-spec Rust implementation MUST remain authoritative for parsing,
 validation, graph construction, and source-reference resolution so editor
 clients do not drift from the CLI.
 :::
-

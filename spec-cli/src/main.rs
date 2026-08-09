@@ -155,11 +155,12 @@ fn run(cli: Cli) -> Result<()> {
             )
         }
         Commands::Graph {
+            hierarchy,
             refinement,
             categorization,
         } => {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
-            commands::graph::run(&specs_dir, refinement, categorization)
+            commands::graph::run(&specs_dir, hierarchy, refinement, categorization)
         }
         Commands::History { update, id } => {
             let specs_dir = find_specs_dir(cli.specs_dir)?;

@@ -14,7 +14,7 @@ mechanically validated.
 
 ## What's here
 
-- `specification.md` — the full Specs Format v0.2 specification
+- `specification.md` — the full Specs Format v0.3 specification
 - `format-memo.md` — one-page cheat sheet
 - `AGENTS.md` — compact reference for AI coding agents
 - `example/` — a working `.specs/` tree demonstrating the format
@@ -63,17 +63,19 @@ starting set of specs, connects them to source, and validates the result.
 ## Quick start
 
 ```sh
-spec init                           # create .specs/_config.toml
+spec init                           # create config + draft PROJECT root
 spec new REQ auth/session-expiry    # scaffold a spec
 spec lint                           # validate .specs/
 spec render REQ:auth/session-expiry --target=agent
+spec render project --target=agent    # project intent alone
 spec render REQ:auth/session-expiry --target=agent --include-source
 spec symbols src/session.rs --query expire
 spec resolve 'spec:src:src/session.rs#symbol=SessionStore/expire'
 spec lsp                            # editor LSP over stdio
 spec children REQ:auth/session-management
 spec coverage REQ:auth/session-management
-spec graph --refinement             # DOT output
+spec graph                          # project-rooted hierarchy as DOT
+spec graph --refinement             # refinement DAG only
 spec tree                           # printed tree of all specs
 spec explore                        # interactive TUI browser
 ```
@@ -102,6 +104,26 @@ spec completions zsh > ~/.zsh/completions/_spec
 
 Specs are `.spec.md` files under `.specs/` with YAML frontmatter and a CommonMark body containing typed blocks:
 
+Every tree begins with one configured project description:
+
+```markdown
+---
+id: PROJECT:example
+type: project
+status: accepted
+summary: The purpose and boundaries shared by every descendant specification.
+owners: [carlo]
+---
+
+# Example
+
+## Purpose
+...
+```
+
+Requirements and the other entity types then capture increasingly specific
+parts of that intent:
+
 ```markdown
 ---
 id: REQ:auth/session-expiry
@@ -125,8 +147,15 @@ line with `spec:src:path/file.ts:42-78` or by language-server symbol with
 The spec tree declares its format once in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.2.0"
+baseline = "forge-spec-v0.3.0"
+project = "PROJECT:example"
 ```
+
+The project document is ambient context: documents without an explicit
+refinement or categorization parent are attached to it implicitly. This does
+not turn project prose into a requirement or change the meaning of `refines`.
+Human and agent renders include the project description before the requested
+specification.
 
 Per-file revisions are derived from Git (`rN`, or `rN+dirty` for working-tree
 changes), so spec files do not carry version bookkeeping.

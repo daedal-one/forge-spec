@@ -11,10 +11,13 @@ use crate::model::registry::SpecRegistry;
 use super::diagnostic::Diagnostic;
 
 static ID_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(REQ|INV|IFC|ADR|GLO|TOPIC|SCN|TASK):[a-z0-9][\w-]*/[a-z0-9][\w-]*$").unwrap()
+    Regex::new(
+        r"^(PROJECT:[a-z0-9][\w-]*|(REQ|INV|IFC|ADR|GLO|TOPIC|SCN|TASK):[a-z0-9][\w-]*/[a-z0-9][\w-]*)$",
+    )
+    .unwrap()
 });
 
-/// R001: ID matches `<TYPE>:namespace/slug` pattern.
+/// R001: ID matches `PROJECT:<slug>` or `<TYPE>:namespace/slug`.
 pub fn check_id_pattern(doc: &SpecDocument) -> Vec<Diagnostic> {
     let id_str = doc.id_str();
     if !ID_PATTERN.is_match(&id_str) {
@@ -87,11 +90,110 @@ pub fn check_spec_config(registry: &SpecRegistry) -> Vec<Diagnostic> {
     Vec::new()
 }
 
+/// R025: the tree has exactly one configured PROJECT document.
+pub fn check_project_root(registry: &SpecRegistry) -> Vec<Diagnostic> {
+    if registry.config.baseline != CURRENT_SPEC_BASELINE {
+        return Vec::new();
+    }
+
+    let config_path = registry.specs_dir.join("_config.toml");
+    let project_documents = registry
+        .documents
+        .iter()
+        .filter(|document| document.universal.entity_type == EntityType::Project)
+        .collect::<Vec<_>>();
+
+    if project_documents.len() != 1 {
+        return vec![Diagnostic::error(
+            "R025",
+            format!(
+                "expected exactly one PROJECT document, found {}; run `spec init` for a new tree or `spec migrate` for an older tree",
+                project_documents.len()
+            ),
+            config_path,
+        )];
+    }
+
+    let Some(configured_id) = registry.config.project.as_deref() else {
+        return vec![Diagnostic::error(
+            "R025",
+            "missing `project` in _config.toml",
+            config_path,
+        )];
+    };
+
+    let Ok(project_id) = configured_id.parse::<crate::model::id::SpecId>() else {
+        return vec![Diagnostic::error(
+            "R025",
+            format!("invalid configured project ID: '{configured_id}'"),
+            config_path,
+        )];
+    };
+    if project_id.entity_type != EntityType::Project {
+        return vec![Diagnostic::error(
+            "R025",
+            format!("configured project must use a PROJECT: ID, found '{configured_id}'"),
+            config_path,
+        )];
+    }
+
+    let document = project_documents[0];
+    if document.id_str() != configured_id {
+        return vec![Diagnostic::error(
+            "R025",
+            format!(
+                "configured project '{configured_id}' does not select the tree's PROJECT document '{}'",
+                document.id_str()
+            ),
+            config_path,
+        )];
+    }
+
+    if document
+        .universal
+        .summary
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default()
+        .is_empty()
+    {
+        return vec![Diagnostic::error(
+            "R025",
+            "PROJECT document requires a non-empty summary",
+            document.source_path.clone(),
+        )];
+    }
+
+    let mut diagnostics = Vec::new();
+    for child in &registry.documents {
+        let refines: &[String] = match &child.type_fields {
+            TypeSpecificFields::Requirement { refines, .. }
+            | TypeSpecificFields::Task { refines, .. } => refines,
+            _ => continue,
+        };
+        if refines.iter().any(|target| {
+            target.split_once('#').map(|(id, _)| id).unwrap_or(target) == configured_id
+        }) {
+            diagnostics.push(Diagnostic::error(
+                "R025",
+                format!(
+                    "'{}' refines PROJECT; project containment is implicit and has no satisfaction semantics",
+                    child.id_str()
+                ),
+                child.source_path.clone(),
+            ));
+        }
+    }
+
+    diagnostics
+}
+
 /// R004: Type-specific frontmatter fields present.
 pub fn check_type_specific_fields(doc: &SpecDocument) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
     match (&doc.universal.entity_type, &doc.type_fields) {
+        (EntityType::Project, TypeSpecificFields::Project) => {}
         (EntityType::Req, TypeSpecificFields::Requirement { level: _, .. }) => {
             // level has a default; nothing strictly required beyond universal
         }
@@ -230,4 +332,65 @@ pub fn check_unique_anchors(doc: &SpecDocument) -> Vec<Diagnostic> {
     }
 
     diags
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validates_the_configured_singleton_project() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("_config.toml"),
+            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [dev]\n---\n\n# Demo\n",
+        )
+        .unwrap();
+        let registry = SpecRegistry::load(temp.path()).unwrap();
+        assert!(check_project_root(&registry).is_empty());
+    }
+
+    #[test]
+    fn rejects_a_missing_project_document() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("_config.toml"),
+            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n",
+        )
+        .unwrap();
+        let registry = SpecRegistry::load(temp.path()).unwrap();
+        let diagnostics = check_project_root(&registry);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "R025");
+        assert!(diagnostics[0].message.contains("exactly one PROJECT"));
+    }
+
+    #[test]
+    fn rejects_refinement_of_project_context() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("_config.toml"),
+            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [dev]\n---\n\n# Demo\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("child.spec.md"),
+            "---\nid: REQ:demo/child\ntype: requirement\nstatus: accepted\nsummary: Child.\nowners: [dev]\nlevel: MUST\nrefines: [PROJECT:demo]\n---\n\n# Child\n",
+        )
+        .unwrap();
+        let registry = SpecRegistry::load(temp.path()).unwrap();
+        let diagnostics = check_project_root(&registry);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("refines PROJECT"));
+    }
 }

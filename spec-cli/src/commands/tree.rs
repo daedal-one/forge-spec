@@ -5,6 +5,7 @@ use anyhow::Result;
 use colored::Colorize;
 
 use crate::model::frontmatter::{Progress, Status, TypeSpecificFields};
+use crate::model::id::EntityType;
 use crate::model::registry::SpecRegistry;
 
 pub fn run(
@@ -22,6 +23,9 @@ pub fn run(
     // Group: namespace -> type-prefix -> Vec<&SpecDocument>
     let mut grouped: BTreeMap<String, BTreeMap<&'static str, Vec<usize>>> = BTreeMap::new();
     for (idx, doc) in registry.documents.iter().enumerate() {
+        if doc.universal.entity_type == EntityType::Project {
+            continue;
+        }
         let ns = &doc.universal.id.namespace;
         let ty = doc.universal.entity_type.prefix();
         if let Some(want_ns) = namespace_filter {
@@ -42,19 +46,44 @@ pub fn run(
             .push(idx);
     }
 
-    if grouped.is_empty() {
+    let project = registry.project();
+    if grouped.is_empty() && project.is_none() {
         println!("(no specs match the filter)");
         return Ok(());
     }
 
-    println!("{}", ".specs/".bold());
+    let tree_prefix = if let Some(project) = project {
+        let status = status_label(project.universal.status);
+        let summary = project
+            .universal
+            .summary
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default();
+        let summary = first_line(summary);
+        println!(
+            "{} {} {} {}",
+            colorize_type("PROJECT"),
+            project.universal.id.slug,
+            status,
+            summary.dimmed()
+        );
+        if grouped.is_empty() {
+            return Ok(());
+        }
+        println!("└── {}", ".specs/".bold());
+        "    "
+    } else {
+        println!("{}", ".specs/".bold());
+        ""
+    };
     let namespaces: Vec<&String> = grouped.keys().collect();
     let ns_count = namespaces.len();
     for (ns_i, ns) in namespaces.iter().enumerate() {
         let last_ns = ns_i + 1 == ns_count;
         let ns_branch = if last_ns { "└──" } else { "├──" };
-        println!("{} {}/", ns_branch, ns.cyan().bold());
-        let ns_prefix = if last_ns { "    " } else { "│   " };
+        println!("{tree_prefix}{} {}/", ns_branch, ns.cyan().bold());
+        let ns_prefix = format!("{tree_prefix}{}", if last_ns { "    " } else { "│   " });
 
         let types = grouped.get(*ns).unwrap();
         // Flatten all entries for this namespace into a single ordered list
@@ -126,6 +155,7 @@ fn first_line(s: &str) -> String {
 
 fn colorize_type(ty: &str) -> colored::ColoredString {
     match ty {
+        "PROJECT" => ty.bright_cyan().bold(),
         "REQ" => ty.green().bold(),
         "INV" => ty.magenta().bold(),
         "IFC" => ty.blue().bold(),

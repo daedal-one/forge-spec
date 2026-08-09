@@ -3,17 +3,19 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-pub const CURRENT_SPEC_BASELINE: &str = "forge-spec-v0.2.0";
+pub const CURRENT_SPEC_BASELINE: &str = "forge-spec-v0.3.0";
 
 #[derive(Debug, Clone)]
 pub struct SpecConfig {
     pub baseline: String,
+    pub project: Option<String>,
     pub declared: bool,
 }
 
 #[derive(Debug, Deserialize)]
 struct RawSpecConfig {
     baseline: String,
+    project: Option<String>,
 }
 
 impl SpecConfig {
@@ -22,6 +24,7 @@ impl SpecConfig {
         if !path.exists() {
             return Ok(Self {
                 baseline: CURRENT_SPEC_BASELINE.into(),
+                project: None,
                 declared: false,
             });
         }
@@ -31,6 +34,7 @@ impl SpecConfig {
             toml::from_str(&content).with_context(|| format!("parsing {}", path.display()))?;
         Ok(Self {
             baseline: raw.baseline,
+            project: raw.project,
             declared: true,
         })
     }
@@ -45,11 +49,12 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.2.0\"\n",
+            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:forge-spec\"\n",
         )
         .unwrap();
         let config = SpecConfig::load(temp.path()).unwrap();
         assert!(config.declared);
         assert_eq!(config.baseline, CURRENT_SPEC_BASELINE);
+        assert_eq!(config.project.as_deref(), Some("PROJECT:forge-spec"));
     }
 }

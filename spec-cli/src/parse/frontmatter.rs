@@ -82,6 +82,7 @@ pub fn parse_frontmatter(
 
     // Parse type-specific fields
     let type_fields = match entity_type {
+        EntityType::Project => TypeSpecificFields::Project,
         EntityType::Req => {
             let level = raw
                 .level
@@ -176,5 +177,20 @@ aspects: [duration]
         } else {
             panic!("expected Requirement variant");
         }
+    }
+
+    #[test]
+    fn parse_project_frontmatter() {
+        let yaml = r#"
+id: PROJECT:forge-spec
+type: project
+status: accepted
+summary: Repository-native specifications.
+owners: [carlo]
+"#;
+        let (uni, fields, warnings) = parse_frontmatter(yaml).unwrap();
+        assert_eq!(uni.id.to_string(), "PROJECT:forge-spec");
+        assert!(warnings.is_empty());
+        assert!(matches!(fields, TypeSpecificFields::Project));
     }
 }

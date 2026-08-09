@@ -1,0 +1,40 @@
+from: forge-spec-v0.2.0
+to: forge-spec-v0.3.0
+summary: >
+  Introduces one configured PROJECT document as the context and navigation root
+  for the complete specification tree while preserving refinement semantics.
+changes:
+  - id: add-project-entity
+    kind: schema
+    area: identity
+    description: PROJECT:<slug> identifies the singleton project description without a namespace.
+  - id: configure-project-root
+    kind: schema
+    area: configuration
+    description: .specs/_config.toml selects the tree's PROJECT document with one project assignment.
+  - id: synthesize-project-hierarchy
+    kind: behavior
+    area: navigation
+    description: Documents without an explicit refinement or categorization parent implicitly descend from PROJECT.
+  - id: include-project-context
+    kind: behavior
+    area: rendering
+    description: Human and agent bundles include the configured project description before focal specifications.
+instructions:
+  - id: scaffold-project-document
+    actor: cli
+    action: Create a deterministic draft _project.spec.md when the tree has no PROJECT document, reuse existing owners, and configure its PROJECT ID without overwriting an existing document.
+    verification: Exactly one PROJECT document exists and _config.toml selects its ID.
+  - id: author-project-intent
+    actor: agent
+    when: The PROJECT document contains TODO placeholders or does not reflect authoritative project documentation.
+    action: Replace scaffolded prose with an evidence-backed purpose, scope, non-goals, and durable principles; keep status draft until reviewed.
+    verification: The description gives any descendant specification enough context to explain why it belongs to the project and what boundaries constrain it.
+  - id: review-project-ownership
+    actor: agent
+    action: Review the migrated owners and summary instead of assuming mechanically collected metadata expresses project authority.
+    verification: PROJECT has a non-empty summary and the owners list names the actual maintainers of project intent.
+validation:
+  - command: spec lint
+  - command: spec render project --target=agent
+  - command: spec graph --hierarchy

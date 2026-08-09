@@ -146,6 +146,7 @@ pub struct UniversalFrontmatter {
 /// Type-specific frontmatter fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypeSpecificFields {
+    Project,
     Requirement {
         level: Level,
         refines: Vec<String>,

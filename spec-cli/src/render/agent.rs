@@ -1,6 +1,7 @@
 use crate::graph;
 use crate::model::document::SpecDocument;
 use crate::model::frontmatter::TypeSpecificFields;
+use crate::model::id::EntityType;
 use crate::model::registry::SpecRegistry;
 
 use super::scope::{DetailLevel, ScopedEntry};
@@ -9,7 +10,14 @@ use super::scope::{DetailLevel, ScopedEntry};
 pub fn render_agent(registry: &SpecRegistry, entries: &[ScopedEntry]) -> String {
     let mut out = String::new();
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    out.push_str("<specs>\n");
+    if let Some(project_id) = registry.project_id() {
+        out.push_str(&format!(
+            "<specs project=\"{}\">\n",
+            escape_xml(&project_id)
+        ));
+    } else {
+        out.push_str("<specs>\n");
+    }
 
     for entry in entries {
         let Some(doc) = registry.get_by_id(&entry.id) else {
@@ -39,8 +47,13 @@ fn render_spec_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut Strin
     let u = &doc.universal;
 
     // Opening tag with attributes
+    let tag = if u.entity_type == EntityType::Project {
+        "project"
+    } else {
+        "spec"
+    };
     out.push_str(&format!(
-        "  <spec id=\"{}\" type=\"{}\" status=\"{}\" revision=\"{}\" baseline=\"{}\"",
+        "  <{tag} id=\"{}\" type=\"{}\" status=\"{}\" revision=\"{}\" baseline=\"{}\"",
         escape_xml(&id),
         u.entity_type.type_name(),
         u.status.as_str(),
@@ -105,7 +118,11 @@ fn render_spec_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut Strin
     }
 
     // Descendants
-    let children = graph::query::children(registry, &id);
+    let children = if u.entity_type == EntityType::Project {
+        graph::query::hierarchy_children(registry, &id)
+    } else {
+        graph::query::children(registry, &id)
+    };
     if !children.is_empty() {
         out.push_str("    <descendants>\n");
         for child_id in &children {
@@ -139,14 +156,19 @@ fn render_spec_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut Strin
         out.push_str("    </descendants>\n");
     }
 
-    out.push_str("  </spec>\n");
+    out.push_str(&format!("  </{tag}>\n"));
 }
 
 fn render_spec_summary(doc: &SpecDocument, registry: &SpecRegistry, out: &mut String) {
     let id = doc.id_str();
     let summary = doc.universal.summary.as_deref().unwrap_or("");
+    let tag = if doc.universal.entity_type == EntityType::Project {
+        "project"
+    } else {
+        "spec"
+    };
     out.push_str(&format!(
-        "  <spec id=\"{}\" type=\"{}\" status=\"{}\" revision=\"{}\" baseline=\"{}\">\n",
+        "  <{tag} id=\"{}\" type=\"{}\" status=\"{}\" revision=\"{}\" baseline=\"{}\">\n",
         escape_xml(&id),
         doc.universal.entity_type.type_name(),
         doc.universal.status.as_str(),
@@ -159,7 +181,7 @@ fn render_spec_summary(doc: &SpecDocument, registry: &SpecRegistry, out: &mut St
             escape_xml(summary.trim())
         ));
     }
-    out.push_str("  </spec>\n");
+    out.push_str(&format!("  </{tag}>\n"));
 }
 
 fn revision_for(doc: &SpecDocument) -> String {
@@ -173,4 +195,45 @@ fn escape_xml(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::scope::{compute_scope, DetailLevel};
+
+    #[test]
+    fn renders_project_as_distinct_ambient_context() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("_config.toml"),
+            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo purpose.\nowners: [dev]\n---\n\n# Demo\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("req.spec.md"),
+            "---\nid: REQ:demo/work\ntype: requirement\nstatus: accepted\nsummary: Work.\nowners: [dev]\nlevel: MUST\nrefines: []\n---\n\n# Work\n",
+        )
+        .unwrap();
+        let registry = SpecRegistry::load(temp.path()).unwrap();
+        let scope = compute_scope(
+            &registry,
+            "REQ:demo/work",
+            DetailLevel::None,
+            DetailLevel::None,
+            None,
+        );
+        let output = render_agent(&registry, &scope);
+
+        assert!(output.contains("<specs project=\"PROJECT:demo\">"));
+        let project = output.find("<project id=\"PROJECT:demo\"").unwrap();
+        let requirement = output.find("<spec id=\"REQ:demo/work\"").unwrap();
+        assert!(project < requirement);
+        assert!(output.contains("<descendant id=\"REQ:demo/work\""));
+    }
 }

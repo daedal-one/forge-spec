@@ -7,6 +7,7 @@ export interface IndexStats {
 export interface ExplorerSnapshot {
   generation: number
   stats: IndexStats
+  projectId?: string
   documents: ExplorerDocument[]
 }
 

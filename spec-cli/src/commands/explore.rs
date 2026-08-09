@@ -135,7 +135,7 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
                     // On a spec node, open the action menu. On a group
                     // node, behave like `l` and expand.
                     match app.current_node().map(|n| n.kind) {
-                        Some(NodeKind::Spec) => app.open_action_menu(),
+                        Some(NodeKind::Project | NodeKind::Spec) => app.open_action_menu(),
                         Some(_) => app.expand_or_select(),
                         None => {}
                     }
@@ -154,6 +154,7 @@ fn event_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
 
 #[derive(Clone, Copy)]
 enum NodeKind {
+    Project,
     Namespace,
     Type,
     Spec,
@@ -224,20 +225,39 @@ struct App {
 
 impl App {
     fn new(registry: SpecRegistry) -> Self {
+        let project_index = registry
+            .project()
+            .and_then(|project| registry.id_index.get(&project.id_str()).copied());
+        let base_depth = u16::from(project_index.is_some());
+
         // Build tree: namespace -> type -> [doc_idx]
         let mut grouped: BTreeMap<String, BTreeMap<&'static str, Vec<usize>>> = BTreeMap::new();
         for (idx, doc) in registry.documents.iter().enumerate() {
+            if doc.universal.entity_type == crate::model::id::EntityType::Project {
+                continue;
+            }
             let ns = doc.universal.id.namespace.clone();
             let ty = doc.universal.entity_type.prefix();
             grouped.entry(ns).or_default().entry(ty).or_default().push(idx);
         }
 
         let mut all_nodes = Vec::new();
+        if let Some(doc_idx) = project_index {
+            let project = &registry.documents[doc_idx];
+            all_nodes.push(Node {
+                kind: NodeKind::Project,
+                label: project.id_str(),
+                depth: 0,
+                doc_idx: Some(doc_idx),
+                namespace: String::new(),
+                entity_type: Some("PROJECT"),
+            });
+        }
         for (ns, types) in &grouped {
             all_nodes.push(Node {
                 kind: NodeKind::Namespace,
                 label: format!("{ns}/"),
-                depth: 0,
+                depth: base_depth,
                 doc_idx: None,
                 namespace: ns.clone(),
                 entity_type: None,
@@ -246,7 +266,7 @@ impl App {
                 all_nodes.push(Node {
                     kind: NodeKind::Type,
                     label: (*ty).to_string(),
-                    depth: 1,
+                    depth: base_depth + 1,
                     doc_idx: None,
                     namespace: ns.clone(),
                     entity_type: Some(*ty),
@@ -264,7 +284,7 @@ impl App {
                     all_nodes.push(Node {
                         kind: NodeKind::Spec,
                         label: doc.universal.id.slug.clone(),
-                        depth: 2,
+                        depth: base_depth + 2,
                         doc_idx: Some(doc_idx),
                         namespace: ns.clone(),
                         entity_type: Some(*ty),
@@ -295,6 +315,7 @@ impl App {
 
     fn group_key(node: &Node) -> Option<String> {
         match node.kind {
+            NodeKind::Project => None,
             NodeKind::Namespace => Some(node.namespace.clone()),
             NodeKind::Type => Some(format!(
                 "{}::{}",
@@ -307,6 +328,7 @@ impl App {
 
     fn parent_key_of(node: &Node) -> Option<String> {
         match node.kind {
+            NodeKind::Project => None,
             NodeKind::Namespace => None,
             NodeKind::Type => Some(node.namespace.clone()),
             NodeKind::Spec => Some(format!(
@@ -324,7 +346,7 @@ impl App {
         let mut keep_spec: Vec<bool> = Vec::with_capacity(self.all_nodes.len());
         for node in &self.all_nodes {
             let pass = match node.kind {
-                NodeKind::Spec => {
+                NodeKind::Project | NodeKind::Spec => {
                     if filter_lc.is_empty() {
                         true
                     } else {
@@ -357,6 +379,11 @@ impl App {
 
         for (i, node) in self.all_nodes.iter().enumerate() {
             match node.kind {
+                NodeKind::Project => {
+                    if keep_spec[i] || filter_lc.is_empty() {
+                        visible.push(i);
+                    }
+                }
                 NodeKind::Namespace => {
                     if *ns_has_visible.get(&node.namespace).unwrap_or(&false) {
                         visible.push(i);
@@ -634,7 +661,7 @@ impl App {
     fn jump_to(&mut self, target_id: &str) {
         // Find the target spec's node in all_nodes
         let target_idx = self.all_nodes.iter().position(|n| {
-            matches!(n.kind, NodeKind::Spec)
+            matches!(n.kind, NodeKind::Project | NodeKind::Spec)
                 && n.doc_idx
                     .map(|i| self.registry.documents[i].id_str() == target_id)
                     .unwrap_or(false)
@@ -747,6 +774,18 @@ fn draw_tree(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
             let node = &app.all_nodes[abs];
             let indent = "  ".repeat(node.depth as usize);
             match node.kind {
+                NodeKind::Project => {
+                    let doc = &app.registry.documents[node.doc_idx.unwrap()];
+                    ListItem::new(Line::from(vec![
+                        Span::raw(indent),
+                        Span::styled(node.label.clone(), type_style("PROJECT")),
+                        Span::raw(" "),
+                        Span::styled(
+                            format!("[{}]", doc.universal.status.as_str()),
+                            Style::default().fg(status_color(doc.universal.status)),
+                        ),
+                    ]))
+                }
                 NodeKind::Namespace => {
                     let marker = if app.collapsed.contains(&node.namespace) {
                         "▸"
@@ -1417,6 +1456,7 @@ fn reverse_refs(registry: &SpecRegistry, target_id: &str) -> Vec<(&'static str, 
 fn type_style(ty: &str) -> Style {
     let base = Style::default().add_modifier(Modifier::BOLD);
     match ty {
+        "PROJECT" => base.fg(Color::LightCyan),
         "REQ" => base.fg(Color::Green),
         "INV" => base.fg(Color::Magenta),
         "IFC" => base.fg(Color::Blue),

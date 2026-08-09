@@ -21,6 +21,7 @@ export class ForgeSpecTreeProvider implements vscode.TreeDataProvider<ExplorerNo
   private snapshotValue: ExplorerSnapshot = {
     generation: 0,
     stats: { parsed: 0, loadedFromCache: 0, removed: 0 },
+    projectId: undefined,
     documents: [],
   }
   private documentsById = new Map<string, ExplorerDocument>()
@@ -91,12 +92,17 @@ export class ForgeSpecTreeProvider implements vscode.TreeDataProvider<ExplorerNo
 
   getChildren(node?: ExplorerNode): ExplorerNode[] {
     if (!node) {
+      const project = this.snapshotValue.projectId
+        ? this.documentsById.get(this.snapshotValue.projectId)
+        : undefined
+      if (project) return [{ kind: 'spec', document: project, ancestry: [] }]
+
       const placed = new Set<string>()
       for (const children of this.placements.values()) {
         for (const child of children) placed.add(child)
       }
       return this.snapshotValue.documents
-        .filter(document => document.entityType === 'TOPIC' || !placed.has(document.id))
+        .filter(document => !placed.has(document.id))
         .sort(compareDocuments)
         .map(document => ({ kind: 'spec', document, ancestry: [] }))
     }
@@ -164,6 +170,7 @@ export class ForgeSpecTreeProvider implements vscode.TreeDataProvider<ExplorerNo
     this.placements = new Map()
     for (const document of this.snapshotValue.documents) {
       for (const parent of [...document.refines, ...document.categorizedUnder]) {
+        if (!this.resolvesParent(parent)) continue
         const children = this.placements.get(parent) ?? []
         if (!children.includes(document.id)) children.push(document.id)
         children.sort((left, right) => compareDocuments(
@@ -173,17 +180,42 @@ export class ForgeSpecTreeProvider implements vscode.TreeDataProvider<ExplorerNo
         this.placements.set(parent, children)
       }
     }
+
+    const projectId = this.snapshotValue.projectId
+    if (!projectId || !this.documentsById.has(projectId)) return
+    const placed = new Set<string>()
+    for (const children of this.placements.values()) {
+      for (const child of children) placed.add(child)
+    }
+    for (const document of this.snapshotValue.documents) {
+      if (document.id === projectId || placed.has(document.id)) continue
+      const children = this.placements.get(projectId) ?? []
+      children.push(document.id)
+      children.sort((left, right) => compareDocuments(
+        this.documentsById.get(left)!,
+        this.documentsById.get(right)!,
+      ))
+      this.placements.set(projectId, children)
+    }
+  }
+
+  private resolvesParent(reference: string): boolean {
+    const [id, anchor] = reference.split('#', 2)
+    const document = this.documentsById.get(id)
+    if (!document) return false
+    return !anchor || document.blocks.some(block => block.id === anchor)
   }
 }
 
 function compareDocuments(left: ExplorerDocument, right: ExplorerDocument): number {
-  const order = ['TOPIC', 'REQ', 'INV', 'IFC', 'SCN', 'TASK', 'ADR', 'GLO']
+  const order = ['PROJECT', 'TOPIC', 'REQ', 'INV', 'IFC', 'SCN', 'TASK', 'ADR', 'GLO']
   const type = order.indexOf(left.entityType) - order.indexOf(right.entityType)
   return type || left.id.localeCompare(right.id)
 }
 
 function iconForType(type: string): vscode.ThemeIcon {
   const icon = {
+    PROJECT: 'root-folder',
     TOPIC: 'list-tree',
     REQ: 'law',
     INV: 'shield',

@@ -9,11 +9,6 @@ use crate::model::registry::SpecRegistry;
 pub fn run(specs_dir: &Path, require_symbols: bool, allow_custom_lsp: bool) -> Result<bool> {
     let registry = SpecRegistry::load(specs_dir)?;
 
-    if registry.documents.is_empty() {
-        println!("No spec files found in {}", specs_dir.display());
-        return Ok(true);
-    }
-
     let diags = lint::lint_all_with_options(&registry, require_symbols, allow_custom_lsp);
 
     if diags.is_empty() {
