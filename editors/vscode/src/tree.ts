@@ -6,6 +6,7 @@ import type {
   ExplorerSnapshot,
   ExplorerSource,
 } from './protocol'
+import { specificationDisplayName, specificationReference } from './references'
 import { ForgeSpecService } from './service'
 
 export type ExplorerNode =
@@ -55,9 +56,17 @@ export class ForgeSpecTreeProvider implements vscode.TreeDataProvider<ExplorerNo
             ? vscode.TreeItemCollapsibleState.Collapsed
             : vscode.TreeItemCollapsibleState.None,
         )
-        item.description = node.block.kind
-        item.tooltip = node.block.text || `${node.block.kind} ${node.block.id}`
-        item.iconPath = new vscode.ThemeIcon('symbol-field')
+        const tooltip = new vscode.MarkdownString()
+        tooltip.appendMarkdown(`**#${node.block.id}**\n\n`)
+        tooltip.appendMarkdown(`${humanizeBlockKind(node.block.kind)} in **${node.owner.title}**`)
+        if (node.block.text) tooltip.appendMarkdown(`\n\n${node.block.text}`)
+        item.tooltip = tooltip
+        item.iconPath = iconForBlock(node.block.kind)
+        item.command = {
+          command: 'forgeSpec.openReference',
+          title: `Open ${node.block.kind}`,
+          arguments: [specificationReference(node.owner.id, node.block.id)],
+        }
         item.contextValue = 'forgeSpec.block'
         return item
       }
@@ -143,15 +152,17 @@ export class ForgeSpecTreeProvider implements vscode.TreeDataProvider<ExplorerNo
       node.document.sources.length > 0 ||
       (this.placements.get(node.document.id) ?? []).length > 0
     const item = new vscode.TreeItem(
-      node.document.id,
+      specificationDisplayName(node.document.id, node.document.title),
       hasChildren
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
     )
     item.description = [node.document.status, node.document.progress].filter(Boolean).join(' · ')
-    item.tooltip = new vscode.MarkdownString(
-      `**${node.document.id}**\n\n${node.document.summary ?? 'No summary'}`,
-    )
+    const tooltip = new vscode.MarkdownString()
+    tooltip.appendMarkdown(`**${node.document.title || specificationDisplayName(node.document.id)}**\n\n`)
+    tooltip.appendCodeblock(node.document.id)
+    tooltip.appendMarkdown(`\n${node.document.summary ?? 'No summary'}`)
+    item.tooltip = tooltip
     item.iconPath = iconForType(node.document.entityType)
     item.command = {
       command: 'forgeSpec.openSpec',
@@ -226,6 +237,27 @@ function iconForType(type: string): vscode.ThemeIcon {
     TASK: 'checklist',
   }[type]
   return new vscode.ThemeIcon(icon ?? 'symbol-misc')
+}
+
+function iconForBlock(kind: string): vscode.ThemeIcon {
+  const icon = {
+    requirement: 'symbol-field',
+    invariant: 'shield',
+    interface: 'plug',
+    clause: 'symbol-key',
+    assumption: 'question',
+    'non-goal': 'circle-slash',
+    example: 'beaker',
+    'glossary-entry': 'book',
+  }[kind]
+  return new vscode.ThemeIcon(icon ?? 'symbol-field')
+}
+
+function humanizeBlockKind(kind: string): string {
+  return kind
+    .split('-')
+    .map(part => part ? part[0].toUpperCase() + part.slice(1) : part)
+    .join(' ')
 }
 
 function sourceDescription(source: ExplorerSource): string {

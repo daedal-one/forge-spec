@@ -38,6 +38,7 @@ pub struct ExplorerSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct ExplorerDocument {
     pub id: String,
+    pub title: String,
     pub entity_type: String,
     pub status: String,
     pub progress: Option<String>,
@@ -470,6 +471,8 @@ fn explorer_document(document: &SpecDocument, registry: &SpecRegistry) -> Explor
 
     ExplorerDocument {
         id: document.id_str(),
+        title: first_markdown_heading(&document.body_raw)
+            .unwrap_or_else(|| document.universal.id.slug.clone()),
         entity_type: document.universal.entity_type.prefix().to_string(),
         status: document.universal.status.as_str().to_string(),
         progress,
@@ -499,6 +502,30 @@ fn first_nonempty_line(body: &str) -> String {
         .find(|line| !line.is_empty())
         .unwrap_or_default()
         .to_string()
+}
+
+fn first_markdown_heading(body: &str) -> Option<String> {
+    body.lines().find_map(|line| {
+        let trimmed = line.trim_start();
+        let marker_length = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+        if !(1..=6).contains(&marker_length) || trimmed.as_bytes().get(marker_length) != Some(&b' ')
+        {
+            return None;
+        }
+        let raw_title = trimmed[marker_length..].trim();
+        let without_closer = raw_title.trim_end_matches('#');
+        let title = if without_closer.len() < raw_title.len()
+            && without_closer
+                .chars()
+                .last()
+                .is_some_and(char::is_whitespace)
+        {
+            without_closer.trim_end()
+        } else {
+            raw_title
+        };
+        (!title.is_empty()).then(|| title.to_string())
+    })
 }
 
 fn discover_spec_files(specs_dir: &Path) -> Vec<PathBuf> {
@@ -670,5 +697,15 @@ mod tests {
 
         let index = WorkspaceIndex::open(&specs, None).unwrap();
         assert_eq!(index.snapshot().project_id.as_deref(), Some("PROJECT:demo"));
+        assert_eq!(index.snapshot().documents[0].title, "Demo");
+    }
+
+    #[test]
+    fn markdown_title_preserves_literal_hashes() {
+        assert_eq!(first_markdown_heading("# C#\n"), Some("C#".to_string()));
+        assert_eq!(
+            first_markdown_heading("## Project title ##\n"),
+            Some("Project title".to_string())
+        );
     }
 }

@@ -13,6 +13,7 @@ export interface ExplorerSnapshot {
 
 export interface ExplorerDocument {
   id: string
+  title: string
   entityType: string
   status: string
   progress?: string

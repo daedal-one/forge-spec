@@ -1,15 +1,23 @@
 import { randomBytes } from 'node:crypto'
 import * as path from 'node:path'
-import MarkdownIt from 'markdown-it'
 import * as vscode from 'vscode'
 import { computeMetadataEdits, MetadataUpdates, parseSpecText } from './frontmatter'
-import type { ProtocolLocation } from './protocol'
+import { renderSpecBody } from './markdown'
+import type { ExplorerSnapshot, ProtocolLocation } from './protocol'
+import { referencePresentation, specificationAnchor } from './references'
+import { incomingRefinements, type RefinementLink } from './relationships'
 import { ForgeSpecService } from './service'
-
-const markdown = new MarkdownIt({ html: false, linkify: true, typographer: true })
 
 export class SpecViewerProvider implements vscode.CustomTextEditorProvider {
   static readonly viewType = 'forgeSpec.viewer'
+  private readonly panels = new Map<string, Set<vscode.WebviewPanel>>()
+  private readonly panelAnchors = new Map<vscode.WebviewPanel, string | undefined>()
+  private readonly pendingAnchors = new Map<string, string>()
+  private snapshot: ExplorerSnapshot = {
+    generation: 0,
+    stats: { parsed: 0, loadedFromCache: 0, removed: 0 },
+    documents: [],
+  }
 
   constructor(private readonly service: ForgeSpecService) {}
 
@@ -17,12 +25,24 @@ export class SpecViewerProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webviewPanel: vscode.WebviewPanel,
   ): void {
+    const documentKey = document.uri.toString()
+    const documentPanels = this.panels.get(documentKey) ?? new Set<vscode.WebviewPanel>()
+    documentPanels.add(webviewPanel)
+    this.panels.set(documentKey, documentPanels)
+
     webviewPanel.webview.options = { enableScripts: true }
+    const initialAnchor = this.pendingAnchors.get(documentKey)
+    this.pendingAnchors.delete(documentKey)
+    this.panelAnchors.set(webviewPanel, initialAnchor)
+    webviewPanel.title = viewerTitle(document.uri, initialAnchor)
     const update = () => {
+      const anchor = this.panelAnchors.get(webviewPanel)
       webviewPanel.webview.html = renderViewer(
         webviewPanel.webview,
         document.getText(),
         document.version,
+        anchor,
+        this.refinementsFor(document.uri, anchor),
       )
     }
     update()
@@ -30,7 +50,12 @@ export class SpecViewerProvider implements vscode.CustomTextEditorProvider {
     const changed = vscode.workspace.onDidChangeTextDocument(event => {
       if (event.document.uri.toString() === document.uri.toString()) update()
     })
-    webviewPanel.onDidDispose(() => changed.dispose())
+    webviewPanel.onDidDispose(() => {
+      changed.dispose()
+      this.panelAnchors.delete(webviewPanel)
+      documentPanels.delete(webviewPanel)
+      if (documentPanels.size === 0) this.panels.delete(documentKey)
+    })
     webviewPanel.webview.onDidReceiveMessage(async message => {
       try {
         switch (message.type) {
@@ -55,11 +80,61 @@ export class SpecViewerProvider implements vscode.CustomTextEditorProvider {
     })
   }
 
+  setSnapshot(snapshot: ExplorerSnapshot): void {
+    this.snapshot = snapshot
+    for (const [documentKey, panels] of this.panels) {
+      const uri = vscode.Uri.parse(documentKey)
+      for (const panel of panels) {
+        const anchor = this.panelAnchors.get(panel)
+        if (!anchor) continue
+        void panel.webview.postMessage({
+          type: 'updateRefinements',
+          anchor,
+          refinements: this.refinementsFor(uri, anchor),
+        })
+      }
+    }
+  }
+
+  async openReference(reference: string): Promise<void> {
+    const location = await this.service.resolveReference(reference)
+    if (!location) throw new Error(`Reference does not resolve: ${reference}`)
+
+    const presentation = referencePresentation(reference)
+    if (presentation?.kind === 'spec') {
+      await this.openSpecLocation(location, specificationAnchor(reference))
+    } else {
+      await revealLocation(location)
+    }
+  }
+
+  async openDocument(uri: vscode.Uri, anchor?: string): Promise<void> {
+    const documentKey = uri.toString()
+    const existing = this.panels.get(documentKey)?.values().next().value
+    if (existing) {
+      this.panelAnchors.set(existing, anchor)
+      existing.title = viewerTitle(uri, anchor)
+      existing.reveal()
+      await existing.webview.postMessage({
+        type: 'revealAnchor',
+        anchor: anchor ?? '',
+        refinements: this.refinementsFor(uri, anchor),
+      })
+      return
+    }
+
+    if (anchor) this.pendingAnchors.set(documentKey, anchor)
+    try {
+      await vscode.commands.executeCommand('vscode.openWith', uri, SpecViewerProvider.viewType)
+    } catch (error) {
+      if (anchor) this.pendingAnchors.delete(documentKey)
+      throw error
+    }
+  }
+
   private async openLink(documentUri: vscode.Uri, href: string): Promise<void> {
     if (href.startsWith('spec:')) {
-      const location = await this.service.resolveReference(href)
-      if (!location) throw new Error(`Reference does not resolve: ${href}`)
-      await revealLocation(location)
+      await this.openReference(href)
       return
     }
     if (/^https?:\/\//.test(href)) {
@@ -79,6 +154,20 @@ export class SpecViewerProvider implements vscode.CustomTextEditorProvider {
         .findIndex(value => headingSlug(value) === wanted)
       if (line >= 0) editor.revealRange(new vscode.Range(line, 0, line, 0))
     }
+  }
+
+  private async openSpecLocation(
+    location: ProtocolLocation,
+    anchor: string | undefined,
+  ): Promise<void> {
+    await this.openDocument(vscode.Uri.parse(location.uri), anchor)
+  }
+
+  private refinementsFor(uri: vscode.Uri, anchor: string | undefined): RefinementLink[] {
+    if (!anchor) return []
+    const owner = this.snapshot.documents.find(document => document.uri === uri.toString())
+    if (!owner) return []
+    return incomingRefinements(this.snapshot.documents, `${owner.id}#${anchor}`)
   }
 }
 
@@ -117,7 +206,13 @@ async function revealLocation(location: ProtocolLocation): Promise<void> {
   editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport)
 }
 
-function renderViewer(webview: vscode.Webview, text: string, version: number): string {
+function renderViewer(
+  webview: vscode.Webview,
+  text: string,
+  version: number,
+  revealAnchor?: string,
+  refinements: readonly RefinementLink[] = [],
+): string {
   const nonce = randomBytes(16).toString('base64')
   let metadata: Record<string, unknown> = {}
   let body = text
@@ -137,6 +232,7 @@ function renderViewer(webview: vscode.Webview, text: string, version: number): s
   const owners = arrayValue(metadata.owners)
   const progress = stringValue(metadata.progress, '')
   const level = stringValue(metadata.level, '')
+  const relationships = renderRelationships(metadata)
   const renderedBody = error
     ? `<div class="error">${escapeHtml(error)}</div><pre>${escapeHtml(text)}</pre>`
     : renderSpecBody(body)
@@ -149,7 +245,7 @@ function renderViewer(webview: vscode.Webview, text: string, version: number): s
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style nonce="${nonce}">${viewerStyles}</style>
 </head>
-<body>
+<body${revealAnchor ? ` data-reveal-anchor="${escapeAttribute(revealAnchor)}"` : ''}>
   <header>
     <div class="identity">
       <span class="type">${escapeHtml(entityType)}</span>
@@ -163,7 +259,8 @@ function renderViewer(webview: vscode.Webview, text: string, version: number): s
   <main>
     <article>${renderedBody}</article>
     <aside>
-      <h2>Metadata</h2>
+      ${renderRefinementContext(revealAnchor, refinements)}
+      <h2>Specification metadata</h2>
       <form id="metadata-form" data-version="${version}">
         <label>ID<input value="${escapeAttribute(id)}" disabled></label>
         <label>Type<input value="${escapeAttribute(entityType)}" disabled></label>
@@ -174,6 +271,7 @@ function renderViewer(webview: vscode.Webview, text: string, version: number): s
         ${entityType === 'requirement' ? `<label>Level<select name="level">${options(['MUST', 'SHOULD', 'MAY', 'INFO'], level)}</select></label>` : ''}
         <label>Summary<textarea name="summary" rows="5">${escapeHtml(summary)}</textarea></label>
         <label>Owners<input name="owners" value="${escapeAttribute(owners.join(', '))}" placeholder="owner, owner"></label>
+        ${relationships}
         <button class="primary" type="submit">Apply metadata</button>
         <p class="hint">Changes use the document's normal undo, dirty, and save flow.</p>
       </form>
@@ -181,12 +279,72 @@ function renderViewer(webview: vscode.Webview, text: string, version: number): s
   </main>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
+    let currentAnchor = document.body.dataset.revealAnchor || '';
+    const refinementContext = document.getElementById('refinement-context');
+    const refinementAnchor = document.getElementById('refinement-anchor');
+    const refinementList = document.getElementById('refinement-list');
+    const refinementEmpty = document.getElementById('refinement-empty');
+    const renderRefinementContext = (anchor, refinements) => {
+      currentAnchor = anchor;
+      refinementContext.hidden = !anchor;
+      refinementAnchor.textContent = anchor ? '#' + anchor : '';
+      refinementList.replaceChildren();
+      for (const refinement of refinements) {
+        const row = document.createElement('div');
+        row.className = 'refinement-item';
+        const link = document.createElement('a');
+        link.className = 'forge-reference forge-reference-spec';
+        link.href = String(refinement.reference || '');
+        link.title = String(refinement.title || '');
+        link.textContent = String(refinement.label || refinement.title || 'Specification');
+        const state = document.createElement('span');
+        state.className = 'refinement-state';
+        state.textContent = [refinement.status, refinement.progress].filter(Boolean).join(' · ');
+        row.append(link, state);
+        refinementList.append(row);
+      }
+      refinementEmpty.hidden = refinements.length > 0;
+    };
+    const clearAnchorFocus = () => {
+      document.querySelectorAll('.spec-anchor-focused').forEach(element => {
+        element.classList.remove('spec-anchor-focused');
+        element.removeAttribute('aria-current');
+      });
+      document.querySelectorAll('.spec-anchor-context').forEach(element => element.classList.remove('spec-anchor-context'));
+    };
+    const revealAnchor = anchor => {
+      clearAnchorFocus();
+      if (!anchor) {
+        document.querySelector('article')?.scrollTo({ top: 0, behavior: 'instant' });
+        return;
+      }
+      requestAnimationFrame(() => {
+        const target = document.getElementById('spec-anchor-' + anchor);
+        if (!target) return;
+        target.classList.add('spec-anchor-focused');
+        target.setAttribute('aria-current', 'true');
+        target.closest('.spec-block')?.classList.add('spec-anchor-context');
+        target.scrollIntoView({ block: 'start' });
+      });
+    };
+    revealAnchor(document.body.dataset.revealAnchor);
+    window.addEventListener('message', event => {
+      if (event.data?.type === 'revealAnchor') {
+        const anchor = String(event.data.anchor || '');
+        renderRefinementContext(anchor, Array.isArray(event.data.refinements) ? event.data.refinements : []);
+        revealAnchor(anchor);
+      }
+      if (event.data?.type === 'updateRefinements' && String(event.data.anchor || '') === currentAnchor) {
+        renderRefinementContext(currentAnchor, Array.isArray(event.data.refinements) ? event.data.refinements : []);
+      }
+    });
     document.getElementById('open-text').addEventListener('click', () => vscode.postMessage({ type: 'openText' }));
     document.addEventListener('click', event => {
-      const anchor = event.target.closest('a');
-      if (!anchor || anchor.getAttribute('href').startsWith('#')) return;
+      const anchor = event.target instanceof Element ? event.target.closest('a') : null;
+      const href = anchor?.getAttribute('href');
+      if (!href || href.startsWith('#')) return;
       event.preventDefault();
-      vscode.postMessage({ type: 'openReference', href: anchor.getAttribute('href') });
+      vscode.postMessage({ type: 'openReference', href });
     });
     document.getElementById('metadata-form').addEventListener('submit', event => {
       event.preventDefault();
@@ -206,33 +364,21 @@ function renderViewer(webview: vscode.Webview, text: string, version: number): s
 </html>`
 }
 
-function renderSpecBody(body: string): string {
-  const lines = body.split(/\r?\n/)
-  const result: string[] = []
-  let plain: string[] = []
-  const flush = () => {
-    if (plain.length > 0) result.push(markdown.render(plain.join('\n')))
-    plain = []
-  }
-  for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index].match(/^:::\{([a-z-]+)(.*?)\}\s*$/)
-    if (!match) {
-      plain.push(lines[index])
-      continue
-    }
-    flush()
-    const inner: string[] = []
-    index += 1
-    while (index < lines.length && lines[index].trim() !== ':::') {
-      inner.push(lines[index])
-      index += 1
-    }
-    const id = match[2].match(/\bid="([^"]+)"/)?.[1]
-    const level = match[2].match(/\blevel="([^"]+)"/)?.[1]
-    result.push(`<section class="spec-block"><div class="spec-block-title"><span>${escapeHtml(match[1])}</span>${id ? `<code>#${escapeHtml(id)}</code>` : ''}${level ? `<strong>${escapeHtml(level)}</strong>` : ''}</div>${markdown.render(inner.join('\n'))}</section>`)
-  }
-  flush()
-  return result.join('\n')
+function renderRefinementContext(
+  anchor: string | undefined,
+  refinements: readonly RefinementLink[],
+): string {
+  return `<section id="refinement-context" class="refinement-context"${anchor ? '' : ' hidden'}>
+    <h2>Requirement <code id="refinement-anchor">${anchor ? `#${escapeHtml(anchor)}` : ''}</code></h2>
+    <h3>Refined by</h3>
+    <div id="refinement-list" class="refinement-list">${refinements.map(renderRefinement).join('')}</div>
+    <p id="refinement-empty" class="hint"${refinements.length > 0 ? ' hidden' : ''}>No specifications refine this requirement yet.</p>
+  </section>`
+}
+
+function renderRefinement(refinement: RefinementLink): string {
+  const state = [refinement.status, refinement.progress].filter(Boolean).join(' · ')
+  return `<div class="refinement-item"><a class="forge-reference forge-reference-spec" href="${escapeAttribute(refinement.reference)}" title="${escapeAttribute(refinement.title)}">${escapeHtml(refinement.label)}</a><span class="refinement-state">${escapeHtml(state)}</span></div>`
 }
 
 function options(values: string[], selected: string): string {
@@ -249,6 +395,27 @@ function arrayValue(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : []
 }
 
+function renderRelationships(metadata: Record<string, unknown>): string {
+  const groups: Array<[string, string[]]> = [
+    ['Refines', arrayValue(metadata.refines)],
+    ['Categorized under', arrayValue(metadata.categorized_under)],
+    ['Related', arrayValue(metadata.related)],
+    ['Blocked by', arrayValue(metadata.blocked_by)],
+    ['Supersedes', arrayValue(metadata.supersedes)],
+  ]
+  const populated = groups.filter(([, references]) => references.length > 0)
+  if (populated.length === 0) return ''
+
+  return `<section class="relationships"><h3>Relationships</h3>${populated.map(([label, references]) => `<div class="relationship"><span>${escapeHtml(label)}</span><div>${references.map(renderRelationship).join('')}</div></div>`).join('')}</section>`
+}
+
+function renderRelationship(reference: string): string {
+  const href = reference.startsWith('spec:') ? reference : `spec:${reference}`
+  const presentation = referencePresentation(href)
+  const label = presentation?.label ?? reference
+  return `<a class="forge-reference forge-reference-${presentation?.kind ?? 'spec'}" href="${escapeAttribute(href)}" title="${escapeAttribute(presentation?.title ?? reference)}">${escapeHtml(label)}</a>`
+}
+
 function headingSlug(line: string): string | undefined {
   const heading = line.match(/^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/)?.[1]
   if (!heading) return undefined
@@ -257,6 +424,11 @@ function headingSlug(line: string): string | undefined {
     .replace(/[^\p{L}\p{N}\s-]/gu, '')
     .trim()
     .replace(/\s+/g, '-')
+}
+
+function viewerTitle(uri: vscode.Uri, anchor?: string): string {
+  const filename = path.basename(uri.fsPath)
+  return anchor ? `#${anchor} · ${filename}` : filename
 }
 
 function escapeAttribute(value: string): string {
@@ -275,8 +447,8 @@ function escapeHtml(value: string): string {
 const viewerStyles = `
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
-body { margin: 0; color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); font: var(--vscode-font-size)/1.55 var(--vscode-font-family); }
-header { position: sticky; top: 0; z-index: 2; padding: 20px 30px 16px; border-bottom: 1px solid var(--vscode-panel-border); background: color-mix(in srgb, var(--vscode-editor-background) 94%, transparent); backdrop-filter: blur(10px); }
+body { display: flex; flex-direction: column; height: 100vh; margin: 0; overflow: hidden; color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); font: var(--vscode-font-size)/1.55 var(--vscode-font-family); }
+header { position: relative; z-index: 2; flex: 0 0 auto; padding: 20px 30px 16px; border-bottom: 1px solid var(--vscode-panel-border); background: color-mix(in srgb, var(--vscode-editor-background) 94%, transparent); backdrop-filter: blur(10px); }
 .identity { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 22px; }
 header p { margin: 8px 0 0; max-width: 880px; color: var(--vscode-descriptionForeground); }
@@ -287,15 +459,21 @@ header button { position: absolute; right: 30px; top: 20px; }
 .status-accepted { color: var(--vscode-testing-iconPassed); }
 .status-draft { color: var(--vscode-editorWarning-foreground); }
 .progress { color: var(--vscode-gitDecoration-modifiedResourceForeground); border: 1px solid currentColor; }
-main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: calc(100vh - 110px); }
-article { width: min(900px, 100%); padding: 30px 42px 80px; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; flex: 1 1 auto; min-height: 0; }
+article { width: min(900px, 100%); min-height: 0; overflow-y: auto; padding: 30px 42px 80px; }
 article h1, article h2, article h3 { line-height: 1.25; margin-top: 1.7em; }
 article a { color: var(--vscode-textLink-foreground); }
+article a.forge-reference, .relationships a.forge-reference { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; margin: 0 2px; padding: 0 5px; border: 1px solid color-mix(in srgb, var(--vscode-textLink-foreground) 35%, transparent); border-radius: 4px; background: color-mix(in srgb, var(--vscode-textLink-foreground) 9%, transparent); text-decoration: none; vertical-align: baseline; }
+article a.forge-reference:hover, .relationships a.forge-reference:hover { border-color: var(--vscode-textLink-activeForeground); color: var(--vscode-textLink-activeForeground); }
+article a.forge-reference::before, .relationships a.forge-reference::before { color: var(--vscode-descriptionForeground); font-size: .85em; }
+article a.forge-reference-spec::before, .relationships a.forge-reference-spec::before { content: '◇'; }
+article a.forge-reference-source::before, .relationships a.forge-reference-source::before { content: '⌘'; }
 article code { font-family: var(--vscode-editor-font-family); background: var(--vscode-textCodeBlock-background); padding: 1px 4px; border-radius: 3px; }
 article pre { overflow: auto; padding: 14px; background: var(--vscode-textCodeBlock-background); border-radius: 6px; }
 article blockquote { border-left: 3px solid var(--vscode-textBlockQuote-border); margin-left: 0; padding-left: 16px; color: var(--vscode-descriptionForeground); }
-aside { border-left: 1px solid var(--vscode-panel-border); padding: 24px 20px; background: var(--vscode-sideBar-background); }
+aside { min-height: 0; overflow-y: auto; border-left: 1px solid var(--vscode-panel-border); padding: 24px 20px; background: var(--vscode-sideBar-background); }
 aside h2 { margin: 0 0 18px; font-size: 15px; }
+aside h2 code { color: var(--vscode-textLink-foreground); font-family: var(--vscode-editor-font-family); font-size: .9em; }
 label { display: grid; gap: 5px; margin-bottom: 14px; color: var(--vscode-descriptionForeground); font-size: 12px; font-weight: 600; }
 input, select, textarea { width: 100%; border: 1px solid var(--vscode-input-border, transparent); color: var(--vscode-input-foreground); background: var(--vscode-input-background); padding: 7px 8px; font: inherit; font-weight: 400; }
 input:focus, select:focus, textarea:focus { outline: 1px solid var(--vscode-focusBorder); }
@@ -303,9 +481,25 @@ button { border: 1px solid var(--vscode-button-border, transparent); color: var(
 button:hover { background: var(--vscode-button-hoverBackground); }
 .primary { width: 100%; }
 .hint { color: var(--vscode-descriptionForeground); font-size: 11px; }
+.relationships { margin: 20px 0; padding-top: 16px; border-top: 1px solid var(--vscode-panel-border); }
+.relationships h3 { margin: 0 0 12px; color: var(--vscode-foreground); font-size: 12px; }
+.relationship { display: grid; gap: 5px; margin-bottom: 10px; }
+.relationship > span { color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 600; }
+.relationship > div { display: flex; flex-wrap: wrap; gap: 5px; }
+.refinement-context { margin: 0 0 22px; padding: 0 0 20px; border-bottom: 1px solid var(--vscode-panel-border); }
+.refinement-context h2 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 14px; }
+.refinement-context h3 { margin: 0 0 9px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+.refinement-list { display: grid; gap: 7px; }
+.refinement-item { display: grid; gap: 2px; justify-items: start; }
+.refinement-state { color: var(--vscode-descriptionForeground); font-size: 10px; text-transform: uppercase; letter-spacing: .03em; }
+[hidden] { display: none !important; }
 .spec-block { margin: 22px 0; padding: 16px 18px 8px; border: 1px solid var(--vscode-panel-border); border-left: 3px solid var(--vscode-focusBorder); border-radius: 5px; background: color-mix(in srgb, var(--vscode-editor-background) 88%, var(--vscode-focusBorder)); }
+.spec-block[id] { scroll-margin-top: 120px; }
+.spec-block.spec-anchor-focused, .spec-block.spec-anchor-context { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 1px var(--vscode-focusBorder), 0 10px 30px color-mix(in srgb, var(--vscode-focusBorder) 14%, transparent); }
 .spec-block-title { display: flex; gap: 8px; align-items: center; color: var(--vscode-descriptionForeground); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
 .spec-block-title strong { margin-left: auto; }
+.clause-anchor { display: inline-flex; scroll-margin-top: 120px; margin-right: 6px; padding: 0 5px; border-radius: 4px; color: var(--vscode-symbolIcon-fieldForeground, var(--vscode-textLink-foreground)); background: color-mix(in srgb, currentColor 10%, transparent); font-family: var(--vscode-editor-font-family); font-size: .9em; }
+.clause-anchor.spec-anchor-focused { outline: 1px solid var(--vscode-focusBorder); background: color-mix(in srgb, var(--vscode-focusBorder) 22%, transparent); }
 .error { padding: 12px; color: var(--vscode-errorForeground); border: 1px solid var(--vscode-inputValidation-errorBorder); background: var(--vscode-inputValidation-errorBackground); }
-@media (max-width: 760px) { main { grid-template-columns: 1fr; } aside { border-left: 0; border-top: 1px solid var(--vscode-panel-border); } header button { position: static; margin-top: 14px; } }
+@media (max-width: 760px) { body { display: block; height: auto; min-height: 100vh; overflow: auto; } header { position: sticky; top: 0; } main { display: grid; grid-template-columns: 1fr; min-height: calc(100vh - 110px); } article, aside { overflow: visible; } aside { border-left: 0; border-top: 1px solid var(--vscode-panel-border); } header button { position: static; margin-top: 14px; } }
 `

@@ -31,7 +31,9 @@ specifications, tasks, and related code.
 
 :::{requirement id="viewer" level="MUST"}
 Selecting a specification MUST open that exact Markdown document in a rendered
-specification viewer showing lifecycle status and type-specific state.
+specification viewer showing lifecycle status and type-specific state. Selecting
+a typed block or clause MUST open the same native viewer focused on that exact
+semantic unit, including direct navigation to specifications that refine it.
 :::
 
 :::{requirement id="metadata" level="MUST"}
@@ -42,7 +44,8 @@ dirty-state, save, and validation flows.
 
 :::{requirement id="navigation" level="MUST"}
 References to other specifications, clauses, source ranges, and source symbols
-MUST navigate to their canonical repository targets.
+MUST be presented with human-readable labels and MUST navigate to their
+canonical repository targets without discarding the exact reference identity.
 :::
 
 :::{requirement id="incremental" level="MUST"}

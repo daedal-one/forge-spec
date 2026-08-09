@@ -30,8 +30,12 @@ cycles from causing recursive expansion.
 :::
 
 :::{requirement id="state" level="MUST"}
-Every specification row MUST display its entity type, lifecycle status, and,
-for TASK entities, implementation progress.
+Every specification row MUST use the document's Markdown title as its concise
+label, MUST convey entity type through its icon without repeating the type
+prefix in the label, and MUST keep the complete ID and summary available in its
+tooltip. Typed block and clause rows MUST likewise use their icon and tooltip
+for kind information instead of repeating the kind beside the anchor label.
+Lifecycle status and TASK progress MUST remain visible as secondary state.
 :::
 
 :::{requirement id="code" level="MUST"}
@@ -40,8 +44,10 @@ children that retain file, line-range, or symbol identity.
 :::
 
 :::{requirement id="open" level="MUST"}
-Activating a specification or code node MUST open its exact file and MUST reveal
-the referenced anchor, range, or symbol whenever one is present.
+Activating a specification, typed block, clause, or code node MUST open its
+exact native target. Typed blocks and clauses MUST open the owning specification
+in a focused forge-spec view of that anchor, while source references MUST reveal
+the addressed file, range, or symbol.
 :::
 
 The VS Code implementation is the native
