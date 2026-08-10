@@ -74,6 +74,8 @@ spec resolve 'spec:src:src/session.rs#symbol=SessionStore/expire'
 spec lsp                            # editor LSP over stdio
 spec children REQ:auth/session-management
 spec coverage REQ:auth/session-management
+spec impact REQ:auth/session-management#c-lifetime
+spec impact --base origin/main --head working-tree --target agent
 spec graph                          # project-rooted hierarchy as DOT
 spec graph --refinement             # refinement DAG only
 spec tree                           # printed tree of all specs
@@ -81,6 +83,40 @@ spec explore                        # interactive TUI browser
 ```
 
 Run `spec --help` for the full command list.
+
+## Review change impact
+
+`spec impact` produces a read-only, evidence-based review before implementation.
+Select an exact specification or clause to examine prospective impact:
+
+```sh
+spec impact REQ:auth/session-management#c-lifetime
+spec impact REQ:auth/session-management#c-lifetime --target agent
+```
+
+Or compare parsed specification snapshots. The default head is the working
+tree, so staged, unstaged, added, and removed spec semantics are reviewed
+together:
+
+```sh
+spec impact --base origin/main
+spec impact --base origin/main --head HEAD --target agent
+```
+
+The command follows clause-qualified refinement paths transitively, includes
+TASK progress, collects explicit `spec:src:` references, and recovers
+implementation and test paths from `Spec-Ref:` history. Git comparisons union
+the base and head graphs so deleted specs and removed relationships are not
+silently lost. Formatting-only edits are reported without inventing a semantic
+cascade.
+
+Human output is a review report. `--target agent` emits the same evidence as a
+deterministic `<forge-spec-impact schema-version="1">` XML envelope. Both
+outputs identify missing task, implementation, and test evidence and state the
+boundary explicitly: source links and Git history are traceability evidence,
+not proof of every runtime code dependency. `spec impact` never creates tasks
+or changes task state; review the report, add missing TASK specs deliberately,
+then use `spec start <task-id>` when work actually begins.
 
 ## Shell completion
 

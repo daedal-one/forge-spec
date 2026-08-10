@@ -106,6 +106,8 @@ spec render project --target=agent         # configured project description
 spec children REQ:auth/foo                 # direct refining children
 spec ancestors REQ:auth/foo                # direct refined-by parents
 spec coverage REQ:auth/foo                 # clause-by-clause coverage
+spec impact REQ:auth/foo#c-clause          # transitive spec/code impact
+spec impact --base origin/main --target=agent # changed-spec impact XML
 spec symbols src/lib.rs --query Resolver   # discover source symbols via LSP
 spec resolve 'spec:src:src/lib.rs#symbol=Resolver/resolve'
 spec lsp                                   # forge-spec editor language server

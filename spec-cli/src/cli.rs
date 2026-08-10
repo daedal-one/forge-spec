@@ -91,6 +91,20 @@ pub enum Commands {
         /// Spec ID
         id: String,
     },
+    /// Measure the specification and code impact of a selected or changed spec
+    Impact {
+        /// Spec ID or clause anchor to analyze (for example REQ:auth/session#c-idle)
+        subject: Option<String>,
+        /// Git revision to compare from; omit when selecting an explicit subject
+        #[arg(long)]
+        base: Option<String>,
+        /// Git revision to compare to, or `working-tree` (default with --base)
+        #[arg(long)]
+        head: Option<String>,
+        /// Report render target
+        #[arg(long, default_value = "human", value_enum)]
+        target: RenderTarget,
+    },
     /// List specs with no refinement relationships
     Orphans,
     /// Explain or apply composable format migrations and reference redirects

@@ -178,6 +178,21 @@ fn run(cli: Cli) -> Result<()> {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             commands::query::coverage(&specs_dir, &id)
         }
+        Commands::Impact {
+            subject,
+            base,
+            head,
+            target,
+        } => {
+            let specs_dir = find_specs_dir(cli.specs_dir)?;
+            commands::impact::run(
+                &specs_dir,
+                subject.as_deref(),
+                base.as_deref(),
+                head.as_deref(),
+                &target,
+            )
+        }
         Commands::Orphans => {
             let specs_dir = find_specs_dir(cli.specs_dir)?;
             commands::query::orphans(&specs_dir)

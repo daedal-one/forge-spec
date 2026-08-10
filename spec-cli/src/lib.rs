@@ -8,6 +8,7 @@ pub mod cli;
 pub mod commands;
 pub mod graph;
 pub mod history;
+pub mod impact;
 pub mod lint;
 pub mod lsp;
 pub mod migration;

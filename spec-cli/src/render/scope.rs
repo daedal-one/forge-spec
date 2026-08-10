@@ -37,7 +37,7 @@ pub fn compute_scope(
     focal_id: &str,
     ancestor_detail: DetailLevel,
     descendant_detail: DetailLevel,
-    _depth: Option<usize>,
+    depth: Option<usize>,
 ) -> Vec<ScopedEntry> {
     let mut entries = Vec::new();
     let mut included: BTreeSet<String> = BTreeSet::new();
@@ -60,10 +60,12 @@ pub fn compute_scope(
         });
     }
 
-    // Direct ancestors
+    let max_depth = depth.unwrap_or(1);
+
+    // Ancestors up to the requested traversal depth.
     if ancestor_detail != DetailLevel::None {
-        let anc = graph::query::ancestors(registry, focal_id);
-        for a in anc {
+        let ancestors = graph::query::transitive_ancestors(registry, focal_id, max_depth);
+        for (a, _) in ancestors {
             if included.insert(a.clone()) {
                 entries.push(ScopedEntry {
                     id: a,
@@ -73,10 +75,16 @@ pub fn compute_scope(
         }
     }
 
-    // Direct descendants
+    // Descendants up to the requested traversal depth. PROJECT uses the
+    // synthesized hierarchy because it is ambient context, not a refinement
+    // parent.
     if descendant_detail != DetailLevel::None {
-        let desc = graph::query::children(registry, focal_id);
-        for d in desc {
+        let descendants = if registry.project_id().as_deref() == Some(focal_id) {
+            graph::query::hierarchy_descendants(registry, focal_id, max_depth)
+        } else {
+            graph::query::descendants(registry, focal_id, max_depth)
+        };
+        for (d, _) in descendants {
             if included.insert(d.clone()) {
                 entries.push(ScopedEntry {
                     id: d,
@@ -163,5 +171,69 @@ mod tests {
         );
         assert_eq!(project_scope.len(), 1);
         assert_eq!(project_scope[0].id, "PROJECT:demo");
+    }
+
+    #[test]
+    fn depth_controls_transitive_descendant_scope() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("_config.toml"),
+            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [dev]\n---\n\n# Demo\n",
+        )
+        .unwrap();
+        for (file, id, refines) in [
+            ("root.spec.md", "REQ:demo/root", "[]"),
+            ("child.spec.md", "REQ:demo/child", "[REQ:demo/root]"),
+            ("leaf.spec.md", "REQ:demo/leaf", "[REQ:demo/child]"),
+        ] {
+            std::fs::write(
+                temp.path().join(file),
+                format!(
+                    "---\nid: {id}\ntype: requirement\nstatus: accepted\nsummary: {id}.\nowners: [dev]\nlevel: MUST\nrefines: {refines}\n---\n\n# {id}\n"
+                ),
+            )
+            .unwrap();
+        }
+        let registry = SpecRegistry::load(temp.path()).unwrap();
+
+        let direct = compute_scope(
+            &registry,
+            "REQ:demo/root",
+            DetailLevel::None,
+            DetailLevel::Summary,
+            None,
+        );
+        assert_eq!(
+            direct
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["PROJECT:demo", "REQ:demo/root", "REQ:demo/child"]
+        );
+
+        let transitive = compute_scope(
+            &registry,
+            "REQ:demo/root",
+            DetailLevel::None,
+            DetailLevel::Summary,
+            Some(2),
+        );
+        assert_eq!(
+            transitive
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "PROJECT:demo",
+                "REQ:demo/root",
+                "REQ:demo/child",
+                "REQ:demo/leaf",
+            ]
+        );
     }
 }

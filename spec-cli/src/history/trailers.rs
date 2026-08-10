@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use anyhow::Result;
-use regex::Regex;
 use once_cell::sync::Lazy;
+use regex::Regex;
 
 static TRAILER_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^Spec-Ref:\s+(.+?)(?:\s+\((\w+)\))?\s*$").unwrap());
@@ -11,6 +11,7 @@ static TRAILER_RE: Lazy<Regex> =
 #[derive(Debug, Clone)]
 pub struct TrailerEvent {
     pub sha: String,
+    pub full_sha: String,
     pub spec_ref: String,
     pub kind: String,
     pub date: String,
@@ -19,9 +20,21 @@ pub struct TrailerEvent {
 
 /// Walk git log and extract Spec-Ref: trailers.
 pub fn walk_trailers(repo_path: &Path) -> Result<Vec<TrailerEvent>> {
+    walk_trailers_from(repo_path, None)
+}
+
+/// Walk Git history from an optional revision and extract `Spec-Ref:` trailers.
+/// When no revision is supplied, history starts at HEAD.
+pub fn walk_trailers_from(repo_path: &Path, revision: Option<&str>) -> Result<Vec<TrailerEvent>> {
     let repo = git2::Repository::discover(repo_path)?;
     let mut revwalk = repo.revwalk()?;
-    revwalk.push_head()?;
+    match revision {
+        Some(revision) => {
+            let object = repo.revparse_single(revision)?;
+            revwalk.push(object.peel_to_commit()?.id())?;
+        }
+        None => revwalk.push_head()?,
+    }
     revwalk.set_sorting(git2::Sort::TIME)?;
 
     let mut events = Vec::new();
@@ -37,11 +50,7 @@ pub fn walk_trailers(repo_path: &Path) -> Result<Vec<TrailerEvent>> {
         let sha = oid.to_string();
         let short_sha = &sha[..7.min(sha.len())];
 
-        let author = commit
-            .author()
-            .name()
-            .unwrap_or("unknown")
-            .to_string();
+        let author = commit.author().name().unwrap_or("unknown").to_string();
 
         let time = commit.time();
         let date = format_epoch(time.seconds());
@@ -56,6 +65,7 @@ pub fn walk_trailers(repo_path: &Path) -> Result<Vec<TrailerEvent>> {
 
                 events.push(TrailerEvent {
                     sha: short_sha.to_string(),
+                    full_sha: sha.clone(),
                     spec_ref,
                     kind,
                     date: date.clone(),

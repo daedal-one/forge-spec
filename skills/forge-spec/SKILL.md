@@ -70,7 +70,17 @@ spec render <relevant-id> --target=agent --include-source
 
 Use `spec coverage <parent-id>` for clause refinement, `spec graph` for the project hierarchy, `spec graph --refinement` for refinement alone, and `spec lint --require-symbols` when language-server availability is an enforced requirement. Fix errors before handoff and state warnings or unavailable source-symbol validation plainly.
 
-When implementing from specs, render the relevant scope before editing code and update specs when the agreed contract changes. For commits touching a spec or its implementation, add a trailer such as:
+When changing an accepted spec or implementing from one, review impact before editing code:
+
+```sh
+spec impact <relevant-id-or-anchor> --target agent
+# For existing branch changes:
+spec impact --base <merge-base-or-upstream> --target agent
+```
+
+Treat explicit source references and Git-trailer history as traceability evidence, not a complete runtime dependency graph. Review every transitive refinement path and reported gap. Create missing TASK specs deliberately and use `spec start <task-id>` only when implementation begins; `spec impact` is read-only.
+
+Then render the relevant scope before editing code and update specs when the agreed contract changes. For commits touching a spec or its implementation, add a trailer such as:
 
 ```text
 Spec-Ref: REQ:auth/session-expiry (implements)

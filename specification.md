@@ -516,8 +516,8 @@ Default scope:
 
 - The configured project description, in full and first.
 - The focal spec(s), in full.
-- Direct ancestors in full.
-- Direct descendants summarized (frontmatter `summary:` + ID only).
+- Ancestors in full up to `--depth` (default one edge).
+- Descendants summarized up to `--depth` (default one edge).
 - Siblings as IDs only.
 - Glossary terms used in any included body, in full.
 
@@ -594,6 +594,8 @@ Subcommands:
 | `spec children <id>`                | list direct refining children                                 |
 | `spec ancestors <id>`               | list direct refined-by parents                                |
 | `spec coverage <id>`                | clause-by-clause refinement-coverage report                   |
+| `spec impact <id-or-anchor> [--target agent]` | prospective transitive impact report                |
+| `spec impact --base B [--head H] [--target agent]` | impact of parsed Git/working-tree changes     |
 | `spec orphans`                      | list referenceless leaf specs                                 |
 | `spec migrate [--from B] [--to B]` | compose and apply format migrations, then rewrite redirects  |
 | `spec migrate --guide [--target agent]` | emit the composed changelog and migration instructions  |
@@ -649,7 +651,51 @@ guidance requires the generated purpose, scope, non-goals, principles,
 summary, and owners to be reviewed; mechanical migration does not invent
 project intent.
 
-### 10.2 Language-server integration
+### 10.2 Change-impact analysis
+
+`spec impact` is a read-only bridge from changed intent to implementation
+review. It has two mutually exclusive modes:
+
+```sh
+spec impact REQ:auth/session-management#c-lifetime
+spec impact --base origin/main --head working-tree --target agent
+```
+
+Subject mode starts from an exact current specification, typed-block anchor, or
+clause anchor. Git mode compares the parsed specifications at `--base` with a
+revision supplied by `--head`, or with the index plus working tree when head is
+omitted or is `working-tree`. Added and removed documents are semantic changes;
+edits whose parsed frontmatter, prose, blocks, and clauses are unchanged are
+reported as formatting-only and do not trigger a cascade.
+
+For each semantic input, the command traverses refining REQ and TASK documents
+transitively. An anchored input follows only refinements of that semantic unit;
+a typed-block input also includes its nested clause anchors. Document-level
+inputs follow every refinement of that document. A PROJECT input affects every
+document because project intent is ambient context. Git mode traverses both the
+base and head graphs and unions the results, preserving removed specifications
+and relationships for review. Every affected document includes its minimum
+depth and one deterministic, clause-qualified explanation path.
+
+Implementation evidence has two explicit confidence classes:
+
+- authored `spec:src:` file, line, and symbol references from every affected
+  document in either snapshot; and
+- source and test paths changed by historical commits carrying a matching
+  typed `Spec-Ref:` trailer.
+
+The report also includes affected TASK progress and gaps where a leaf has no
+source or historical implementation evidence, the closure has no attached
+TASK, or no explicit or historical test evidence exists. These are review
+signals, not proof of the complete runtime dependency graph.
+
+The default human target is Markdown. `--target agent` emits the same facts in
+a deterministic XML document rooted at
+`<forge-spec-impact schema-version="1">`, including inputs, affected specs,
+paths, sources, history, tasks, gaps, notes, and handoff instructions. The
+command never creates TASK documents, changes task state, or edits code.
+
+### 10.3 Language-server integration
 
 `spec lsp` is a Language Server Protocol server for `.spec.md` files. It
 publishes lint diagnostics for unsaved buffers and provides completion, hover,

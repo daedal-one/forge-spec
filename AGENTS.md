@@ -28,6 +28,8 @@ spec lint                      # validate all rules (pre-commit)
 spec render REQ:auth/foo --target=agent   # XML envelope for LLM context
 spec children REQ:auth/foo     # who refines this?
 spec coverage REQ:auth/foo     # clause-by-clause coverage
+spec impact REQ:auth/foo#c-id  # cascading spec, task, source, and history impact
+spec impact --base origin/main --target agent  # review changed specs before coding
 spec graph                     # DOT output of project hierarchy
 spec graph --refinement        # DOT output of refinement DAG only
 spec migrate --guide --target agent   # composed migration context
@@ -47,5 +49,5 @@ Full spec: `specification.md`. Key sections by line number:
 | Git trailers & history | 399-453 | 7 |
 | Render targets (human & agent XML) | 454-538 | 8 |
 | Lint rules R001-R025 | 539-578 | 9 |
-| CLI initialization, migration, and LSP integration | 579-682 | 10-10.2 |
-| Worked file template | 683-735 | 11 |
+| CLI initialization, migration, impact, and LSP integration | 579-728 | 10-10.3 |
+| Worked file template | 729-781 | 11 |

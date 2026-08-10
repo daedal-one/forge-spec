@@ -2,10 +2,10 @@ use anyhow::Result;
 
 use crate::cli::Shell;
 
-const SUBCOMMANDS: &str = "new lint render graph history children ancestors coverage orphans migrate symbols resolve lsp todo start done block reset defer wontdo tree explore completions";
+const SUBCOMMANDS: &str = "new lint render graph history children ancestors coverage impact orphans migrate symbols resolve lsp todo start done block reset defer wontdo tree explore completions";
 
 const ID_TAKING: &str =
-    "render history children ancestors coverage start done block reset defer wontdo";
+    "render history children ancestors coverage impact start done block reset defer wontdo";
 
 pub fn run(shell: Shell) -> Result<()> {
     let script = match shell {
@@ -102,6 +102,7 @@ fn fish_script() -> String {
         ("children", "List direct refining children"),
         ("ancestors", "List direct refined-by parents"),
         ("coverage", "Clause-by-clause refinement coverage"),
+        ("impact", "Measure cascading specification and code impact"),
         ("orphans", "List specs with no refinement relationships"),
         ("migrate", "Explain or apply format migrations"),
         ("symbols", "List source symbols through a language server"),

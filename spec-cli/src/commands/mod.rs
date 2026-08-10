@@ -3,6 +3,7 @@ pub mod completions;
 pub mod explore;
 pub mod graph;
 pub mod history;
+pub mod impact;
 pub mod init;
 pub mod lint;
 pub mod migrate;
