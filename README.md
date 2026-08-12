@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.svg" alt="forge-spec logo" width="480">
+</p>
+
 # forge-spec
 
 A file format and mini-toolchain for project specifications.
