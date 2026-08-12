@@ -38,6 +38,16 @@ impl SpecConfig {
             declared: true,
         })
     }
+
+    pub(crate) fn from_toml(content: &str) -> Result<Self> {
+        let raw: RawSpecConfig =
+            toml::from_str(content).context("parsing candidate _config.toml")?;
+        Ok(Self {
+            baseline: raw.baseline,
+            project: raw.project,
+            declared: true,
+        })
+    }
 }
 
 #[cfg(test)]

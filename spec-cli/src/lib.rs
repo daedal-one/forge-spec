@@ -15,6 +15,7 @@ pub mod migration;
 pub mod model;
 pub mod parse;
 pub mod project;
+pub mod projection;
 pub mod render;
 pub mod symbol;
 pub mod workspace;
