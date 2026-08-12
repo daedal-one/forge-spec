@@ -1,14 +1,26 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-pub const CURRENT_SPEC_BASELINE: &str = "forge-spec-v0.3.0";
+pub const CURRENT_SPEC_BASELINE: &str = "forge-spec-v0.4.0";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DocumentationCollectionConfig {
+    pub id: String,
+    pub title: String,
+    pub root: String,
+    pub include: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct SpecConfig {
     pub baseline: String,
     pub project: Option<String>,
+    pub documentation: Vec<DocumentationCollectionConfig>,
     pub declared: bool,
 }
 
@@ -16,6 +28,8 @@ pub struct SpecConfig {
 struct RawSpecConfig {
     baseline: String,
     project: Option<String>,
+    #[serde(default)]
+    documentation: Vec<DocumentationCollectionConfig>,
 }
 
 impl SpecConfig {
@@ -25,6 +39,7 @@ impl SpecConfig {
             return Ok(Self {
                 baseline: CURRENT_SPEC_BASELINE.into(),
                 project: None,
+                documentation: Vec::new(),
                 declared: false,
             });
         }
@@ -35,6 +50,7 @@ impl SpecConfig {
         Ok(Self {
             baseline: raw.baseline,
             project: raw.project,
+            documentation: raw.documentation,
             declared: true,
         })
     }
@@ -45,6 +61,7 @@ impl SpecConfig {
         Ok(Self {
             baseline: raw.baseline,
             project: raw.project,
+            documentation: raw.documentation,
             declared: true,
         })
     }
@@ -59,12 +76,33 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:forge-spec\"\n",
+            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:forge-spec\"\n",
         )
         .unwrap();
         let config = SpecConfig::load(temp.path()).unwrap();
         assert!(config.declared);
         assert_eq!(config.baseline, CURRENT_SPEC_BASELINE);
         assert_eq!(config.project.as_deref(), Some("PROJECT:forge-spec"));
+        assert!(config.documentation.is_empty());
+    }
+
+    #[test]
+    fn loads_documentation_collections() {
+        let config = SpecConfig::from_toml(
+            r#"baseline = "forge-spec-v0.4.0"
+project = "PROJECT:forge-spec"
+
+[[documentation]]
+id = "guides"
+title = "Guides"
+root = "docs"
+include = ["**/*.md"]
+exclude = ["generated/**"]
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.documentation.len(), 1);
+        assert_eq!(config.documentation[0].id, "guides");
+        assert_eq!(config.documentation[0].exclude, ["generated/**"]);
     }
 }

@@ -11,15 +11,19 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
+use crate::documentation::{
+    discover_documentation, matching_collections, parse_documentation, DocumentationIndex,
+    DocumentationIssue, DocumentationLinkTarget,
+};
 use crate::lint::diagnostic::{Diagnostic, Severity};
-use crate::model::config::{SpecConfig, CURRENT_SPEC_BASELINE};
+use crate::model::config::{DocumentationCollectionConfig, SpecConfig, CURRENT_SPEC_BASELINE};
 use crate::model::document::SpecDocument;
 use crate::model::frontmatter::TypeSpecificFields;
 use crate::model::reference::{SourceTarget, SpecReference};
 use crate::model::registry::{Redirect, SpecRegistry};
 
-pub const SPEC_STATE_SCHEMA_VERSION: &str = "forge-spec-state-v1";
-pub const SPEC_DELTA_SCHEMA_VERSION: &str = "forge-spec-delta-v1";
+pub const SPEC_STATE_SCHEMA_VERSION: &str = "forge-spec-state-v2";
+pub const SPEC_DELTA_SCHEMA_VERSION: &str = "forge-spec-delta-v2";
 pub const SPEC_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Repository-relative changes layered over the saved `.specs/` tree.
@@ -35,7 +39,17 @@ pub enum OverlayEntry {
 pub struct ProjectedConfig {
     pub baseline: String,
     pub project: Option<String>,
+    pub documentation: Vec<ProjectedDocumentationCollection>,
     pub declared: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ProjectedDocumentationCollection {
+    pub id: String,
+    pub title: String,
+    pub root: String,
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -112,6 +126,44 @@ pub struct ProjectedSpecification {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ProjectedDocumentationHeading {
+    pub title: String,
+    pub segments: Vec<String>,
+    pub level: u8,
+    pub line: usize,
+    pub end_line: usize,
+    pub fragment: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ProjectedDocumentation {
+    pub collection_id: String,
+    pub path: String,
+    pub title: String,
+    pub summary: Option<String>,
+    pub headings: Vec<ProjectedDocumentationHeading>,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentationLinkKind {
+    Specification,
+    Documentation,
+    Source,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ProjectedDocumentationLink {
+    pub source_kind: String,
+    pub source: String,
+    pub target_kind: DocumentationLinkKind,
+    pub target: String,
+    pub label: String,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RelationshipKind {
     ProjectContainment,
@@ -185,6 +237,8 @@ pub struct SpecState {
     pub valid: bool,
     pub config: ProjectedConfig,
     pub specifications: Vec<ProjectedSpecification>,
+    pub documentation: Vec<ProjectedDocumentation>,
+    pub documentation_links: Vec<ProjectedDocumentationLink>,
     pub redirects: Vec<ProjectedRedirect>,
     pub relationships: Vec<ProjectedRelationship>,
     pub source_references: Vec<ProjectedSourceReference>,
@@ -211,6 +265,13 @@ pub struct ChangedSpecification {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangedDocumentation {
+    pub path: String,
+    pub before: ProjectedDocumentation,
+    pub after: ProjectedDocumentation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigChange {
     pub before: ProjectedConfig,
     pub after: ProjectedConfig,
@@ -226,12 +287,17 @@ pub struct SpecDelta {
     pub added_specifications: Vec<ProjectedSpecification>,
     pub removed_specifications: Vec<ProjectedSpecification>,
     pub changed_specifications: Vec<ChangedSpecification>,
+    pub added_documentation: Vec<ProjectedDocumentation>,
+    pub removed_documentation: Vec<ProjectedDocumentation>,
+    pub changed_documentation: Vec<ChangedDocumentation>,
     pub added_redirects: Vec<ProjectedRedirect>,
     pub removed_redirects: Vec<ProjectedRedirect>,
     pub added_relationships: Vec<ProjectedRelationship>,
     pub removed_relationships: Vec<ProjectedRelationship>,
     pub added_source_references: Vec<ProjectedSourceReference>,
     pub removed_source_references: Vec<ProjectedSourceReference>,
+    pub added_documentation_links: Vec<ProjectedDocumentationLink>,
+    pub removed_documentation_links: Vec<ProjectedDocumentationLink>,
     pub added_diagnostics: Vec<ProjectedDiagnostic>,
     pub removed_diagnostics: Vec<ProjectedDiagnostic>,
 }
@@ -272,6 +338,38 @@ impl SpecDelta {
             })
             .collect();
 
+        let before_documentation = before
+            .documentation
+            .iter()
+            .map(|document| (document.path.clone(), document))
+            .collect::<BTreeMap<_, _>>();
+        let after_documentation = after
+            .documentation
+            .iter()
+            .map(|document| (document.path.clone(), document))
+            .collect::<BTreeMap<_, _>>();
+        let added_documentation = after_documentation
+            .iter()
+            .filter(|(path, _)| !before_documentation.contains_key(*path))
+            .map(|(_, document)| (*document).clone())
+            .collect();
+        let removed_documentation = before_documentation
+            .iter()
+            .filter(|(path, _)| !after_documentation.contains_key(*path))
+            .map(|(_, document)| (*document).clone())
+            .collect();
+        let changed_documentation = after_documentation
+            .iter()
+            .filter_map(|(path, document)| {
+                let before = before_documentation.get(path)?;
+                (*before != *document).then(|| ChangedDocumentation {
+                    path: path.clone(),
+                    before: (*before).clone(),
+                    after: (*document).clone(),
+                })
+            })
+            .collect();
+
         Self {
             schema_version: SPEC_DELTA_SCHEMA_VERSION.into(),
             from_state_schema: before.schema_version.clone(),
@@ -284,6 +382,9 @@ impl SpecDelta {
             added_specifications,
             removed_specifications,
             changed_specifications,
+            added_documentation,
+            removed_documentation,
+            changed_documentation,
             added_redirects: set_difference(&before.redirects, &after.redirects),
             removed_redirects: set_difference(&after.redirects, &before.redirects),
             added_relationships: set_difference(&before.relationships, &after.relationships),
@@ -296,6 +397,14 @@ impl SpecDelta {
                 &after.source_references,
                 &before.source_references,
             ),
+            added_documentation_links: set_difference(
+                &before.documentation_links,
+                &after.documentation_links,
+            ),
+            removed_documentation_links: set_difference(
+                &after.documentation_links,
+                &before.documentation_links,
+            ),
             added_diagnostics: set_difference(&before.diagnostics, &after.diagnostics),
             removed_diagnostics: set_difference(&after.diagnostics, &before.diagnostics),
         }
@@ -306,21 +415,51 @@ impl SpecDelta {
     }
 }
 
-/// Project the saved specification tree plus an in-memory overlay.
+/// Project the saved specification tree, configured documentation, and an
+/// in-memory repository-relative overlay.
 ///
 /// Overlay keys may be relative to the supplied `.specs/` directory or may
 /// include its repository-relative `.specs/` prefix. Absolute paths and paths
 /// containing `..` are rejected before any input is read.
 pub fn project(specs_dir: &Path, overlay: &Overlay) -> Result<SpecState> {
+    let repository_root = specs_dir
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| specs_dir.to_path_buf());
     let mut normalized_overlay = BTreeMap::new();
     for (path, entry) in overlay {
         let relative = normalize_overlay_path(specs_dir, path)?;
         if normalized_overlay.insert(relative, entry.clone()).is_some() {
-            bail!("multiple overlay entries resolve to the same specification input");
+            bail!("multiple overlay entries resolve to the same repository input");
         }
     }
 
     let mut files = load_saved_inputs(specs_dir)?;
+    for (path, entry) in &normalized_overlay {
+        if !is_specification_input(path) {
+            continue;
+        }
+        match entry {
+            OverlayEntry::Upsert(content) => {
+                files.insert(path.clone(), content.clone());
+            }
+            OverlayEntry::Delete => {
+                files.remove(path);
+            }
+        }
+    }
+
+    let mut discovery_diagnostics = Vec::new();
+    let config = parse_config(
+        files.get(Path::new(".specs/_config.toml")),
+        &mut discovery_diagnostics,
+    );
+    let (discovered, issues) = discover_documentation(&repository_root, &config.documentation)?;
+    for entry in discovered {
+        let bytes = std::fs::read(&entry.source_path)
+            .with_context(|| format!("reading documentation {}", entry.source_path.display()))?;
+        files.insert(PathBuf::from(entry.repository_path), bytes);
+    }
     for (path, entry) in normalized_overlay {
         match entry {
             OverlayEntry::Upsert(content) => {
@@ -332,27 +471,67 @@ pub fn project(specs_dir: &Path, overlay: &Overlay) -> Result<SpecState> {
         }
     }
 
-    project_files(files)
+    project_files(files, issues, discovery_diagnostics)
 }
 
-fn project_files(files: BTreeMap<PathBuf, Vec<u8>>) -> Result<SpecState> {
-    let mut raw_diagnostics = Vec::new();
-    let config = parse_config(files.get(Path::new("_config.toml")), &mut raw_diagnostics);
-    let redirects = parse_redirects(
-        files.get(Path::new("_redirects.toml")),
+fn project_files(
+    files: BTreeMap<PathBuf, Vec<u8>>,
+    documentation_issues: Vec<DocumentationIssue>,
+    mut raw_diagnostics: Vec<Diagnostic>,
+) -> Result<SpecState> {
+    let config = parse_config(
+        files.get(Path::new(".specs/_config.toml")),
         &mut raw_diagnostics,
     );
+    let redirects = parse_redirects(
+        files.get(Path::new(".specs/_redirects.toml")),
+        &mut raw_diagnostics,
+    );
+    raw_diagnostics.extend(documentation_issues.into_iter().map(|issue| {
+        let mut diagnostic = projection_diagnostic(&issue.code, issue.message, &issue.file);
+        if let Some(line) = issue.line {
+            diagnostic = diagnostic.at_line(line);
+        }
+        diagnostic
+    }));
 
     let mut documents = Vec::new();
+    let mut documentation_documents = Vec::new();
     for (path, bytes) in &files {
-        if !is_spec_file(path) {
-            if path != Path::new("_config.toml") && path != Path::new("_redirects.toml") {
+        if !is_spec_repository_path(path) {
+            if path == Path::new(".specs/_config.toml")
+                || path == Path::new(".specs/_redirects.toml")
+            {
+                continue;
+            }
+            let path_text = path_string(path);
+            let collections = matching_collections(&path_text, &config.documentation)?;
+            if collections.len() != 1 {
                 raw_diagnostics.push(projection_diagnostic(
                     "P004",
-                    "unsupported projection input; expected .spec.md, _config.toml, or _redirects.toml",
+                    if collections.is_empty() {
+                        "unsupported projection input; Markdown is not enrolled by a documentation collection"
+                    } else {
+                        "documentation input belongs to overlapping collections"
+                    },
                     path,
                 ));
+                continue;
             }
+            let Ok(content) = std::str::from_utf8(bytes) else {
+                raw_diagnostics.push(projection_diagnostic(
+                    "P002",
+                    "documentation input is not valid UTF-8",
+                    path,
+                ));
+                continue;
+            };
+            documentation_documents.push(parse_documentation(
+                path,
+                &path_text,
+                &collections[0],
+                content,
+            ));
             continue;
         }
         let Ok(content) = std::str::from_utf8(bytes) else {
@@ -378,7 +557,9 @@ fn project_files(files: BTreeMap<PathBuf, Vec<u8>>) -> Result<SpecState> {
             .cmp(&b.id_str())
             .then_with(|| a.source_path.cmp(&b.source_path))
     });
-    let registry = build_registry(documents, config.clone(), redirects.clone());
+    let documentation =
+        DocumentationIndex::from_documents(Path::new(""), documentation_documents, Vec::new());
+    let registry = build_registry(documents, config.clone(), redirects.clone(), documentation);
     raw_diagnostics.extend(projection_lint(&registry));
 
     let specifications = registry
@@ -389,6 +570,13 @@ fn project_files(files: BTreeMap<PathBuf, Vec<u8>>) -> Result<SpecState> {
     let (relationships, source_references, mut source_diagnostics) =
         project_relationships(&registry);
     raw_diagnostics.append(&mut source_diagnostics);
+    let documentation = registry
+        .documentation
+        .documents
+        .iter()
+        .map(project_documentation)
+        .collect();
+    let documentation_links = project_documentation_links(&registry);
 
     let mut diagnostics = raw_diagnostics
         .into_iter()
@@ -414,9 +602,12 @@ fn project_files(files: BTreeMap<PathBuf, Vec<u8>>) -> Result<SpecState> {
         config: ProjectedConfig {
             baseline: config.baseline,
             project: config.project,
+            documentation: project_documentation_collections(&config.documentation),
             declared: config.declared,
         },
         specifications,
+        documentation,
+        documentation_links,
         redirects: redirects
             .into_iter()
             .map(|redirect| ProjectedRedirect {
@@ -450,17 +641,17 @@ fn load_saved_inputs(specs_dir: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>> {
             .strip_prefix(specs_dir)
             .context("resolving specification path relative to root")?
             .to_path_buf();
-        if !is_supported_path(&relative) {
+        if !is_supported_spec_relative_path(&relative) {
             continue;
         }
         let bytes = std::fs::read(entry.path())
             .with_context(|| format!("reading specification input {}", relative.display()))?;
-        files.insert(relative, bytes);
+        files.insert(Path::new(".specs").join(relative), bytes);
     }
     Ok(files)
 }
 
-fn normalize_overlay_path(specs_dir: &Path, path: &Path) -> Result<PathBuf> {
+fn normalize_overlay_path(_specs_dir: &Path, path: &Path) -> Result<PathBuf> {
     if path.is_absolute() {
         bail!("overlay paths must be repository-relative");
     }
@@ -478,22 +669,27 @@ fn normalize_overlay_path(specs_dir: &Path, path: &Path) -> Result<PathBuf> {
         bail!("overlay path must name an input file");
     }
 
-    let root_name = specs_dir.file_name();
-    if let Some(position) = root_name.and_then(|name| {
-        components
-            .iter()
-            .position(|component| component.as_os_str() == name)
-    }) {
-        components.drain(..=position);
+    let normalized: PathBuf = components.into_iter().collect();
+    if normalized.starts_with(".specs") {
+        return Ok(normalized);
     }
-    if components.is_empty() {
-        bail!("overlay path must name a file inside the specification root");
+    if is_supported_spec_relative_path(&normalized) {
+        return Ok(Path::new(".specs").join(normalized));
     }
-    Ok(components.into_iter().collect())
+    Ok(normalized)
 }
 
-fn is_supported_path(path: &Path) -> bool {
+fn is_supported_spec_relative_path(path: &Path) -> bool {
     is_spec_file(path) || path == Path::new("_config.toml") || path == Path::new("_redirects.toml")
+}
+
+fn is_specification_input(path: &Path) -> bool {
+    path.strip_prefix(".specs")
+        .is_ok_and(is_supported_spec_relative_path)
+}
+
+fn is_spec_repository_path(path: &Path) -> bool {
+    path.strip_prefix(".specs").is_ok_and(is_spec_file)
 }
 
 fn is_spec_file(path: &Path) -> bool {
@@ -507,6 +703,7 @@ fn parse_config(bytes: Option<&Vec<u8>>, diagnostics: &mut Vec<Diagnostic>) -> S
         return SpecConfig {
             baseline: CURRENT_SPEC_BASELINE.into(),
             project: None,
+            documentation: Vec::new(),
             declared: false,
         };
     };
@@ -535,6 +732,7 @@ fn invalid_config() -> SpecConfig {
     SpecConfig {
         baseline: String::new(),
         project: None,
+        documentation: Vec::new(),
         declared: true,
     }
 }
@@ -587,6 +785,7 @@ fn build_registry(
     documents: Vec<SpecDocument>,
     config: SpecConfig,
     redirects: Vec<Redirect>,
+    mut documentation: DocumentationIndex,
 ) -> SpecRegistry {
     let mut id_index = BTreeMap::new();
     let mut anchor_index = BTreeMap::new();
@@ -597,6 +796,17 @@ fn build_registry(
             anchor_index.insert(format!("{id}#{anchor}"), index);
         }
     }
+    for document in &documents {
+        let source = document.id_str();
+        for located in &document.references {
+            documentation.add_specification_backlink(
+                &located.reference,
+                &source,
+                &located.link_text,
+                located.line,
+            );
+        }
+    }
     SpecRegistry {
         documents,
         id_index,
@@ -604,6 +814,7 @@ fn build_registry(
         redirects,
         specs_dir: PathBuf::new(),
         config,
+        documentation,
     }
 }
 
@@ -642,6 +853,9 @@ fn projection_lint(registry: &SpecRegistry) -> Vec<Diagnostic> {
     diagnostics.extend(crate::lint::structural::check_project_root(registry));
     diagnostics.extend(crate::lint::structural::check_unique_ids(registry));
     diagnostics.extend(crate::lint::references::check_references(registry));
+    diagnostics.extend(crate::lint::references::check_documentation_references(
+        registry,
+    ));
     diagnostics.extend(crate::lint::references::check_summary_on_referenced(
         registry,
     ));
@@ -752,6 +966,91 @@ fn project_specification(document: &SpecDocument) -> ProjectedSpecification {
         blocks,
         body: document.body_raw.clone(),
     }
+}
+
+fn project_documentation_collections(
+    collections: &[DocumentationCollectionConfig],
+) -> Vec<ProjectedDocumentationCollection> {
+    let mut projected = collections
+        .iter()
+        .map(|collection| ProjectedDocumentationCollection {
+            id: collection.id.clone(),
+            title: collection.title.clone(),
+            root: collection.root.clone(),
+            include: collection.include.clone(),
+            exclude: collection.exclude.clone(),
+        })
+        .collect::<Vec<_>>();
+    projected.sort();
+    projected
+}
+
+fn project_documentation(
+    document: &crate::documentation::DocumentationDocument,
+) -> ProjectedDocumentation {
+    ProjectedDocumentation {
+        collection_id: document.collection_id.clone(),
+        path: document.path.clone(),
+        title: document.title.clone(),
+        summary: document.summary.clone(),
+        headings: document
+            .headings
+            .iter()
+            .map(|heading| ProjectedDocumentationHeading {
+                title: heading.title.clone(),
+                segments: heading.segments.clone(),
+                level: heading.level,
+                line: heading.line,
+                end_line: heading.end_line,
+                fragment: heading.fragment.clone(),
+            })
+            .collect(),
+        body: document.body.clone(),
+    }
+}
+
+fn project_documentation_links(registry: &SpecRegistry) -> Vec<ProjectedDocumentationLink> {
+    let mut links = BTreeSet::new();
+    for specification in &registry.documents {
+        for located in &specification.references {
+            if let SpecReference::Documentation(target) = &located.reference {
+                links.insert(ProjectedDocumentationLink {
+                    source_kind: "specification".to_string(),
+                    source: specification.id_str(),
+                    target_kind: DocumentationLinkKind::Documentation,
+                    target: target.to_string(),
+                    label: located.link_text.clone(),
+                    line: located.line,
+                });
+            }
+        }
+    }
+    for document in &registry.documentation.documents {
+        for link in &document.links {
+            let Some(target) = registry.documentation.canonical_target(link) else {
+                continue;
+            };
+            let target_kind = match &link.target {
+                DocumentationLinkTarget::Forge(SpecReference::Spec(_)) => {
+                    DocumentationLinkKind::Specification
+                }
+                DocumentationLinkTarget::Forge(SpecReference::Source(_)) => {
+                    DocumentationLinkKind::Source
+                }
+                DocumentationLinkTarget::Forge(SpecReference::Documentation(_))
+                | DocumentationLinkTarget::Markdown { .. } => DocumentationLinkKind::Documentation,
+            };
+            links.insert(ProjectedDocumentationLink {
+                source_kind: "documentation".to_string(),
+                source: document.path.clone(),
+                target_kind,
+                target,
+                label: link.label.clone(),
+                line: link.line,
+            });
+        }
+    }
+    links.into_iter().collect()
 }
 
 fn project_relationships(
@@ -954,6 +1253,7 @@ fn project_relationships(
                         selector,
                     });
                 }
+                SpecReference::Documentation(_) => {}
             }
         }
     }

@@ -11,6 +11,7 @@ use crate::project::{ensure_project_document, existing_project, write_project_co
 
 pub const LEGACY_SPEC_BASELINE: &str = "forge-spec-v0.1.0";
 pub const V0_2_SPEC_BASELINE: &str = "forge-spec-v0.2.0";
+pub const V0_3_SPEC_BASELINE: &str = "forge-spec-v0.3.0";
 
 type ApplyMigration = fn(&Path) -> Result<MigrationStepReport>;
 type VerifyMigration = fn(&Path) -> Result<()>;
@@ -31,6 +32,11 @@ const MIGRATIONS: &[MigrationDefinition] = &[
         guide: include_str!("../../migrations/forge-spec-v0.2.0-to-v0.3.0.yaml"),
         apply: apply_v0_2_to_v0_3,
         verify: verify_v0_2_to_v0_3,
+    },
+    MigrationDefinition {
+        guide: include_str!("../../migrations/forge-spec-v0.3.0-to-v0.4.0.yaml"),
+        apply: apply_v0_3_to_v0_4,
+        verify: verify_v0_3_to_v0_4,
     },
 ];
 
@@ -557,6 +563,20 @@ fn verify_v0_2_to_v0_3(specs_dir: &Path) -> Result<()> {
     if configured != document_id {
         bail!("configured project '{configured}' does not match migrated document '{document_id}'");
     }
+    Ok(())
+}
+
+fn apply_v0_3_to_v0_4(_specs_dir: &Path) -> Result<MigrationStepReport> {
+    // Documentation enrollment is intentionally explicit. Existing Markdown
+    // files remain outside the knowledge graph until a maintainer adds a
+    // configured collection.
+    Ok(MigrationStepReport::default())
+}
+
+fn verify_v0_3_to_v0_4(specs_dir: &Path) -> Result<()> {
+    // Composed plans write the final baseline only after every step verifies,
+    // so the declared value may still identify an earlier source here.
+    SpecConfig::load(specs_dir)?;
     Ok(())
 }
 

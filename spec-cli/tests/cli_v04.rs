@@ -8,7 +8,7 @@ fn workspace() -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
         temp.path().join("_config.toml"),
-        "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n",
+        "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
     )
     .unwrap();
     std::fs::write(
@@ -218,4 +218,123 @@ fn dynamic_completion_reaches_typed_document_selectors() {
     .contains("Policy"));
     let refinement = complete(&["relation", "refine", "REQ:demo/example"]);
     assert!(refinement.contains("REQ:demo/example#c-rule"));
+    let references = complete(&["inspect", "resolve"]);
+    assert!(references.contains("spec:REQ:demo/example#c-rule"));
+}
+
+#[test]
+fn documentation_commands_and_render_share_heading_resolution() {
+    let temp = tempfile::tempdir().unwrap();
+    let specs = temp.path().join(".specs");
+    let docs = temp.path().join("docs");
+    std::fs::create_dir_all(&specs).unwrap();
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(
+        specs.join("_config.toml"),
+        "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        specs.join("_project.spec.md"),
+        "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [carlo]\n---\n\n# Demo\n",
+    )
+    .unwrap();
+    std::fs::write(
+        specs.join("release.spec.md"),
+        "---\nid: REQ:demo/release\ntype: requirement\nstatus: accepted\nsummary: Release safely.\nowners: [carlo]\nlevel: MUST\nrefines: []\n---\n\n# Release\n\n[Rollback](spec:doc:docs/operations.md#heading=Operations/Deployment/Rollback)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        docs.join("operations.md"),
+        "# Operations\n\nRun production.\n\n## Deployment\n\n### Rollback\n\nRestore the last release for the [project](spec:PROJECT:demo) using the [release module](spec:src:src/release.rs).\n\n## Support\n\nPage the owner.\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(temp.path().join("src")).unwrap();
+    std::fs::write(temp.path().join("src/release.rs"), "pub fn rollback() {}\n").unwrap();
+
+    let render = Command::new(binary())
+        .args([
+            "--specs-dir",
+            specs.to_str().unwrap(),
+            "render",
+            "REQ:demo/release",
+            "--target",
+            "agent",
+            "--include-docs",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        render.status.success(),
+        "{}",
+        String::from_utf8_lossy(&render.stderr)
+    );
+    let render = String::from_utf8(render.stdout).unwrap();
+    assert!(render.contains("<documentation>"));
+    assert!(render.contains("spec:doc:docs/operations.md#heading=Operations/Deployment/Rollback"));
+    assert!(render.contains("### Rollback"));
+    assert!(!render.contains("## Support"));
+
+    let inspect = Command::new(binary())
+        .args([
+            "--specs-dir",
+            specs.to_str().unwrap(),
+            "inspect",
+            "documentation",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(inspect.status.success());
+    let inspect: serde_json::Value = serde_json::from_slice(&inspect.stdout).unwrap();
+    assert_eq!(inspect[0]["path"], "docs/operations.md");
+
+    let completion = Command::new(binary())
+        .args([
+            "--specs-dir",
+            specs.to_str().unwrap(),
+            "__complete",
+            "suggest",
+            "inspect",
+            "resolve",
+        ])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8(completion.stdout)
+        .unwrap()
+        .contains("spec:doc:docs/operations.md#heading=Operations/Deployment/Rollback"));
+
+    let backlinks = Command::new(binary())
+        .args([
+            "--specs-dir",
+            specs.to_str().unwrap(),
+            "inspect",
+            "backlinks",
+            "spec:doc:docs/operations.md",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(backlinks.status.success());
+    let backlinks: serde_json::Value = serde_json::from_slice(&backlinks.stdout).unwrap();
+    assert_eq!(backlinks[0]["source"], "REQ:demo/release");
+
+    let project_backlinks = Command::new(binary())
+        .args([
+            "--specs-dir",
+            specs.to_str().unwrap(),
+            "inspect",
+            "backlinks",
+            "PROJECT:demo",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    let project_backlinks: serde_json::Value =
+        serde_json::from_slice(&project_backlinks.stdout).unwrap();
+    assert!(project_backlinks
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|backlink| backlink["source"] == "docs/operations.md"));
 }

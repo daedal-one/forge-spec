@@ -1,2 +1,14 @@
-baseline = "forge-spec-v0.3.0"
+baseline = "forge-spec-v0.4.0"
 project = "PROJECT:forge-spec"
+
+[[documentation]]
+id = "project"
+title = "Project documentation"
+root = "."
+include = ["README.md","AGENTS.md","format-memo.md","specification.md"]
+
+[[documentation]]
+id = "integrations"
+title = "Tooling integrations"
+root = "."
+include = ["editors/vscode/README.md","skills/forge-spec/SKILL.md"]

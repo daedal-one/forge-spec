@@ -61,7 +61,7 @@ fn bash_script(rows: &[(String, Vec<(String, String)>)]) -> String {
         cases.push_str(&format!("        {path:?}) choices={words:?} ;;\n"));
     }
     format!(
-        r#"# bash completion for spec 0.4; command levels are derived from Clap
+        r#"# bash completion for spec 0.5; command levels are derived from Clap
 _spec() {{
     local cur path choices value
     COMPREPLY=()
@@ -95,7 +95,7 @@ fn zsh_script(rows: &[(String, Vec<(String, String)>)]) -> String {
     }
     format!(
         r#"#compdef spec
-# zsh completion for spec 0.4; command levels are derived from Clap
+# zsh completion for spec 0.5; command levels are derived from Clap
 _spec() {{
   local path
   local -a choices values
@@ -116,7 +116,7 @@ compdef _spec spec
 }
 
 fn fish_script(rows: &[(String, Vec<(String, String)>)]) -> String {
-    let mut output = String::from("# fish completion for spec 0.4; command levels are derived from Clap\ncomplete -c spec -e\n");
+    let mut output = String::from("# fish completion for spec 0.5; command levels are derived from Clap\ncomplete -c spec -e\n");
     for (path, children) in rows {
         let parent = path.split_whitespace().last();
         for (name, description) in children {

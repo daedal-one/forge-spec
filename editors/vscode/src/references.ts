@@ -1,19 +1,23 @@
 export interface ReferencePresentation {
   href: string
-  kind: 'spec' | 'source'
+  kind: 'spec' | 'source' | 'documentation'
   label: string
   title: string
 }
 
 const SPEC_REFERENCE = /^spec:(?:PROJECT:[A-Za-z0-9][\w-]*|(?:REQ|INV|IFC|ADR|GLO|TOPIC|SCN|TASK):[A-Za-z0-9][\w-]*\/[A-Za-z0-9][\w-]*)(?:#[A-Za-z0-9][\w-]*)?/
 const SOURCE_REFERENCE = /^spec:src:[A-Za-z0-9_./%-]+(?::\d+(?:-\d+)?|#symbol=[A-Za-z0-9_.~%/-]+)?/
+const DOCUMENTATION_REFERENCE = /^spec:doc:[A-Za-z0-9_./%-]+(?:#heading=[A-Za-z0-9_.~%/-]+)?/
 
 export function matchForgeReference(source: string): string | undefined {
+  const documentationReference = source.match(DOCUMENTATION_REFERENCE)?.[0]?.replace(/[.,;!?]+$/, '')
+  if (documentationReference) return documentationReference
   const sourceReference = source.match(SOURCE_REFERENCE)?.[0]?.replace(/[.,;!?]+$/, '')
   return sourceReference || source.match(SPEC_REFERENCE)?.[0]
 }
 
 export function referencePresentation(href: string): ReferencePresentation | undefined {
+  if (href.startsWith('spec:doc:')) return documentationPresentation(href)
   if (href.startsWith('spec:src:')) return sourcePresentation(href)
   if (!SPEC_REFERENCE.test(href) || matchForgeReference(href) !== href) return undefined
 
@@ -23,6 +27,32 @@ export function referencePresentation(href: string): ReferencePresentation | und
     kind: 'spec',
     label: specificationDisplayName(target),
     title: target,
+  }
+}
+
+function documentationPresentation(href: string): ReferencePresentation | undefined {
+  if (!DOCUMENTATION_REFERENCE.test(href) || matchForgeReference(href) !== href) return undefined
+  const target = href.slice('spec:doc:'.length)
+  const marker = '#heading='
+  const markerIndex = target.indexOf(marker)
+  const sourcePath = markerIndex >= 0 ? target.slice(0, markerIndex) : target
+  if (!sourcePath || sourcePath.includes('#')) return undefined
+  if (markerIndex < 0) {
+    return {
+      href,
+      kind: 'documentation',
+      label: basename(sourcePath),
+      title: sourcePath,
+    }
+  }
+  const segments = target.slice(markerIndex + marker.length).split('/')
+  if (segments.some(segment => !segment)) return undefined
+  const heading = segments.map(decodeReferencePart).join(' / ')
+  return {
+    href,
+    kind: 'documentation',
+    label: `${basename(sourcePath)} › ${heading}`,
+    title: `${sourcePath} — ${heading}`,
   }
 }
 

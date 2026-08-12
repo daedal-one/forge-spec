@@ -2,6 +2,7 @@ pub mod change;
 pub mod complete;
 pub mod completions;
 pub mod dispatch;
+pub mod documentation;
 pub mod explore;
 pub mod graph;
 pub mod history;

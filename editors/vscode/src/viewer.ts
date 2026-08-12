@@ -17,6 +17,8 @@ export class SpecViewerProvider implements vscode.CustomTextEditorProvider {
     generation: 0,
     stats: { parsed: 0, loadedFromCache: 0, removed: 0 },
     documents: [],
+    documentationCollections: [],
+    documentation: [],
   }
 
   constructor(private readonly service: ForgeSpecService) {}
@@ -465,6 +467,7 @@ article a.forge-reference:hover, .relationships a.forge-reference:hover { border
 article a.forge-reference::before, .relationships a.forge-reference::before { color: var(--vscode-descriptionForeground); font-size: .85em; }
 article a.forge-reference-spec::before, .relationships a.forge-reference-spec::before { content: '◇'; }
 article a.forge-reference-source::before, .relationships a.forge-reference-source::before { content: '⌘'; }
+article a.forge-reference-documentation::before, .relationships a.forge-reference-documentation::before { content: '§'; }
 article code { font-family: var(--vscode-editor-font-family); background: var(--vscode-textCodeBlock-background); padding: 1px 4px; border-radius: 3px; }
 article pre { overflow: auto; padding: 14px; background: var(--vscode-textCodeBlock-background); border-radius: 6px; }
 article blockquote { border-left: 3px solid var(--vscode-textBlockQuote-border); margin-left: 0; padding-left: 16px; color: var(--vscode-descriptionForeground); }

@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use spec_cli::projection::{
-    project, Overlay, OverlayEntry, ProjectedSourceSelector, RelationshipKind,
-    SPEC_DELTA_SCHEMA_VERSION, SPEC_STATE_SCHEMA_VERSION,
+    project, DocumentationLinkKind, Overlay, OverlayEntry, ProjectedSourceSelector,
+    RelationshipKind, SPEC_DELTA_SCHEMA_VERSION, SPEC_STATE_SCHEMA_VERSION,
 };
 
-const CONFIG: &str = "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n";
+const CONFIG: &str = "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n";
 
 const PROJECT: &str = r#"---
 id: PROJECT:demo
@@ -271,10 +271,10 @@ fn invalid_inputs_are_retained_as_sorted_diagnostics() {
     assert_eq!(
         paths,
         vec![
+            ".specs/binary.spec.md",
+            ".specs/broken.spec.md",
             "_config.toml",
             "_redirects.toml",
-            "binary.spec.md",
-            "broken.spec.md"
         ]
     );
     assert!(state
@@ -316,4 +316,67 @@ fn semantic_delta_is_complete_and_deterministic() {
         delta.canonical_json().unwrap(),
         before.diff(&after).canonical_json().unwrap()
     );
+}
+
+#[test]
+fn projects_configured_documentation_links_headings_and_overlay_deltas() {
+    let temp = tempfile::tempdir().unwrap();
+    let specs = temp.path().join(".specs");
+    write(
+        &specs.join("_config.toml"),
+        "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+    );
+    write(
+        &specs.join("_project.spec.md"),
+        &format!("{PROJECT}\n[Deployment guide](spec:doc:docs/guide.md#heading=Guide/Deploy)\n"),
+    );
+    write(
+        &temp.path().join("docs/guide.md"),
+        "# Guide\n\nSummary.\n\n## Deploy\n\nSee the [runbook](runbook.md#steps) and [project](spec:PROJECT:demo).\n",
+    );
+    write(
+        &temp.path().join("docs/runbook.md"),
+        "# Runbook\n\n## Steps\n\nDo it.\n",
+    );
+
+    let before = project(&specs, &Overlay::new()).unwrap();
+    assert!(before.valid, "{:?}", before.diagnostics);
+    assert_eq!(before.schema_version, SPEC_STATE_SCHEMA_VERSION);
+    assert_eq!(before.documentation.len(), 2);
+    assert_eq!(
+        before.documentation[0].headings[1].segments,
+        ["Guide".to_string(), "Deploy".to_string()]
+    );
+    assert!(before.documentation_links.iter().any(|link| {
+        link.source_kind == "specification"
+            && link.target == "spec:doc:docs/guide.md#heading=Guide/Deploy"
+    }));
+    assert!(before.documentation_links.iter().any(|link| {
+        link.source == "docs/guide.md"
+            && link.target_kind == DocumentationLinkKind::Documentation
+            && link.target == "spec:doc:docs/runbook.md#heading=Runbook/Steps"
+    }));
+    assert!(before.documentation_links.iter().any(|link| {
+        link.source == "docs/guide.md"
+            && link.target_kind == DocumentationLinkKind::Specification
+            && link.target == "spec:PROJECT:demo"
+    }));
+
+    let overlay = BTreeMap::from([(
+        "docs/guide.md".into(),
+        OverlayEntry::Upsert(
+            b"# Guide\n\nChanged summary.\n\n## Deploy\n\nSee the [project](spec:PROJECT:demo).\n"
+                .to_vec(),
+        ),
+    )]);
+    let after = project(&specs, &overlay).unwrap();
+    let delta = before.diff(&after);
+    assert_eq!(delta.changed_documentation.len(), 1);
+    assert_eq!(delta.changed_documentation[0].path, "docs/guide.md");
+    assert!(delta
+        .removed_documentation_links
+        .iter()
+        .any(|link| { link.target == "spec:doc:docs/runbook.md#heading=Runbook/Steps" }));
+    assert!(delta.added_documentation.is_empty());
+    assert!(delta.removed_documentation.is_empty());
 }

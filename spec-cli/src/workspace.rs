@@ -10,12 +10,18 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use walkdir::WalkDir;
 
+use crate::documentation::{
+    discover_documentation, matching_collections, parse_documentation, DiscoveredDocumentation,
+    DocumentationBacklink, DocumentationDocument, DocumentationIndex, DocumentationIssue,
+    DocumentationReference,
+};
+use crate::model::config::SpecConfig;
 use crate::model::document::SpecDocument;
 use crate::model::frontmatter::TypeSpecificFields;
 use crate::model::reference::{SourceTarget, SpecReference};
 use crate::model::registry::SpecRegistry;
 
-const CACHE_SCHEMA_VERSION: &str = "3";
+const CACHE_SCHEMA_VERSION: &str = "4";
 
 #[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +38,8 @@ pub struct ExplorerSnapshot {
     pub stats: IndexStats,
     pub project_id: Option<String>,
     pub documents: Vec<ExplorerDocument>,
+    pub documentation_collections: Vec<ExplorerDocumentationCollection>,
+    pub documentation: Vec<ExplorerDocumentation>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -50,6 +58,55 @@ pub struct ExplorerDocument {
     pub categorized_under: Vec<String>,
     pub blocks: Vec<ExplorerBlock>,
     pub sources: Vec<ExplorerSource>,
+    pub documentation: Vec<ExplorerReference>,
+    pub documented_by: Vec<DocumentationBacklink>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerReference {
+    pub reference: String,
+    pub label: String,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerDocumentationCollection {
+    pub id: String,
+    pub title: String,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerDocumentation {
+    pub collection_id: String,
+    pub collection_title: String,
+    pub path: String,
+    pub title: String,
+    pub summary: Option<String>,
+    pub uri: String,
+    pub headings: Vec<ExplorerDocumentationHeading>,
+    pub links: Vec<ExplorerDocumentationLink>,
+    pub backlinks: Vec<DocumentationBacklink>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerDocumentationHeading {
+    pub title: String,
+    pub reference: String,
+    pub level: u8,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerDocumentationLink {
+    pub reference: String,
+    pub label: String,
+    pub line: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,6 +144,8 @@ pub struct WorkspaceIndex {
     repository_root: PathBuf,
     connection: Connection,
     documents: BTreeMap<PathBuf, SpecDocument>,
+    documentation_documents: BTreeMap<PathBuf, DocumentationDocument>,
+    documentation_issues: Vec<DocumentationIssue>,
     registry: SpecRegistry,
     generation: u64,
     stats: IndexStats,
@@ -117,6 +176,8 @@ impl WorkspaceIndex {
             repository_root,
             connection,
             documents: BTreeMap::new(),
+            documentation_documents: BTreeMap::new(),
+            documentation_issues: Vec::new(),
             registry: empty_registry,
             generation: 0,
             stats: IndexStats::default(),
@@ -142,6 +203,22 @@ impl WorkspaceIndex {
         self.registry.with_override(path, content)
     }
 
+    pub fn documentation_with_override(
+        &self,
+        path: &Path,
+        content: &str,
+    ) -> Result<DocumentationIndex> {
+        self.registry.documentation_with_override(path, content)
+    }
+
+    pub fn registry_with_documentation_override(
+        &self,
+        path: &Path,
+        content: &str,
+    ) -> Result<SpecRegistry> {
+        self.registry.with_documentation_override(path, content)
+    }
+
     pub fn generation(&self) -> u64 {
         self.generation
     }
@@ -158,11 +235,35 @@ impl WorkspaceIndex {
             .map(|document| explorer_document(document, &self.registry))
             .collect::<Vec<_>>();
         documents.sort_by(|left, right| left.id.cmp(&right.id));
+        let mut documentation = self
+            .registry
+            .documentation
+            .documents
+            .iter()
+            .map(|document| explorer_documentation(document, &self.registry.documentation))
+            .collect::<Vec<_>>();
+        documentation.sort_by(|left, right| {
+            left.collection_id
+                .cmp(&right.collection_id)
+                .then_with(|| left.path.cmp(&right.path))
+        });
         ExplorerSnapshot {
             generation: self.generation,
             stats: self.stats,
             project_id: self.registry.project_id(),
             documents,
+            documentation_collections: self
+                .registry
+                .config
+                .documentation
+                .iter()
+                .map(|collection| ExplorerDocumentationCollection {
+                    id: collection.id.clone(),
+                    title: collection.title.clone(),
+                    root: collection.root.clone(),
+                })
+                .collect(),
+            documentation,
         }
     }
 
@@ -191,7 +292,32 @@ impl WorkspaceIndex {
             stats.removed += 1;
         }
 
+        let config = SpecConfig::load(&self.specs_dir)?;
+        let (discovered, documentation_issues) =
+            discover_documentation(&self.repository_root, &config.documentation)?;
+        let documentation_seen = discovered
+            .iter()
+            .map(|entry| entry.source_path.clone())
+            .collect::<BTreeSet<_>>();
+        let mut documentation_documents = BTreeMap::new();
+        for entry in &discovered {
+            let (document, cached) = self.load_documentation(entry)?;
+            if cached {
+                stats.loaded_from_cache += 1;
+            } else {
+                stats.parsed += 1;
+            }
+            documentation_documents.insert(entry.source_path.clone(), document);
+        }
+        let cached_documentation_paths = self.cached_documentation_paths()?;
+        for path in cached_documentation_paths.difference(&documentation_seen) {
+            self.delete_cached_documentation(path)?;
+            stats.removed += 1;
+        }
+
         self.documents = documents;
+        self.documentation_documents = documentation_documents;
+        self.documentation_issues = documentation_issues;
         self.rebuild_registry()?;
         self.stats = stats;
         self.generation = self.generation.saturating_add(1);
@@ -207,6 +333,8 @@ impl WorkspaceIndex {
     {
         let mut stats = IndexStats::default();
         let mut config_changed = false;
+        let mut documentation_changed = false;
+        let mut registry_changed = false;
         for path in paths {
             let path = normalize_event_path(&self.repository_root, &path);
             let file_name = path.file_name().and_then(|value| value.to_str());
@@ -215,11 +343,29 @@ impl WorkspaceIndex {
                 continue;
             }
             if file_name == Some("_redirects.toml") {
+                registry_changed = true;
+                continue;
+            }
+            if path.extension().and_then(|value| value.to_str()) == Some("md")
+                && !is_spec_file(&path)
+            {
+                let previously_enrolled = self.registry.documentation.contains_source_path(&path);
+                let now_configured = path
+                    .strip_prefix(&self.repository_root)
+                    .ok()
+                    .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+                    .map(|relative| {
+                        matching_collections(&relative, &self.registry.config.documentation)
+                    })
+                    .transpose()?
+                    .is_some_and(|collections| !collections.is_empty());
+                documentation_changed |= previously_enrolled || now_configured;
                 continue;
             }
             if !is_spec_file(&path) || !path.starts_with(&self.specs_dir) {
                 continue;
             }
+            registry_changed = true;
 
             if path.is_file() {
                 if let Some((document, cached)) = self.load_document(&path)? {
@@ -242,6 +388,13 @@ impl WorkspaceIndex {
             self.initialize_cache()?;
             return self.reconcile();
         }
+        if documentation_changed {
+            return self.reconcile();
+        }
+        if !registry_changed {
+            self.stats = stats;
+            return Ok(stats);
+        }
         self.rebuild_registry()?;
         self.stats = stats;
         self.generation = self.generation.saturating_add(1);
@@ -259,12 +412,14 @@ impl WorkspaceIndex {
         )?;
 
         let config = crate::model::config::SpecConfig::load(&self.specs_dir)?;
+        let documentation_identity = serde_json::to_string(&config.documentation)?;
         let repository_identity = self.repository_root.to_string_lossy().into_owned();
         let expected = [
             ("schema", CACHE_SCHEMA_VERSION),
             ("parser", env!("CARGO_PKG_VERSION")),
             ("baseline", config.baseline.as_str()),
             ("project", config.project.as_deref().unwrap_or("")),
+            ("documentation", documentation_identity.as_str()),
             ("repository", repository_identity.as_str()),
         ];
         let invalid = expected.iter().any(|(key, value)| {
@@ -275,7 +430,15 @@ impl WorkspaceIndex {
         if invalid {
             self.connection.execute_batch(
                 "DROP TABLE IF EXISTS spec_files;
+                 DROP TABLE IF EXISTS documentation_files;
                  CREATE TABLE spec_files (
+                     path TEXT PRIMARY KEY,
+                     modified_ns INTEGER NOT NULL,
+                     size INTEGER NOT NULL,
+                     content TEXT NOT NULL,
+                     document_json TEXT NOT NULL
+                 );
+                 CREATE TABLE documentation_files (
                      path TEXT PRIMARY KEY,
                      modified_ns INTEGER NOT NULL,
                      size INTEGER NOT NULL,
@@ -286,6 +449,13 @@ impl WorkspaceIndex {
         } else {
             self.connection.execute_batch(
                 "CREATE TABLE IF NOT EXISTS spec_files (
+                     path TEXT PRIMARY KEY,
+                     modified_ns INTEGER NOT NULL,
+                     size INTEGER NOT NULL,
+                     content TEXT NOT NULL,
+                     document_json TEXT NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS documentation_files (
                      path TEXT PRIMARY KEY,
                      modified_ns INTEGER NOT NULL,
                      size INTEGER NOT NULL,
@@ -378,6 +548,79 @@ impl WorkspaceIndex {
         Ok(paths)
     }
 
+    fn load_documentation(
+        &self,
+        entry: &DiscoveredDocumentation,
+    ) -> Result<(DocumentationDocument, bool)> {
+        let fingerprint = fingerprint(&std::fs::metadata(&entry.source_path)?)?;
+        let path_text = entry.source_path.to_string_lossy();
+        let cached = self
+            .connection
+            .query_row(
+                "SELECT document_json FROM documentation_files
+                 WHERE path = ?1 AND modified_ns = ?2 AND size = ?3",
+                params![
+                    path_text.as_ref(),
+                    fingerprint.modified_ns,
+                    fingerprint.size
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if let Some(json) = cached {
+            if let Ok(document) = serde_json::from_str::<DocumentationDocument>(&json) {
+                return Ok((document, true));
+            }
+        }
+
+        let content = std::fs::read_to_string(&entry.source_path)
+            .with_context(|| format!("reading {}", entry.source_path.display()))?;
+        let document = parse_documentation(
+            &entry.source_path,
+            &entry.repository_path,
+            &entry.collection,
+            &content,
+        );
+        let json = serde_json::to_string(&document)?;
+        self.connection.execute(
+            "INSERT INTO documentation_files(path, modified_ns, size, content, document_json)
+             VALUES(?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(path) DO UPDATE SET
+                 modified_ns = excluded.modified_ns,
+                 size = excluded.size,
+                 content = excluded.content,
+                 document_json = excluded.document_json",
+            params![
+                path_text.as_ref(),
+                fingerprint.modified_ns,
+                fingerprint.size,
+                content,
+                json
+            ],
+        )?;
+        Ok((document, false))
+    }
+
+    fn cached_documentation_paths(&self) -> Result<BTreeSet<PathBuf>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT path FROM documentation_files")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        let mut paths = BTreeSet::new();
+        for row in rows {
+            paths.insert(PathBuf::from(row?));
+        }
+        Ok(paths)
+    }
+
+    fn delete_cached_documentation(&self, path: &Path) -> Result<()> {
+        self.connection.execute(
+            "DELETE FROM documentation_files WHERE path = ?1",
+            params![path.to_string_lossy().as_ref()],
+        )?;
+        Ok(())
+    }
+
     fn delete_cached(&self, path: &Path) -> Result<()> {
         self.connection.execute(
             "DELETE FROM spec_files WHERE path = ?1",
@@ -387,9 +630,17 @@ impl WorkspaceIndex {
     }
 
     fn rebuild_registry(&mut self) -> Result<()> {
-        self.registry = SpecRegistry::from_documents(
+        let config = SpecConfig::load(&self.specs_dir)?;
+        let documentation = DocumentationIndex::from_documents(
+            &self.repository_root,
+            self.documentation_documents.values().cloned().collect(),
+            self.documentation_issues.clone(),
+        );
+        self.registry = SpecRegistry::from_documents_with_config_and_documentation(
             &self.specs_dir,
             self.documents.values().cloned().collect(),
+            config,
+            documentation,
         )?;
         Ok(())
     }
@@ -468,6 +719,26 @@ fn explorer_document(document: &SpecDocument, registry: &SpecRegistry) -> Explor
             })
         })
         .collect();
+    let documentation = document
+        .references
+        .iter()
+        .filter_map(|located| {
+            let SpecReference::Documentation(reference) = &located.reference else {
+                return None;
+            };
+            Some(ExplorerReference {
+                reference: reference.to_string(),
+                label: located.link_text.clone(),
+                line: located.line,
+            })
+        })
+        .collect();
+    let documented_by = registry
+        .documentation
+        .backlinks_with_prefix(&format!("spec:{}", document.id_str()))
+        .into_iter()
+        .filter(|backlink| backlink.source_kind == "documentation")
+        .collect();
 
     ExplorerDocument {
         id: document.id_str(),
@@ -486,6 +757,55 @@ fn explorer_document(document: &SpecDocument, registry: &SpecRegistry) -> Explor
         categorized_under,
         blocks,
         sources,
+        documentation,
+        documented_by,
+    }
+}
+
+fn explorer_documentation(
+    document: &DocumentationDocument,
+    index: &DocumentationIndex,
+) -> ExplorerDocumentation {
+    let headings = document
+        .headings
+        .iter()
+        .map(|heading| ExplorerDocumentationHeading {
+            title: heading.title.clone(),
+            reference: DocumentationReference::heading(
+                document.path.clone(),
+                heading.segments.clone(),
+            )
+            .to_string(),
+            level: heading.level,
+            line: heading.line,
+        })
+        .collect();
+    let links = document
+        .links
+        .iter()
+        .filter_map(|link| {
+            index
+                .canonical_target(link)
+                .map(|reference| ExplorerDocumentationLink {
+                    reference,
+                    label: link.label.clone(),
+                    line: link.line,
+                })
+        })
+        .collect();
+    let file_reference = DocumentationReference::file(document.path.clone()).to_string();
+    ExplorerDocumentation {
+        collection_id: document.collection_id.clone(),
+        collection_title: document.collection_title.clone(),
+        path: document.path.clone(),
+        title: document.title.clone(),
+        summary: document.summary.clone(),
+        uri: url::Url::from_file_path(&document.source_path)
+            .map(|url| url.to_string())
+            .unwrap_or_else(|_| document.source_path.to_string_lossy().into_owned()),
+        headings,
+        links,
+        backlinks: index.backlinks_with_prefix(&file_reference),
     }
 }
 
@@ -686,7 +1006,7 @@ mod tests {
         std::fs::create_dir_all(&specs).unwrap();
         std::fs::write(
             specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -706,6 +1026,50 @@ mod tests {
         assert_eq!(
             first_markdown_heading("## Project title ##\n"),
             Some("Project title".to_string())
+        );
+    }
+
+    #[test]
+    fn incrementally_caches_and_refreshes_configured_documentation() {
+        let temp = tempfile::tempdir().unwrap();
+        let specs = temp.path().join(".specs");
+        let docs = temp.path().join("docs");
+        std::fs::create_dir_all(&specs).unwrap();
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(
+            specs.join("_config.toml"),
+            "baseline = \"forge-spec-v0.4.0\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+        )
+        .unwrap();
+        let guide = docs.join("start.md");
+        std::fs::write(&guide, "# Start\n\nFirst summary.\n").unwrap();
+        let cache = temp.path().join("cache/index.sqlite3");
+
+        let cold = WorkspaceIndex::open(&specs, Some(&cache)).unwrap();
+        assert_eq!(cold.stats().parsed, 1);
+        assert_eq!(cold.snapshot().documentation.len(), 1);
+        assert_eq!(cold.snapshot().documentation[0].title, "Start");
+        drop(cold);
+
+        let mut warm = WorkspaceIndex::open(&specs, Some(&cache)).unwrap();
+        assert_eq!(warm.stats().loaded_from_cache, 1);
+        assert_eq!(warm.stats().parsed, 0);
+
+        let unconfigured = temp.path().join("notes.md");
+        std::fs::write(&unconfigured, "# Private note\n").unwrap();
+        let generation = warm.generation();
+        assert_eq!(
+            warm.refresh_paths([unconfigured]).unwrap(),
+            IndexStats::default()
+        );
+        assert_eq!(warm.generation(), generation);
+
+        std::fs::write(&guide, "# Start\n\nA longer replacement summary.\n").unwrap();
+        let stats = warm.refresh_paths([guide]).unwrap();
+        assert_eq!(stats.parsed, 1);
+        assert_eq!(
+            warm.snapshot().documentation[0].summary.as_deref(),
+            Some("A longer replacement summary.")
         );
     }
 }

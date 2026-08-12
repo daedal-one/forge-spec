@@ -169,7 +169,27 @@ fn publish_diagnostics(
     uri: &str,
     document: &OpenDocument,
 ) -> Result<()> {
-    let diagnostics = match workspace.registry_with_override(&document.path, &document.text) {
+    let is_documentation = workspace
+        .registry()
+        .documentation
+        .contains_source_path(&document.path);
+    if !is_indexed_document(workspace, document) {
+        return send_notification(
+            connection,
+            "textDocument/publishDiagnostics",
+            json!({
+                "uri": uri,
+                "version": document.version,
+                "diagnostics": []
+            }),
+        );
+    }
+    let registry = if is_documentation {
+        workspace.registry_with_documentation_override(&document.path, &document.text)
+    } else {
+        workspace.registry_with_override(&document.path, &document.text)
+    };
+    let diagnostics = match registry {
         Ok(registry) => crate::lint::lint_all(&registry)
             .into_iter()
             .filter(|diagnostic| diagnostic.file == document.path)
@@ -389,6 +409,9 @@ fn completion(
     params: &Value,
 ) -> Result<Value> {
     let (document, line, character) = request_document(documents, params)?;
+    if !is_indexed_document(workspace, document) {
+        return Ok(json!([]));
+    }
     let registry = registry_for(workspace, document)?;
     let prefix = line_prefix(&document.text, line, character).unwrap_or_default();
 
@@ -438,6 +461,39 @@ fn completion(
             ));
         }
     }
+    for documentation in &registry.documentation.documents {
+        let reference =
+            crate::documentation::DocumentationReference::file(documentation.path.clone())
+                .to_string();
+        items.push(completion_item(
+            &documentation.title,
+            17,
+            documentation.summary.clone(),
+            &reference,
+            prefix,
+            line,
+            character,
+        ));
+        for heading in &documentation.headings {
+            let reference = crate::documentation::DocumentationReference::heading(
+                documentation.path.clone(),
+                heading.segments.clone(),
+            )
+            .to_string();
+            items.push(completion_item(
+                &heading.segments.join(" / "),
+                18,
+                Some(format!(
+                    "{} · {}",
+                    documentation.collection_title, documentation.path
+                )),
+                &reference,
+                prefix,
+                line,
+                character,
+            ));
+        }
+    }
     Ok(Value::Array(items))
 }
 
@@ -447,6 +503,9 @@ fn hover(
     params: &Value,
 ) -> Result<Value> {
     let (document, line, character) = request_document(documents, params)?;
+    if !is_indexed_document(workspace, document) {
+        return Ok(Value::Null);
+    }
     let Some(token) = spec_token_at(&document.text, line, character) else {
         return Ok(Value::Null);
     };
@@ -476,6 +535,21 @@ fn hover(
                 resolved.reference, resolved.snippet
             )
         }
+        SpecReference::Documentation(reference) => {
+            let registry = registry_for(workspace, document)?;
+            let Some((documentation, heading)) = registry.documentation.resolve(&reference) else {
+                return Ok(Value::Null);
+            };
+            let selection = heading
+                .map(|heading| heading.segments.join(" / "))
+                .unwrap_or_else(|| documentation.title.clone());
+            format!(
+                "**{}** · documentation · {}\n\n{}",
+                selection,
+                documentation.collection_title,
+                documentation.summary.as_deref().unwrap_or("No summary")
+            )
+        }
     };
     Ok(json!({ "contents": { "kind": "markdown", "value": markdown } }))
 }
@@ -486,6 +560,9 @@ fn definition(
     params: &Value,
 ) -> Result<Value> {
     let (document, line, character) = request_document(documents, params)?;
+    if !is_indexed_document(workspace, document) {
+        return Ok(Value::Null);
+    }
     let Some(token) = spec_token_at(&document.text, line, character) else {
         return Ok(Value::Null);
     };
@@ -517,6 +594,19 @@ fn definition(
                 range.end.character,
             ))
         }
+        SpecReference::Documentation(reference) => {
+            let registry = registry_for(workspace, document)?;
+            let Some((documentation, heading)) = registry.documentation.resolve(&reference) else {
+                return Ok(Value::Null);
+            };
+            let start = heading
+                .map(|heading| heading.line.saturating_sub(1) as u32)
+                .unwrap_or(0);
+            let end = heading
+                .map(|heading| heading.end_line.saturating_sub(1) as u32)
+                .unwrap_or(start);
+            Ok(location(&documentation.source_path, start, 0, end, 0))
+        }
     }
 }
 
@@ -526,25 +616,50 @@ fn references(
     params: &Value,
 ) -> Result<Value> {
     let (document, line, character) = request_document(documents, params)?;
+    if !is_indexed_document(workspace, document) {
+        return Ok(json!([]));
+    }
     let Some(token) = spec_token_at(&document.text, line, character) else {
         return Ok(json!([]));
     };
-    let Some(SpecReference::Spec(target)) = parse_spec_url(token) else {
+    let Some(target) = parse_spec_url(token) else {
         return Ok(json!([]));
     };
     let registry = registry_for(workspace, document)?;
     let target = target.to_string();
-    let mut locations = Vec::new();
+    let mut found = std::collections::BTreeSet::<(PathBuf, u32)>::new();
     for spec in &registry.documents {
         for reference in &spec.references {
-            if matches!(&reference.reference, SpecReference::Spec(found) if found.to_string() == target)
+            let candidate = reference.reference.to_string();
+            if candidate == target
+                || (!target.contains('#') && candidate.starts_with(&format!("{target}#")))
             {
                 let line = reference.line.saturating_sub(1) as u32;
-                locations.push(location(&spec.source_path, line, 0, line, 0));
+                found.insert((spec.source_path.clone(), line));
             }
         }
     }
-    Ok(Value::Array(locations))
+    for backlink in registry.documentation.backlinks_with_prefix(&target) {
+        let source_path = if backlink.source_kind == "documentation" {
+            registry
+                .documentation
+                .get(&backlink.source)
+                .map(|document| document.source_path.clone())
+        } else {
+            registry
+                .get_by_id(&backlink.source)
+                .map(|document| document.source_path.clone())
+        };
+        if let Some(path) = source_path {
+            found.insert((path, backlink.line.saturating_sub(1) as u32));
+        }
+    }
+    Ok(Value::Array(
+        found
+            .into_iter()
+            .map(|(path, line)| location(&path, line, 0, line, 0))
+            .collect(),
+    ))
 }
 
 fn document_symbols(
@@ -554,7 +669,34 @@ fn document_symbols(
 ) -> Result<Value> {
     let uri = value_string(params, "/textDocument/uri")?;
     let document = documents.get(&uri).context("document is not open")?;
+    if !is_indexed_document(workspace, document) {
+        return Ok(json!([]));
+    }
     let registry = registry_for(workspace, document)?;
+    if let Some(documentation) = registry
+        .documentation
+        .documents
+        .iter()
+        .find(|candidate| same_path(&candidate.source_path, &document.path))
+    {
+        return Ok(Value::Array(
+            documentation
+                .headings
+                .iter()
+                .map(|heading| {
+                    let start = heading.line.saturating_sub(1) as u32;
+                    let end = heading.end_line.saturating_sub(1) as u32;
+                    json!({
+                        "name": heading.title,
+                        "detail": heading.segments.join(" / "),
+                        "kind": 3,
+                        "range": range(start, 0, end, line_utf16_len(&document.text, end)),
+                        "selectionRange": range(start, 0, start, line_utf16_len(&document.text, start))
+                    })
+                })
+                .collect(),
+        ));
+    }
     let Some(spec) = registry
         .documents
         .iter()
@@ -624,11 +766,71 @@ fn resolve_reference(workspace: &WorkspaceIndex, params: &Value) -> Result<Value
                 range.end.character,
             ))
         }
+        SpecReference::Documentation(reference) => {
+            let Some((documentation, heading)) =
+                workspace.registry().documentation.resolve(&reference)
+            else {
+                return Ok(Value::Null);
+            };
+            let start = heading
+                .map(|heading| heading.line.saturating_sub(1) as u32)
+                .unwrap_or(0);
+            let end = heading
+                .map(|heading| heading.end_line.saturating_sub(1) as u32)
+                .unwrap_or(start);
+            Ok(location(&documentation.source_path, start, 0, end, 0))
+        }
     }
 }
 
 fn registry_for(workspace: &WorkspaceIndex, document: &OpenDocument) -> Result<SpecRegistry> {
-    workspace.registry_with_override(&document.path, &document.text)
+    if workspace
+        .registry()
+        .documentation
+        .contains_source_path(&document.path)
+    {
+        workspace.registry_with_documentation_override(&document.path, &document.text)
+    } else if document
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".spec.md"))
+    {
+        workspace.registry_with_override(&document.path, &document.text)
+    } else {
+        anyhow::bail!("Markdown document is not enrolled in forge-spec documentation")
+    }
+}
+
+fn is_indexed_document(workspace: &WorkspaceIndex, document: &OpenDocument) -> bool {
+    workspace
+        .registry()
+        .documentation
+        .contains_source_path(&document.path)
+        || (path_is_within(&document.path, workspace.specs_dir())
+            && document
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".spec.md")))
+}
+
+fn path_is_within(path: &Path, root: &Path) -> bool {
+    if path.starts_with(root) {
+        return true;
+    }
+    if path
+        .canonicalize()
+        .is_ok_and(|canonical| canonical.starts_with(root))
+    {
+        return true;
+    }
+    let Some((parent, file_name)) = path.parent().zip(path.file_name()) else {
+        return false;
+    };
+    parent
+        .canonicalize()
+        .is_ok_and(|canonical| canonical.join(file_name).starts_with(root))
 }
 
 fn request_document<'a>(
@@ -839,7 +1041,7 @@ mod tests {
         std::fs::create_dir_all(&specs_dir).unwrap();
         std::fs::write(
             specs_dir.join("_config.toml"),
-            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -985,5 +1187,145 @@ mod tests {
             Message::Response(_)
         ));
         handle.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn enrolled_markdown_uses_unsaved_diagnostics_symbols_hover_and_definition() {
+        let temp = tempfile::tempdir().unwrap();
+        let specs_dir = temp.path().join(".specs");
+        let docs_dir = temp.path().join("docs");
+        std::fs::create_dir_all(&specs_dir).unwrap();
+        std::fs::create_dir_all(&docs_dir).unwrap();
+        std::fs::write(
+            specs_dir.join("_config.toml"),
+            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            specs_dir.join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [carlo]\n---\n\n# Demo\n",
+        )
+        .unwrap();
+        let guide_path = docs_dir.join("guide.md");
+        let saved = "# Guide\n\n## Deploy\n\nSee the [steps](spec:doc:docs/runbook.md#heading=Runbook/Steps).\n";
+        let unsaved = "# Guide\n\n## Deploy\n\nSee the [steps](spec:doc:docs/runbook.md#heading=Runbook/Steps) and [missing](missing.md).\n";
+        std::fs::write(&guide_path, saved).unwrap();
+        let runbook_path = docs_dir.join("runbook.md");
+        std::fs::write(&runbook_path, "# Runbook\n\n## Steps\n\nDo it.\n").unwrap();
+
+        let workspace = WorkspaceIndex::open(&specs_dir, None).unwrap();
+        let uri = Url::from_file_path(&guide_path).unwrap().to_string();
+        let document = OpenDocument {
+            path: guide_path,
+            text: unsaved.to_string(),
+            version: 2,
+        };
+        let documents = HashMap::from([(uri.clone(), document.clone())]);
+        let (server, client) = Connection::memory();
+        publish_diagnostics(&server, &workspace, &uri, &document).unwrap();
+        let Message::Notification(diagnostics) = client.receiver.recv().unwrap() else {
+            panic!("expected diagnostics notification")
+        };
+        assert!(diagnostics.params["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "R029"));
+
+        let symbols = document_symbols(
+            &workspace,
+            &documents,
+            &json!({ "textDocument": { "uri": uri } }),
+        )
+        .unwrap();
+        assert_eq!(symbols[0]["name"], "Guide");
+        assert_eq!(symbols[1]["detail"], "Guide / Deploy");
+
+        let token_character = unsaved.lines().nth(4).unwrap().find("spec:doc").unwrap() as u32 + 8;
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 4, "character": token_character }
+        });
+        let hovered = hover(&workspace, &documents, &params).unwrap();
+        assert!(hovered["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("Runbook / Steps"));
+        let defined = definition(&workspace, &documents, &params).unwrap();
+        assert_eq!(
+            Url::parse(defined["uri"].as_str().unwrap())
+                .unwrap()
+                .to_file_path()
+                .unwrap(),
+            runbook_path.canonicalize().unwrap()
+        );
+        assert_eq!(defined["range"]["start"]["line"], 2);
+    }
+
+    #[test]
+    fn unenrolled_markdown_is_inert() {
+        let temp = tempfile::tempdir().unwrap();
+        let specs_dir = temp.path().join(".specs");
+        let docs_dir = temp.path().join("docs");
+        std::fs::create_dir_all(&specs_dir).unwrap();
+        std::fs::create_dir_all(&docs_dir).unwrap();
+        std::fs::write(
+            specs_dir.join("_config.toml"),
+            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            specs_dir.join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [carlo]\n---\n\n# Demo\n",
+        )
+        .unwrap();
+
+        let notes_path = temp.path().join("notes.md");
+        let text = "# Notes\n\nSee spec:PROJECT:demo.\n";
+        std::fs::write(&notes_path, text).unwrap();
+        let workspace = WorkspaceIndex::open(&specs_dir, None).unwrap();
+        let uri = Url::from_file_path(&notes_path).unwrap().to_string();
+        let document = OpenDocument {
+            path: notes_path,
+            text: text.to_string(),
+            version: 1,
+        };
+        let documents = HashMap::from([(uri.clone(), document.clone())]);
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 2, "character": 10 }
+        });
+
+        let (server, client) = Connection::memory();
+        publish_diagnostics(&server, &workspace, &uri, &document).unwrap();
+        let Message::Notification(diagnostics) = client.receiver.recv().unwrap() else {
+            panic!("expected diagnostics notification")
+        };
+        assert!(diagnostics.params["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            completion(&workspace, &documents, &params).unwrap(),
+            json!([])
+        );
+        assert_eq!(hover(&workspace, &documents, &params).unwrap(), Value::Null);
+        assert_eq!(
+            definition(&workspace, &documents, &params).unwrap(),
+            Value::Null
+        );
+        assert_eq!(
+            references(&workspace, &documents, &params).unwrap(),
+            json!([])
+        );
+        assert_eq!(
+            document_symbols(
+                &workspace,
+                &documents,
+                &json!({ "textDocument": { "uri": uri } }),
+            )
+            .unwrap(),
+            json!([])
+        );
     }
 }

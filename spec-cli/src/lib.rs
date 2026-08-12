@@ -6,6 +6,7 @@
 
 pub mod cli;
 pub mod commands;
+pub mod documentation;
 pub mod editable;
 pub mod graph;
 pub mod history;

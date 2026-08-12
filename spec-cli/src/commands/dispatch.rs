@@ -38,14 +38,18 @@ pub fn run(cli: Cli) -> Result<()> {
             ancestors,
             descendants,
             include_source,
+            include_docs,
         } => commands::render::run(
             &find_specs_dir(explicit)?,
             &id_or_query,
-            &target,
-            depth,
-            &ancestors,
-            &descendants,
-            include_source,
+            &commands::render::RenderOptions {
+                target: &target,
+                depth,
+                ancestors: &ancestors,
+                descendants: &descendants,
+                include_source,
+                include_docs,
+            },
         ),
         Commands::Impact {
             subject,
@@ -94,6 +98,12 @@ fn inspect(specs_dir: PathBuf, command: InspectCommands) -> Result<()> {
         InspectCommands::Relations { id } => commands::query::relations(&specs_dir, &id),
         InspectCommands::Coverage { id } => commands::query::coverage(&specs_dir, &id),
         InspectCommands::Orphans => commands::query::orphans(&specs_dir),
+        InspectCommands::Documentation { collection, json } => {
+            commands::documentation::list(&specs_dir, collection.as_deref(), json)
+        }
+        InspectCommands::Backlinks { reference, json } => {
+            commands::documentation::backlinks(&specs_dir, &reference, json)
+        }
         InspectCommands::Resolve {
             reference,
             json,
@@ -248,6 +258,21 @@ fn change(specs_dir: PathBuf, command: ChangeCommands) -> Result<()> {
                 spec: id,
                 block,
                 clause,
+            },
+        },
+        ChangeCommands::Documentation(args) => match args.command {
+            DocumentationCommands::CollectionAdd {
+                id,
+                title,
+                root,
+                include,
+                exclude,
+            } => Operation::DocumentationCollectionAdd {
+                id,
+                title,
+                root,
+                include,
+                exclude,
             },
         },
         ChangeCommands::Batch { from, dry_run } => {

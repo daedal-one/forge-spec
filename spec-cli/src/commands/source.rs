@@ -91,6 +91,45 @@ pub fn resolve(
                 println!("{canonical}\t{}", document.source_path.display());
             }
         }
+        SpecReference::Documentation(documentation) => {
+            let registry = SpecRegistry::load(specs_dir)?;
+            let Some((document, heading)) = registry.documentation.resolve(&documentation) else {
+                bail!("documentation reference not found: {documentation}");
+            };
+            let start = heading.map(|heading| heading.line).unwrap_or(1);
+            let end = heading
+                .map(|heading| heading.end_line)
+                .unwrap_or_else(|| document.body.lines().count().max(1));
+            if as_json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "reference": documentation.to_string(),
+                        "path": document.path,
+                        "collection": document.collection_id,
+                        "title": document.title,
+                        "summary": document.summary,
+                        "startLine": start,
+                        "endLine": end,
+                    }))?
+                );
+            } else {
+                println!("{}", documentation);
+                println!("collection: {}", document.collection_id);
+                println!("path: {}", document.path);
+                println!("location: {start}-{end}");
+                let snippet = document
+                    .body
+                    .lines()
+                    .skip(start.saturating_sub(1))
+                    .take(end.saturating_sub(start) + 1)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if !snippet.is_empty() {
+                    println!("\n{snippet}");
+                }
+            }
+        }
     }
     Ok(())
 }

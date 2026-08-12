@@ -25,7 +25,10 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub struct PlannedOperation {
     pub index: usize,
     pub operation: &'static str,
-    pub spec: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spec: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -118,7 +121,11 @@ impl MutationEngine {
                 .map(|(index, operation)| PlannedOperation {
                     index: index + 1,
                     operation: operation.name(),
-                    spec: operation.primary_spec().to_string(),
+                    spec: operation.primary_spec().map(str::to_string),
+                    config: operation
+                        .primary_spec()
+                        .is_none()
+                        .then_some(".specs/_config.toml"),
                 })
                 .collect(),
             files,
@@ -448,6 +455,13 @@ impl CandidateWorkspace {
             }
 
             SpecRename { spec, new_id } => self.rename(spec, new_id),
+            DocumentationCollectionAdd {
+                id,
+                title,
+                root,
+                include,
+                exclude,
+            } => self.add_documentation_collection(id, title, root, include, exclude),
         }
     }
 
@@ -734,6 +748,45 @@ impl CandidateWorkspace {
             content.push('\n');
         }
         content.push_str(&format!("\n[[redirect]]\nfrom = {old:?}\nto = {new:?}\n"));
+        self.extra_writes.insert(path, content.into_bytes());
+        Ok(())
+    }
+
+    fn add_documentation_collection(
+        &mut self,
+        id: &str,
+        title: &str,
+        root: &str,
+        include: &[String],
+        exclude: &[String],
+    ) -> Result<()> {
+        let path = self.specs_dir.join("_config.toml");
+        let bytes = self
+            .extra_writes
+            .get(&path)
+            .cloned()
+            .unwrap_or(fs::read(&path)?);
+        let mut content = String::from_utf8(bytes)?;
+        let current = SpecConfig::from_toml(&content)?;
+        if current
+            .documentation
+            .iter()
+            .any(|collection| collection.id == id)
+        {
+            bail!("documentation collection '{id}' already exists");
+        }
+        if !content.ends_with('\n') {
+            content.push('\n');
+        }
+        content.push_str("\n[[documentation]]\n");
+        content.push_str(&format!("id = {}\n", serde_json::to_string(id)?));
+        content.push_str(&format!("title = {}\n", serde_json::to_string(title)?));
+        content.push_str(&format!("root = {}\n", serde_json::to_string(root)?));
+        content.push_str(&format!("include = {}\n", serde_json::to_string(include)?));
+        if !exclude.is_empty() {
+            content.push_str(&format!("exclude = {}\n", serde_json::to_string(exclude)?));
+        }
+        SpecConfig::from_toml(&content)?;
         self.extra_writes.insert(path, content.into_bytes());
         Ok(())
     }
@@ -1132,7 +1185,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         fs::write(
@@ -1345,5 +1398,59 @@ mod tests {
             .path()
             .join("auth/final-session-policy.spec.md")
             .exists());
+    }
+
+    #[test]
+    fn documentation_collection_add_preserves_config_and_indexes_only_matches() {
+        let temp = tempfile::tempdir().unwrap();
+        let specs = temp.path().join(".specs");
+        fs::create_dir_all(&specs).unwrap();
+        fs::create_dir_all(temp.path().join("docs/generated")).unwrap();
+        fs::write(
+            specs.join("_config.toml"),
+            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
+        )
+        .unwrap();
+        fs::write(
+            specs.join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [carlo]\n---\n\n# Demo\n",
+        )
+        .unwrap();
+        fs::write(temp.path().join("docs/guide.md"), "# Guide\n").unwrap();
+        fs::write(
+            temp.path().join("docs/generated/output.md"),
+            "# Generated\n",
+        )
+        .unwrap();
+        let request = ChangeRequest::new(vec![Operation::DocumentationCollectionAdd {
+            id: "guides".into(),
+            title: "Guides".into(),
+            root: "docs".into(),
+            include: vec!["**/*.md".into()],
+            exclude: vec!["generated/**".into()],
+        }]);
+
+        let outcome = MutationEngine::new(&specs)
+            .execute(&request, false)
+            .unwrap();
+        assert!(outcome.written);
+        assert_eq!(outcome.plan.operations[0].spec, None);
+        assert_eq!(
+            outcome.plan.operations[0].config,
+            Some(".specs/_config.toml")
+        );
+        let config = SpecConfig::load(&specs).unwrap();
+        assert_eq!(config.project.as_deref(), Some("PROJECT:demo"));
+        assert_eq!(config.documentation.len(), 1);
+        let registry = SpecRegistry::load(&specs).unwrap();
+        assert_eq!(
+            registry
+                .documentation
+                .documents
+                .iter()
+                .map(|document| document.path.as_str())
+                .collect::<Vec<_>>(),
+            ["docs/guide.md"]
+        );
     }
 }

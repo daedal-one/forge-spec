@@ -2,9 +2,9 @@
 
 A file format and mini-toolchain for project specifications.
 
-Instead of scattering requirements, design decisions, and documentation across markdown
-files, code comments, and issue trackers, forge-spec provides a single source of
-truth: `.specs/` files in the repo.
+Forge-spec keeps project intent authoritative in `.specs/`, then connects that
+intent to source symbols and deliberately selected Markdown without forcing
+ordinary documentation into a specification schema.
 
 Each spec is a standalone document with structured metadata and a clear prose body:
 it's markdown++ for your vibe coding needs.
@@ -14,7 +14,7 @@ mechanically validated.
 
 ## What's here
 
-- `specification.md` — the full Specs Format v0.3 specification
+- `specification.md` — the full Specs Format v0.4 specification
 - `format-memo.md` — one-page cheat sheet
 - `AGENTS.md` — compact reference for AI coding agents
 - `example/` — a working `.specs/` tree demonstrating the format
@@ -71,6 +71,8 @@ spec render project --target=agent    # project intent alone
 spec render REQ:auth/session-expiry --target=agent --include-source
 spec inspect symbols src/session.rs --query expire
 spec inspect resolve 'spec:src:src/session.rs#symbol=SessionStore/expire'
+spec inspect documentation              # enrolled Markdown + headings
+spec inspect backlinks 'spec:doc:docs/operations.md'
 spec lsp                            # editor LSP over stdio
 spec inspect relations REQ:auth/session-management
 spec inspect coverage REQ:auth/session-management
@@ -106,11 +108,15 @@ spec impact --base origin/main --head HEAD --target agent
 ```
 
 The command follows clause-qualified refinement paths transitively, includes
-TASK progress, collects explicit `spec:src:` references, and recovers
+TASK progress, collects explicit `spec:src:` and documentation surfaces, and recovers
 implementation and test paths from `Spec-Ref:` history. Git comparisons union
 the base and head graphs so deleted specs and removed relationships are not
 silently lost. Formatting-only edits are reported without inventing a semantic
 cascade.
+
+Documentation files and headings are also valid impact subjects. A changed
+document follows explicit spec backlinks into the refinement closure, while
+remaining context rather than refinement or coverage evidence.
 
 Human output is a review report. `--target agent` emits the same evidence as a
 deterministic `<forge-spec-impact schema-version="1">` XML envelope. Both
@@ -181,12 +187,14 @@ A session token MUST be invalidated when wall-clock age >= 30 days.
 
 Cross-reference other specs with `[text](spec:REQ:auth/foo)`. Link to source by
 line with `spec:src:path/file.ts:42-78` or by language-server symbol with
-`spec:src:path/file.ts#symbol=Type/method`.
+`spec:src:path/file.ts#symbol=Type/method`. Link to enrolled documentation with
+`spec:doc:docs/operations.md` or an exact hierarchical heading such as
+`spec:doc:docs/operations.md#heading=Deployment/Rollback`.
 
 The spec tree declares its format once in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.3.0"
+baseline = "forge-spec-v0.4.0"
 project = "PROJECT:example"
 ```
 
@@ -198,6 +206,37 @@ specification.
 
 Per-file revisions are derived from Git (`rN`, or `rN+dirty` for working-tree
 changes), so spec files do not carry version bookkeeping.
+
+## Connect project documentation
+
+Generic Markdown remains ordinary Markdown. Projects opt specific files into
+named collections in `.specs/_config.toml`:
+
+```toml
+[[documentation]]
+id = "guides"
+title = "Engineering guides"
+root = "docs"
+include = ["**/*.md"]
+exclude = ["generated/**", "vendor/**"]
+```
+
+The shared index extracts titles, summaries, hierarchical headings, ordinary
+relative Markdown links, `spec:` links, and backlinks. Files must belong to
+exactly one collection; forge-spec never auto-enrolls existing Markdown.
+
+```sh
+spec change documentation collection-add guides \
+  --title 'Engineering guides' --root docs --include '**/*.md' \
+  --exclude 'generated/**' 'vendor/**'
+spec inspect documentation --collection guides
+spec inspect resolve 'spec:doc:docs/operations.md#heading=Deployment/Rollback'
+spec render REQ:deploy/release --target agent --include-docs
+```
+
+The LSP and VS Code explorer use this same model. Enrolled files get heading
+symbols, completion, hover, definition, references, validation, and normal
+editable Markdown behavior; unconfigured Markdown stays outside the index.
 
 ## Migrating format versions
 
@@ -217,10 +256,10 @@ Use `--from` when an unconfigured legacy tree cannot be inferred and `--to` to
 target a specific supported baseline. The baseline is updated only after every
 format transformation and reference redirect succeeds.
 
-## Typed changes in CLI v0.4
+## Typed changes in CLI v0.5
 
-The executable is `spec 0.4.0`; the stored document format remains
-`forge-spec-v0.3.0`. Supported writers compile human commands and editor
+The executable is `spec 0.5.0`; the stored document format is
+`forge-spec-v0.4.0`. Supported writers compile human commands and editor
 actions into the same closed Rust operation enum. A versioned batch can group
 changes across the workspace:
 
@@ -253,5 +292,21 @@ Source symbols use the repository's language server. Built-in providers are
 in `.specs/_lsp.toml`; custom commands are only executed when the CLI is passed
 `--allow-custom-lsp`. Use `spec lint --require-symbols` in CI when provider
 availability must be enforced rather than reported as a warning.
+
+## Canonical library projection
+
+Rust consumers can project a saved `.specs/` tree plus a multi-file in-memory
+overlay through `spec_cli::projection`. Overlay entries create, replace, or
+delete spec, configuration, redirect, and configured Markdown inputs without
+writing them to disk. The result is a deterministic `forge-spec-state-v2`
+schema containing normalized specifications, clauses, relationships,
+documentation, cross-surface links, source selectors, and diagnostics; invalid
+intermediate input remains visible as an invalid state. `SpecState::diff`
+produces a deterministic `forge-spec-delta-v2` semantic delta.
+
+The projection surface deliberately performs no language-server lookup and
+contains no ledger, session, or temporal-graph policy. Downstream systems may
+hash or retain the canonical bytes while forge-spec stays independently useful
+as the authority for specification semantics.
 
 See `specification.md` for the full format definition.

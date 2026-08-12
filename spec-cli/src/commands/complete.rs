@@ -111,6 +111,31 @@ fn print_refinement_targets(registry: &SpecRegistry) -> Result<()> {
     Ok(())
 }
 
+fn print_reference_targets(registry: &SpecRegistry) -> Result<()> {
+    for id in registry.id_index.keys() {
+        println!("spec:{id}");
+        for anchor in document(registry, id)?.anchors() {
+            println!("spec:{id}#{anchor}");
+        }
+    }
+    for documentation in &registry.documentation.documents {
+        println!(
+            "{}",
+            crate::documentation::DocumentationReference::file(documentation.path.clone())
+        );
+        for heading in &documentation.headings {
+            println!(
+                "{}",
+                crate::documentation::DocumentationReference::heading(
+                    documentation.path.clone(),
+                    heading.segments.clone(),
+                )
+            );
+        }
+    }
+    Ok(())
+}
+
 fn suggest(registry: &SpecRegistry, words: &[String]) -> Result<()> {
     let top = word(words, 0);
     let namespace = word(words, 1);
@@ -125,6 +150,19 @@ fn suggest(registry: &SpecRegistry, words: &[String]) -> Result<()> {
     }
     if top == Some("inspect") && namespace == Some("graph") && words.len() == 2 {
         return print_values(&["hierarchy", "refinement", "categorization"]);
+    }
+    if top == Some("inspect") && namespace == Some("documentation") && last == Some("--collection")
+    {
+        for collection in &registry.config.documentation {
+            println!("{}", collection.id);
+        }
+        return Ok(());
+    }
+    if top == Some("inspect")
+        && words.len() == 2
+        && matches!(namespace, Some("resolve" | "backlinks"))
+    {
+        return print_reference_targets(registry);
     }
     if top == Some("task") {
         if namespace == Some("list") && last == Some("--state") {

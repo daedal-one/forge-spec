@@ -1,4 +1,4 @@
-# Specs Format v0.3 — Specification
+# Specs Format v0.4 — Specification
 
 A file format and toolchain for project specifications, designed to be:
 
@@ -20,7 +20,8 @@ In scope:
 
 - Capturing project intent, requirements, invariants, interface contracts,
   architecture decisions, tasks, and glossary entries as first-class entities.
-- Cross-referencing entities both within the spec graph and to source code.
+- Cross-referencing entities within the spec graph, to source code, and to
+  explicitly enrolled project documentation.
 - Tracking refinement (a high-level requirement decomposed into
   sub-requirements) at clause-level granularity.
 - Linking specs to the commits that touch or implement them.
@@ -31,10 +32,11 @@ In scope:
 Not in scope:
 
 - Replacing test suites. Specs describe intent; tests verify code.
-- Replacing API documentation generators (OpenAPI etc.). Specs reference
-  contracts but do not enumerate every field.
+- Replacing documentation systems or API documentation generators (OpenAPI
+  etc.). Forge-spec indexes selected Markdown and links it to intent, but the
+  Markdown remains independently authored documentation.
 - Symbolic / formal verification. The format is designed to be amenable to
-  it later; v0.3 produces no proofs.
+  it later; v0.4 produces no proofs.
 
 ---
 
@@ -149,9 +151,27 @@ The format baseline and singleton project root are declared once for the entire
 spec tree in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.3.0"
+baseline = "forge-spec-v0.4.0"
 project = "PROJECT:forge-spec"
 ```
+
+Generic Markdown is enrolled through named collections in the same config:
+
+```toml
+[[documentation]]
+id = "guides"
+title = "Engineering guides"
+root = "docs"
+include = ["**/*.md"]
+exclude = ["generated/**", "vendor/**"]
+```
+
+Collection roots, includes, and excludes are repository-relative. Each
+enrolled file must belong to exactly one collection. `.spec.md` files are
+always excluded from documentation collections. A migration never infers
+collections from files already present: enrollment is an explicit project
+decision, which keeps generated, vendored, private, and incidental Markdown
+outside the knowledge graph unless selected deliberately.
 
 ### 3.2 Body
 
@@ -213,10 +233,12 @@ Registered prefixes for full document IDs:
 | `SCN`   | scenario                        | example walkthrough                                    |
 | `TASK`  | task                            | traceable implementation work                          |
 
-Plus one virtual prefix used only inside reference URLs:
+Plus two virtual prefixes used only inside reference URLs:
 
 - `src:` — references a path (and optional line range) in the working tree,
   resolved against `pinned_at` if set, else HEAD.
+- `doc:` — references an explicitly enrolled repository Markdown path and,
+  optionally, one hierarchical heading.
 
 ### 4.1 Type-specific frontmatter
 
@@ -299,6 +321,8 @@ References are CommonMark links with a `spec:` URL scheme:
 [idempotency key](spec:GLO:terms/idempotency-key)
 [session.ts:42-78](spec:src:packages/auth/session.ts:42-78)
 [SessionStore/expire](spec:src:packages/auth/session.ts#symbol=SessionStore/expire)
+[deployment guide](spec:doc:docs/deployment.md)
+[rollback procedure](spec:doc:docs/deployment.md#heading=Operations/Rollback)
 ```
 
 This survives any standard Markdown renderer (the URL is shown as a link to
@@ -314,12 +338,27 @@ links during transmutation.
 - `src:path#symbol=segment/segment` → ask the source language server for the
   named document-symbol hierarchy. Each segment uses URL percent-encoding,
   so `/` remains the hierarchy separator even when a symbol name contains it.
+- `doc:path` → resolve a repository-relative Markdown file that belongs to one
+  configured documentation collection.
+- `doc:path#heading=segment/segment` → resolve an exact hierarchical heading
+  path. Heading segments use URL percent-encoding. Hierarchy makes repeated
+  titles such as `Setup` unambiguous without relying on renderer-specific
+  fragment algorithms.
+
+Enrolled Markdown remains ordinary CommonMark. The index derives its title
+from the first heading (falling back to the filename), its summary from the
+first prose paragraph, and its outline from headings. It records both
+`spec:` links and ordinary relative links between enrolled Markdown files,
+normalizing ordinary heading fragments to hierarchical `spec:doc:` targets.
+Backlinks are available in both directions between documentation,
+specifications, and source references.
 
 ### 5.3 Validation
 
 The linter:
 
-- resolves every `spec:` URL across all documents;
+- resolves every `spec:` URL across specs and enrolled documentation;
+- validates ordinary relative Markdown links between enrolled documents;
 - emits `R005` (error) for dangling references;
 - emits `R006` (warning) for references to deprecated specs lacking an
   acknowledgment;
@@ -339,6 +378,13 @@ child:
 | `refines`            | DAG    | child's content jointly contributes to parent's satisfaction           |
 | `categorized_under`  | tree   | navigational grouping only; no claim about content                     |
 | `applies_to`         | n-to-n | child concerns these components / interfaces                           |
+
+Documentation links are intentionally not a fourth specification relation.
+An enrolled Markdown file can document a spec, and a spec can cite a document,
+but neither direction implies project containment, refinement,
+categorization, clause coverage, normative authority, or requirement
+satisfaction. Tooling exposes documentation as a parallel navigational tree
+and as associated context on a spec.
 
 ### 6.1 Project containment
 
@@ -386,13 +432,13 @@ is independent of the refinement graph.
 
 ### 6.4 Composition (deferred)
 
-v0.3 does not have a first-class `COMP:` type. If a requirement describes a
+v0.4 does not have a first-class `COMP:` type. If a requirement describes a
 component, set `kind: component` on the requirement. Future v2 work may
 introduce `COMP:` and migrate `kind: component` requirements to it.
 
 `applies_to:` exists today as a free-form list of component identifiers
 (e.g., `[auth-service, gateway]`). It is not validated against any registry
-in v0.3.
+in v0.4.
 
 ---
 
@@ -467,6 +513,8 @@ suitable for further rendering by Pandoc, Typst, or any static-site tool.
   first occurrence per document.
 - `src:` references rendered as fenced code blocks with file path and line
   numbers shown above the snippet.
+- With `--include-docs`, directly referenced documentation files or exact
+  heading sections are appended with collection and resolution status.
 
 ### 8.2 `--target=agent`
 
@@ -496,6 +544,10 @@ Same content, structured envelope optimized for LLM consumption:
     ...
   </referenced-source>
 </spec>
+<documentation>
+  <document reference="spec:doc:docs/deployment.md#heading=Operations/Rollback"
+            collection="guides" status="verified"><![CDATA[...]]></document>
+</documentation>
 </specs>
 ```
 
@@ -526,6 +578,7 @@ Flags:
 - `--descendants=full|summary|id-only|none`
 - `--depth=N`
 - `--include-source`
+- `--include-docs`
 
 ### 8.4 Determinism
 
@@ -568,6 +621,10 @@ config in `.specs/_lint.toml`.
 | `R023`      | error    | Source line range is valid                                           |
 | `R024`      | warning  | `.specs/_config.toml` declares the supported format baseline        |
 | `R025`      | error    | Exactly one configured PROJECT with a summary exists and is not refined |
+| `R026`      | error    | Documentation collections are safe, named, non-overlapping, and resolvable |
+| `R027`      | error    | `spec:doc:` path targets are enrolled                               |
+| `R028`      | error    | `spec:doc:` heading paths resolve uniquely                          |
+| `R029`      | error    | Ordinary relative Markdown links resolve within enrolled documentation |
 | `R-redir`   | info     | Reference traverses a redirect                                       |
 
 `status: draft` downgrades `R002`–`R012` from error to warning. This is the
@@ -586,19 +643,22 @@ Subcommands:
 |-------------------------------------|---------------------------------------------------------------|
 | `spec init`                         | initialize config and a draft singleton PROJECT document       |
 | `spec new <type> <slug>`            | scaffold a new spec from a per-type template                  |
-| `spec lint [--require-symbols]`     | validate specs and source references                          |
+| `spec lint [--require-symbols]`     | validate specs, documentation, and source references           |
 | `spec render <id-or-query> [flags]` | produce render bundles                                        |
 | `spec inspect tree`                 | print the project-rooted specification tree                   |
 | `spec inspect graph [view]`         | emit hierarchy, refinement, or categorization DOT             |
 | `spec inspect relations <id>`       | report incoming and outgoing relationships                    |
 | `spec inspect coverage <id>`        | clause-by-clause refinement-coverage report                   |
 | `spec inspect orphans`              | list specs without refinement relationships                   |
-| `spec inspect resolve <reference>`  | resolve a spec or source reference                            |
+| `spec inspect documentation`        | list enrolled documents and hierarchical headings             |
+| `spec inspect backlinks <reference>`| show incoming links from specs or documentation                |
+| `spec inspect resolve <reference>`  | resolve a spec, documentation, or source reference             |
 | `spec inspect symbols <path>`       | list language-server symbols for a source file                |
 | `spec impact <id-or-anchor> [--target agent]` | prospective transitive impact report                |
 | `spec impact --base B [--head H] [--target agent]` | impact of parsed Git/working-tree changes     |
 | `spec change ...`                   | compile human changes into typed workspace operations         |
 | `spec change batch --from F`        | apply or dry-run a versioned multi-operation request          |
+| `spec change documentation collection-add ...` | enroll one named Markdown collection             |
 | `spec rename <id> <new-id>`         | rename a spec, incoming references, config, and redirect      |
 | `spec lifecycle ...`                | draft, accept, deprecate, or atomically supersede             |
 | `spec relation ...`                 | refine, categorize, or relate specifications                  |
@@ -631,7 +691,8 @@ describes exactly one adjacent baseline transition and contains:
 - an idempotent mechanical transformation implemented by the CLI.
 
 Migration artifacts compose in format release order. Given a tree at
-`forge-spec-v0.1.0`, CLI v0.4 plans and applies `v0.1 -> v0.2 -> v0.3` in one
+`forge-spec-v0.1.0`, CLI v0.5 plans and applies
+`v0.1 -> v0.2 -> v0.3 -> v0.4` in one
 invocation rather than requiring a direct migration for every version pair.
 The CLI release does not create a format migration when stored document syntax
 is unchanged. Historical artifacts remain shipped with future CLIs.
@@ -650,13 +711,19 @@ cycles, ambiguous routes, and a `--from` value that conflicts with a declared
 project baseline.
 
 Missing `_config.toml` is inferred as v0.1 when legacy per-file version fields
-are present, as v0.3 when a valid PROJECT document exists, and as v0.2
+are present, as the current v0.4 shape when a valid PROJECT document exists,
+and as v0.2
 otherwise. The v0.2→v0.3 migration creates a deterministic draft project
 document, reuses existing owners, and records the source baseline before the
 target baseline so interrupted migrations remain recoverable. Migration
 guidance requires the generated purpose, scope, non-goals, principles,
 summary, and owners to be reviewed; mechanical migration does not invent
 project intent.
+
+The v0.3→v0.4 migration adds documentation collections and references as an
+optional capability. Its mechanical step updates the baseline only. It never
+scans the repository to invent collections; maintainers add reviewed roots and
+patterns explicitly with `spec change documentation collection-add`.
 
 ### 10.2 Change-impact analysis
 
@@ -665,11 +732,13 @@ review. It has two mutually exclusive modes:
 
 ```sh
 spec impact REQ:auth/session-management#c-lifetime
+spec impact 'spec:doc:docs/session-operations.md#heading=Expiry/Recovery'
 spec impact --base origin/main --head working-tree --target agent
 ```
 
-Subject mode starts from an exact current specification, typed-block anchor, or
-clause anchor. Git mode compares the parsed specifications at `--base` with a
+Subject mode starts from an exact current specification, typed-block anchor,
+clause anchor, enrolled documentation file, or documentation heading. Git mode
+compares the parsed specifications and enrolled documentation at `--base` with a
 revision supplied by `--head`, or with the index plus working tree when head is
 omitted or is `working-tree`. Added and removed documents are semantic changes;
 edits whose parsed frontmatter, prose, blocks, and clauses are unchanged are
@@ -683,6 +752,12 @@ document because project intent is ambient context. Git mode traverses both the
 base and head graphs and unions the results, preserving removed specifications
 and relationships for review. Every affected document includes its minimum
 depth and one deterministic, clause-qualified explanation path.
+
+A documentation change follows explicit spec-to-document backlinks before
+cascading through refinements; it does not create a refinement edge of its own.
+Reports also list documentation referenced by affected specs and enrolled
+documents that link back to them. Documentation is context and traceability,
+not implementation or test coverage evidence.
 
 Implementation evidence has two explicit confidence classes:
 
@@ -699,15 +774,19 @@ signals, not proof of the complete runtime dependency graph.
 The default human target is Markdown. `--target agent` emits the same facts in
 a deterministic XML document rooted at
 `<forge-spec-impact schema-version="1">`, including inputs, affected specs,
-paths, sources, history, tasks, gaps, notes, and handoff instructions. The
+paths, documentation, sources, history, tasks, gaps, notes, and handoff instructions. The
 command never creates TASK documents, changes task state, or edits code.
 
 ### 10.3 Language-server integration
 
-`spec lsp` is a Language Server Protocol server for `.spec.md` files. It
-publishes lint diagnostics for unsaved buffers and provides completion, hover,
-definition, references, and document symbols. Source-symbol completion delegates
-to the downstream language server selected from the referenced file extension.
+`spec lsp` is a Language Server Protocol server for `.spec.md` files and
+Markdown enrolled by documentation collections. It publishes lint diagnostics
+for unsaved buffers and provides completion, hover, definition, references,
+and document symbols using the shared workspace index. Enrolled Markdown gets
+ordinary editable Markdown behavior plus heading symbols and `spec:doc:`
+navigation; unconfigured Markdown remains inert. Source-symbol completion
+delegates to the downstream language server selected from the referenced file
+extension.
 
 The custom `forgeSpec/applyChanges` request accepts the same
 `forge-spec-change/v1` operation objects as `spec change batch`. Rust checks the
@@ -740,8 +819,8 @@ and the desire to ship a single static binary.
 
 ### 10.4 Typed workspace mutation
 
-CLI v0.4 separates the executable release from the unchanged v0.3 document
-format. Every supported document writer uses one Rust transaction engine. The
+CLI v0.5 implements the v0.4 document format. Every supported document writer
+and documentation-collection mutation uses one Rust transaction engine. The
 public batch envelope is:
 
 ```json
@@ -780,6 +859,39 @@ workspace transaction that preserves entity type, prevents ID/path collision,
 updates incoming frontmatter and body references plus project configuration,
 and records a redirect. Supersession updates both lifecycle pointers in one
 transaction and rejects conflicts or cycles. No `--force` bypass exists.
+
+`documentation.collection.add` is a configuration operation rather than a
+spec mutation. It preserves existing TOML content, rejects duplicate IDs and
+unsafe or overlapping collections, rebuilds the candidate documentation
+index, and commits only when the complete workspace introduces no lint errors.
+
+### 10.5 Canonical overlay projection
+
+The Rust library exposes a read-only projection surface for consumers that need
+specification semantics at an unsaved workspace state. Its inputs are one saved
+`.specs/` directory and a map of repository-relative overlay entries. An entry
+can create or replace bytes, or delete the corresponding saved input. Supported
+inputs are `.spec.md`, `_config.toml`, `_redirects.toml`, and generic Markdown
+matched by the overlaid configuration's documentation collections; absolute
+paths and parent-directory traversal are rejected before projection.
+
+`forge-spec-state-v2` deterministically orders and serializes semantic
+configuration, specifications, typed blocks and clause anchors, redirects,
+explicit relationships, synthesized PROJECT containment, documentation
+collections, document bodies and headings, cross-surface documentation links,
+source selectors, and diagnostics. Paths in the schema are relative and use
+`/`; absolute host paths are not part of the contract. Invalid UTF-8, YAML,
+configuration, redirects, enrollment, links, or semantic rules produce a state
+with `valid: false` and sorted diagnostics rather than disappearing from the
+projection. Source selectors remain explicit and unverified: canonical output
+never depends on language-server availability.
+
+`forge-spec-delta-v2` compares two canonical states and reports added, removed,
+and changed specifications and documentation plus documentation-link,
+redirect, relationship, source-reference, diagnostic, validity, and
+configuration changes. Projecting or diffing performs no workspace writes.
+Identical saved and overlaid bytes must produce identical canonical state
+bytes.
 
 ---
 
@@ -836,7 +948,7 @@ Symbolic enforcement point:
 
 ---
 
-## 12. Open issues for v0.3 → v1
+## 12. Open issues for v0.4 → v1
 
 - **Component first-class type (`COMP:`).** Deferred. Trigger condition for
   introducing it: more than ~5 requirements with `kind: component` and a
@@ -848,11 +960,11 @@ Symbolic enforcement point:
 
 - **Cross-repo references.** Useful for monorepo / multi-repo organizations.
   The `spec:` URL scheme is extensible (`spec:other-repo/REQ:foo`); resolution
-  needs a registry. Out of scope for v0.3.
+  needs a registry. Out of scope for v0.4.
 
 - **Symbolic clause-coverage proof.** The current coverage check is
   syntactic: every clause has at least one refining child. A semantic check
-  — children jointly imply parent — is not feasible in v0.3.
+  — children jointly imply parent — is not feasible in v0.4.
 
 - **Concurrent edits and merge.** No special handling. Standard git merge
   with line-level conflict resolution. Frontmatter is small and conflict-

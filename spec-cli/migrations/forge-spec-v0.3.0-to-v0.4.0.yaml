@@ -1,0 +1,43 @@
+from: forge-spec-v0.3.0
+to: forge-spec-v0.4.0
+summary: >
+  Adds opt-in, named collections of ordinary Markdown documentation to the
+  workspace knowledge graph without turning documentation into specification
+  entities or changing existing refinement and coverage semantics.
+changes:
+  - id: add-documentation-collections
+    kind: schema
+    area: configuration
+    description: .specs/_config.toml can declare named repository-relative Markdown collections with include and exclude patterns.
+  - id: add-documentation-references
+    kind: schema
+    area: references
+    description: "spec:doc:<path> references address enrolled files and #heading=<hierarchical-path> addresses headings."
+  - id: index-documentation-relationships
+    kind: behavior
+    area: workspace
+    description: The shared index records headings, summaries, ordinary Markdown links, forge-spec links, and backlinks.
+  - id: expose-documentation-tooling
+    kind: behavior
+    area: tooling
+    description: CLI, canonical projection, impact, rendering, LSP, and editor explorer surfaces expose the same documentation model.
+instructions:
+  - id: preserve-existing-markdown-boundary
+    actor: cli
+    action: Update only the declared baseline; do not infer or add documentation collections from files already present in the repository.
+    verification: Existing Markdown remains unenrolled and no new documentation section appears in _config.toml.
+  - id: review-documentation-collections
+    actor: agent
+    when: Project documentation should participate in navigation, validation, projection, or impact analysis.
+    action: Propose bounded collection roots and include or exclude patterns, then add each approved collection with spec change documentation collection-add.
+    verification: Every enrolled file belongs to exactly one collection and generated, vendored, or private Markdown remains excluded.
+  - id: replace-stable-cross-document-links
+    actor: agent
+    when: A specification needs a durable link to an enrolled document or heading.
+    action: Use spec:doc repository paths and hierarchical heading selectors while retaining ordinary relative links between documentation files.
+    verification: spec lint resolves both forge-spec documentation links and ordinary Markdown links.
+validation:
+  - command: spec lint
+  - command: spec inspect documentation
+    when: At least one documentation collection is configured.
+  - command: spec render project --target agent

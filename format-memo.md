@@ -1,6 +1,6 @@
 # Specs Format — Hands-on Memo
 
-One-page reference for Specs Format v0.3. For the full spec, see `specification.md`.
+One-page reference for Specs Format v0.4. For the full spec, see `specification.md`.
 
 ## File layout
 
@@ -31,8 +31,19 @@ aspects: [duration]     # required if refines has multiple parents
 Declare the format once in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.3.0"
+baseline = "forge-spec-v0.4.0"
 project = "PROJECT:example"
+```
+
+Optionally enroll ordinary Markdown in named, non-overlapping collections:
+
+```toml
+[[documentation]]
+id = "guides"
+title = "Engineering guides"
+root = "docs"
+include = ["**/*.md"]
+exclude = ["generated/**"]
 ```
 
 File revisions are computed from Git history and shown as `rN` or `rN+dirty`.
@@ -47,7 +58,13 @@ CommonMark links with `spec:` URL scheme.
 [link text](spec:GLO:terms/idempotency-key)
 [link text](spec:src:packages/auth/session.ts:42-78)
 [link text](spec:src:packages/auth/session.ts#symbol=SessionStore/expire)
+[link text](spec:doc:docs/operations.md)
+[link text](spec:doc:docs/operations.md#heading=Deployment/Rollback)
 ```
+
+Documentation heading selectors are hierarchical and percent-encode `/`
+inside a heading name. Ordinary relative links between enrolled Markdown files
+remain valid and are indexed too.
 
 ## Typed block
 
@@ -93,6 +110,7 @@ refines:
 | `SCN`   | scenario                         |
 | `TASK`  | implementation task              |
 | `src:`  | (virtual) source-tree reference  |
+| `doc:`  | (virtual) enrolled Markdown reference |
 
 ## Common commands
 
@@ -109,6 +127,9 @@ spec impact REQ:auth/foo#c-clause          # transitive spec/code impact
 spec impact --base origin/main --target=agent # changed-spec impact XML
 spec inspect symbols src/lib.rs --query Resolver
 spec inspect resolve 'spec:src:src/lib.rs#symbol=Resolver/resolve'
+spec inspect documentation                  # configured docs + headings
+spec inspect backlinks 'spec:doc:docs/operations.md'
+spec render REQ:auth/foo --target=agent --include-docs
 spec lsp                                   # forge-spec editor language server
 spec inspect graph hierarchy               # DOT of project hierarchy
 spec inspect graph refinement              # DOT of refinement DAG only
@@ -142,6 +163,10 @@ referencing an `ADR:` in the same commit.
 | `R011`   | referenced spec missing `summary:`                                 | add `summary:` to the target              |
 | `R012`   | multi-parent refinement without `aspects:`                         | add `aspects:` justifying the split       |
 | `R025`   | missing, duplicate, misconfigured, or refined PROJECT root          | repair config/containment, then review `_project.spec.md` |
+| `R026`   | invalid, unsafe, or overlapping documentation collection             | fix roots and include/exclude patterns     |
+| `R027`   | `spec:doc:` path is not enrolled                                     | enroll the file or fix the path            |
+| `R028`   | documentation heading is missing or ambiguous                        | use the exact hierarchical heading path    |
+| `R029`   | ordinary relative Markdown link does not resolve                     | fix or enroll the linked Markdown file     |
 | `R-redir`| reference traversed a redirect (info)                              | rewrite to the canonical target           |
 
 ## Status escape hatch

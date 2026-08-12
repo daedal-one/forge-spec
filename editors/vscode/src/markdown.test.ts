@@ -20,6 +20,18 @@ describe('forge-spec Markdown rendering', () => {
     expect(rendered).toContain('class="forge-reference forge-reference-source"')
   })
 
+  it('turns bare documentation references into readable navigable labels', () => {
+    const rendered = renderSpecBody(
+      'See spec:doc:docs/architecture.md#heading=System%20design/Request%20flow.',
+    )
+
+    expect(rendered).toContain(
+      'href="spec:doc:docs/architecture.md#heading=System%20design/Request%20flow"',
+    )
+    expect(rendered).toContain('>architecture.md › System design / Request flow</a>')
+    expect(rendered).toContain('class="forge-reference forge-reference-documentation"')
+  })
+
   it('preserves authored link labels and leaves inline code literal', () => {
     const rendered = renderSpecBody(
       '[the session policy](spec:REQ:auth/session-expiry) and `spec:REQ:auth/raw`',

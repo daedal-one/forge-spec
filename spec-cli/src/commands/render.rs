@@ -8,15 +8,16 @@ use crate::model::registry::SpecRegistry;
 use crate::render::scope::{compute_scope, DetailLevel};
 use crate::render::{agent, human};
 
-pub fn run(
-    specs_dir: &Path,
-    id_or_query: &str,
-    target: &RenderTarget,
-    depth: Option<usize>,
-    ancestors: &str,
-    descendants: &str,
-    include_source: bool,
-) -> Result<()> {
+pub struct RenderOptions<'a> {
+    pub target: &'a RenderTarget,
+    pub depth: Option<usize>,
+    pub ancestors: &'a str,
+    pub descendants: &'a str,
+    pub include_source: bool,
+    pub include_docs: bool,
+}
+
+pub fn run(specs_dir: &Path, id_or_query: &str, options: &RenderOptions<'_>) -> Result<()> {
     let registry = SpecRegistry::load(specs_dir)?;
 
     // Resolve the query — support exact ID or simple glob
@@ -26,8 +27,8 @@ pub fn run(
         bail!("no specs match '{id_or_query}'");
     }
 
-    let ancestor_detail = DetailLevel::from_str_val(ancestors);
-    let descendant_detail = DetailLevel::from_str_val(descendants);
+    let ancestor_detail = DetailLevel::from_str_val(options.ancestors);
+    let descendant_detail = DetailLevel::from_str_val(options.descendants);
 
     for focal_id in &focal_ids {
         let entries = compute_scope(
@@ -35,22 +36,106 @@ pub fn run(
             focal_id,
             ancestor_detail,
             descendant_detail,
-            depth,
+            options.depth,
         );
 
-        let mut output = match target {
+        let mut output = match options.target {
             RenderTarget::Human => human::render_human(&registry, &entries),
             RenderTarget::Agent => agent::render_agent(&registry, &entries),
         };
 
-        if include_source {
-            append_source_references(&registry, &entries, target, &mut output)?;
+        if options.include_source {
+            append_source_references(&registry, &entries, options.target, &mut output)?;
+        }
+        if options.include_docs {
+            append_documentation_references(&registry, &entries, options.target, &mut output);
         }
 
         print!("{output}");
     }
 
     Ok(())
+}
+
+fn append_documentation_references(
+    registry: &SpecRegistry,
+    entries: &[crate::render::scope::ScopedEntry],
+    target: &RenderTarget,
+    output: &mut String,
+) {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut excerpts = Vec::new();
+    for entry in entries {
+        let Some(document) = registry.get_by_id(&entry.id) else {
+            continue;
+        };
+        for located in &document.references {
+            let SpecReference::Documentation(reference) = &located.reference else {
+                continue;
+            };
+            let identity = reference.to_string();
+            if !seen.insert(identity.clone()) {
+                continue;
+            }
+            let Some((documentation, heading)) = registry.documentation.resolve(reference) else {
+                excerpts.push((
+                    identity,
+                    String::new(),
+                    "unresolved".to_string(),
+                    "Documentation reference did not resolve.".to_string(),
+                ));
+                continue;
+            };
+            let start = heading.map(|heading| heading.line).unwrap_or(1);
+            let end = heading
+                .map(|heading| heading.end_line)
+                .unwrap_or_else(|| documentation.body.lines().count().max(1));
+            let snippet = documentation
+                .body
+                .lines()
+                .skip(start.saturating_sub(1))
+                .take(end.saturating_sub(start) + 1)
+                .collect::<Vec<_>>()
+                .join("\n");
+            excerpts.push((
+                identity,
+                documentation.collection_id.clone(),
+                "verified".to_string(),
+                snippet,
+            ));
+        }
+    }
+    if excerpts.is_empty() {
+        return;
+    }
+
+    match target {
+        RenderTarget::Human => {
+            output.push_str("\n## Referenced documentation\n\n");
+            for (reference, collection, status, snippet) in excerpts {
+                output.push_str(&format!(
+                    "### `{reference}` ({status}, collection `{collection}`)\n\n{snippet}\n\n"
+                ));
+            }
+        }
+        RenderTarget::Agent => {
+            let closing = "</specs>\n";
+            if output.ends_with(closing) {
+                output.truncate(output.len() - closing.len());
+            }
+            output.push_str("  <documentation>\n");
+            for (reference, collection, status, snippet) in excerpts {
+                output.push_str(&format!(
+                    "    <document reference=\"{}\" collection=\"{}\" status=\"{}\"><![CDATA[{}]]></document>\n",
+                    escape_xml(&reference),
+                    escape_xml(&collection),
+                    status,
+                    snippet.replace("]]>", "]]&gt;")
+                ));
+            }
+            output.push_str("  </documentation>\n</specs>\n");
+        }
+    }
 }
 
 fn append_source_references(

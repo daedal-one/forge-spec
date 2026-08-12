@@ -9,13 +9,19 @@ use git2::{ObjectType, Repository, Tree, TreeWalkMode, TreeWalkResult};
 use serde::Serialize;
 use walkdir::WalkDir;
 
+use crate::documentation::{
+    matching_collections, parse_documentation, DocumentationIndex, DocumentationReference,
+    DocumentationTarget,
+};
 use crate::history::trailers;
 use crate::model::block::TypedBlock;
+use crate::model::config::SpecConfig;
 use crate::model::document::SpecDocument;
 use crate::model::frontmatter::TypeSpecificFields;
 use crate::model::id::{EntityType, QualifiedAnchor};
 use crate::model::reference::{SourceTarget, SpecReference};
 use crate::model::registry::SpecRegistry;
+use crate::parse::references::parse_spec_url;
 
 const WORKING_TREE: &str = "working-tree";
 
@@ -105,6 +111,17 @@ pub struct SourceSurface {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct DocumentationSurface {
+    pub reference: String,
+    pub path: String,
+    pub title: String,
+    pub collection: String,
+    pub relationship: String,
+    pub specifications: BTreeSet<String>,
+    pub snapshots: BTreeSet<SnapshotSide>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct HistoryEvidence {
     pub spec_ref: String,
     pub kind: String,
@@ -128,6 +145,7 @@ pub struct ImpactSummary {
     pub requirements: usize,
     pub tasks: usize,
     pub explicit_source_references: usize,
+    pub documentation_surfaces: usize,
     pub historical_events: usize,
     pub implementation_files: usize,
     pub test_files: usize,
@@ -145,6 +163,7 @@ pub struct ImpactReport {
     pub inputs: Vec<ImpactInput>,
     pub affected_specs: Vec<ImpactedSpec>,
     pub source_surfaces: Vec<SourceSurface>,
+    pub documentation_surfaces: Vec<DocumentationSurface>,
     pub history: Vec<HistoryEvidence>,
     pub tasks: Vec<ImpactTask>,
     pub gaps: Vec<String>,
@@ -156,6 +175,7 @@ struct Snapshot {
     side: SnapshotSide,
     registry: SpecRegistry,
     contents: BTreeMap<String, String>,
+    documentation_contents: BTreeMap<String, String>,
 }
 
 impl Snapshot {
@@ -176,10 +196,17 @@ impl Snapshot {
         }
 
         let registry = SpecRegistry::from_documents(specs_dir, documents)?;
+        let documentation_contents = registry
+            .documentation
+            .documents
+            .iter()
+            .map(|document| (document.path.clone(), document.body.clone()))
+            .collect();
         Ok(Self {
             side,
             registry,
             contents,
+            documentation_contents,
         })
     }
 
@@ -213,7 +240,14 @@ impl Snapshot {
                 return TreeWalkResult::Ok;
             };
             let relative_path = PathBuf::from(root).join(name);
-            if !relative_path.starts_with(&relative_specs) || !is_spec_path(&relative_path) {
+            let is_spec_input = relative_path.starts_with(&relative_specs)
+                && (is_spec_path(&relative_path)
+                    || relative_path == relative_specs.join("_config.toml"));
+            let is_markdown = relative_path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("md"));
+            if !is_spec_input && !is_markdown {
                 return TreeWalkResult::Ok;
             }
             match repository.find_blob(entry.id()).and_then(|blob| {
@@ -230,19 +264,56 @@ impl Snapshot {
             return Err(error.into());
         }
 
+        let config_path = relative_specs.join("_config.toml");
+        let config_content = files
+            .iter()
+            .find(|(path, _)| *path == config_path)
+            .map(|(_, content)| content.as_str())
+            .context("historical specification tree has no .specs/_config.toml")?;
+        let config = SpecConfig::from_toml(config_content)?;
+
         let mut documents = Vec::new();
         let mut contents = BTreeMap::new();
+        let mut documentation_documents = Vec::new();
+        let mut documentation_contents = BTreeMap::new();
         for (relative_path, content) in files {
             let source_path = workdir.join(relative_path);
-            let document = crate::parse::parse_content(&source_path, &content)?;
-            contents.insert(document.id_str(), content);
-            documents.push(document);
+            let repository_path = source_path
+                .strip_prefix(workdir)
+                .expect("tree path is rooted at the Git worktree")
+                .to_string_lossy()
+                .replace('\\', "/");
+            if source_path.starts_with(workdir.join(&relative_specs)) && is_spec_path(&source_path)
+            {
+                let document = crate::parse::parse_content(&source_path, &content)?;
+                contents.insert(document.id_str(), content);
+                documents.push(document);
+                continue;
+            }
+            let collections = matching_collections(&repository_path, &config.documentation)?;
+            if let Some(collection) = collections.first() {
+                documentation_contents.insert(repository_path.clone(), content.clone());
+                documentation_documents.push(parse_documentation(
+                    &source_path,
+                    &repository_path,
+                    collection,
+                    &content,
+                ));
+            }
         }
-        let registry = SpecRegistry::from_documents(specs_dir, documents)?;
+        let documentation =
+            DocumentationIndex::from_documents(workdir, documentation_documents, Vec::new());
+        let registry = SpecRegistry::from_documents_with_config_and_documentation(
+            specs_dir,
+            documents,
+            config,
+            documentation,
+        )?;
         Ok(Self {
             side,
             registry,
             contents,
+            documentation_contents,
         })
     }
 
@@ -274,13 +345,31 @@ pub fn analyze(specs_dir: &Path, request: &ImpactRequest) -> Result<ImpactReport
 
 fn analyze_subject(specs_dir: &Path, subject: &str) -> Result<ImpactReport> {
     let current = Snapshot::working(specs_dir, SnapshotSide::Current)?;
-    let parsed: QualifiedAnchor = subject
-        .parse()
-        .map_err(|error: String| anyhow::anyhow!(error))?;
-    let (canonical, _) = current.registry.resolve_redirect(&parsed.to_string());
-    if !current.registry.reference_exists(&canonical).0 {
-        bail!("spec or anchor not found: '{subject}'");
-    }
+    let canonical = match parse_spec_url(subject) {
+        Some(SpecReference::Documentation(reference)) => {
+            if current.registry.documentation.resolve(&reference).is_none() {
+                bail!("documentation file or heading not found: '{subject}'");
+            }
+            reference.to_string()
+        }
+        Some(SpecReference::Spec(parsed)) => {
+            let (canonical, _) = current.registry.resolve_redirect(&parsed.to_string());
+            if !current.registry.reference_exists(&canonical).0 {
+                bail!("spec or anchor not found: '{subject}'");
+            }
+            canonical
+        }
+        _ => {
+            let parsed: QualifiedAnchor = subject
+                .parse()
+                .map_err(|error: String| anyhow::anyhow!(error))?;
+            let (canonical, _) = current.registry.resolve_redirect(&parsed.to_string());
+            if !current.registry.reference_exists(&canonical).0 {
+                bail!("spec or anchor not found: '{subject}'");
+            }
+            canonical
+        }
+    };
 
     let mut sides = BTreeSet::new();
     sides.insert(SnapshotSide::Current);
@@ -357,6 +446,32 @@ fn changed_inputs(base: &Snapshot, head: &Snapshot) -> Result<Vec<ImpactInput>> 
                     .context("head snapshot lost parsed document")?;
                 inputs.extend(modified_inputs(old_doc, new_doc, old, new)?);
             }
+            _ => {}
+        }
+    }
+
+    let documentation_paths = base
+        .documentation_contents
+        .keys()
+        .chain(head.documentation_contents.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for path in documentation_paths {
+        let reference = DocumentationReference::file(path.clone()).to_string();
+        match (
+            base.documentation_contents.get(&path),
+            head.documentation_contents.get(&path),
+        ) {
+            (None, Some(_)) => inputs.push(input(&reference, "added", &[SnapshotSide::Head], true)),
+            (Some(_), None) => {
+                inputs.push(input(&reference, "removed", &[SnapshotSide::Base], true))
+            }
+            (Some(old), Some(new)) if old != new => inputs.push(input(
+                &reference,
+                "modified",
+                &[SnapshotSide::Base, SnapshotSide::Head],
+                true,
+            )),
             _ => {}
         }
     }
@@ -542,6 +657,7 @@ fn finish_report(
 
     let affected_specs = finalize_specs(&pending, snapshots);
     let source_surfaces = collect_source_surfaces(&affected_specs, snapshots);
+    let documentation_surfaces = collect_documentation_surfaces(&affected_specs, snapshots);
     let tasks = collect_tasks(&affected_specs, snapshots);
     let mut notes = Vec::new();
     if inputs.is_empty() {
@@ -586,6 +702,7 @@ fn finish_report(
         &inputs,
         &affected_specs,
         &source_surfaces,
+        &documentation_surfaces,
         &history,
         &tasks,
         &gaps,
@@ -600,6 +717,7 @@ fn finish_report(
         inputs,
         affected_specs,
         source_surfaces,
+        documentation_surfaces,
         history,
         tasks,
         gaps,
@@ -612,6 +730,34 @@ fn cascade_input(
     input: &ImpactInput,
     pending: &mut BTreeMap<String, PendingImpact>,
 ) {
+    if let Some(SpecReference::Documentation(target)) = parse_spec_url(&input.reference) {
+        for document in &snapshot.registry.documents {
+            let id = document.id_str();
+            let linked = document.references.iter().any(|located| {
+                let SpecReference::Documentation(reference) = &located.reference else {
+                    return false;
+                };
+                documentation_reference_matches(&target, reference)
+            });
+            if !linked {
+                continue;
+            }
+            let path = vec![input.reference.clone(), id.clone()];
+            merge_pending(
+                pending,
+                &id,
+                1,
+                format!("references changed documentation {}", input.reference),
+                path.clone(),
+                snapshot.side,
+            );
+            if input.cascade {
+                cascade_refinements(snapshot, &id, 1, path, pending);
+            }
+        }
+        return;
+    }
+
     let root_id = document_id(&input.reference).to_string();
     let Some(root) = snapshot.document(&root_id) else {
         return;
@@ -646,14 +792,26 @@ fn cascade_input(
         return;
     }
 
-    let mut queue = VecDeque::new();
-    queue.push_back((
-        input.reference.clone(),
-        0usize,
+    cascade_refinements(
+        snapshot,
+        &input.reference,
+        0,
         vec![input.reference.clone()],
-    ));
+        pending,
+    );
+}
+
+fn cascade_refinements(
+    snapshot: &Snapshot,
+    root_reference: &str,
+    root_depth: usize,
+    root_path: Vec<String>,
+    pending: &mut BTreeMap<String, PendingImpact>,
+) {
+    let mut queue = VecDeque::new();
+    queue.push_back((root_reference.to_string(), root_depth, root_path));
     let mut visited = BTreeSet::new();
-    visited.insert(root_id);
+    visited.insert(document_id(root_reference).to_string());
 
     while let Some((parent_reference, depth, path)) = queue.pop_front() {
         for (child_id, matched_target) in
@@ -673,6 +831,19 @@ fn cascade_input(
                 queue.push_back((child_id, depth + 1, child_path));
             }
         }
+    }
+}
+
+fn documentation_reference_matches(
+    changed: &DocumentationReference,
+    linked: &DocumentationReference,
+) -> bool {
+    if changed.path != linked.path {
+        return false;
+    }
+    match &changed.target {
+        DocumentationTarget::File => true,
+        DocumentationTarget::Heading { .. } => changed == linked,
     }
 }
 
@@ -830,6 +1001,79 @@ fn collect_source_surfaces(
                         specifications: BTreeSet::new(),
                         snapshots: BTreeSet::new(),
                         test_path: is_test_path(&source.path),
+                    });
+                entry.specifications.insert(id.clone());
+                entry.snapshots.insert(snapshot.side);
+            }
+        }
+    }
+    surfaces.into_values().collect()
+}
+
+fn collect_documentation_surfaces(
+    affected: &[ImpactedSpec],
+    snapshots: &[&Snapshot],
+) -> Vec<DocumentationSurface> {
+    let ids = affected
+        .iter()
+        .map(|spec| spec.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut surfaces = BTreeMap::<(String, String), DocumentationSurface>::new();
+    for snapshot in snapshots {
+        for document in &snapshot.registry.documents {
+            let id = document.id_str();
+            if !ids.contains(id.as_str()) {
+                continue;
+            }
+            for located in &document.references {
+                let SpecReference::Documentation(reference) = &located.reference else {
+                    continue;
+                };
+                let Some((documentation, _)) = snapshot.registry.documentation.resolve(reference)
+                else {
+                    continue;
+                };
+                let canonical = reference.to_string();
+                let relationship = "referenced-by-specification".to_string();
+                let entry = surfaces
+                    .entry((canonical.clone(), relationship.clone()))
+                    .or_insert_with(|| DocumentationSurface {
+                        reference: canonical,
+                        path: documentation.path.clone(),
+                        title: documentation.title.clone(),
+                        collection: documentation.collection_id.clone(),
+                        relationship,
+                        specifications: BTreeSet::new(),
+                        snapshots: BTreeSet::new(),
+                    });
+                entry.specifications.insert(id.clone());
+                entry.snapshots.insert(snapshot.side);
+            }
+
+            for backlink in snapshot
+                .registry
+                .documentation
+                .backlinks_with_prefix(&format!("spec:{id}"))
+            {
+                if backlink.source_kind != "documentation" {
+                    continue;
+                }
+                let Some(documentation) = snapshot.registry.documentation.get(&backlink.source)
+                else {
+                    continue;
+                };
+                let reference = DocumentationReference::file(backlink.source.clone()).to_string();
+                let relationship = "documents-specification".to_string();
+                let entry = surfaces
+                    .entry((reference.clone(), relationship.clone()))
+                    .or_insert_with(|| DocumentationSurface {
+                        reference,
+                        path: documentation.path.clone(),
+                        title: documentation.title.clone(),
+                        collection: documentation.collection_id.clone(),
+                        relationship,
+                        specifications: BTreeSet::new(),
+                        snapshots: BTreeSet::new(),
                     });
                 entry.specifications.insert(id.clone());
                 entry.snapshots.insert(snapshot.side);
@@ -1010,6 +1254,7 @@ fn summarize(
     inputs: &[ImpactInput],
     affected: &[ImpactedSpec],
     sources: &[SourceSurface],
+    documentation: &[DocumentationSurface],
     history: &[HistoryEvidence],
     tasks: &[ImpactTask],
     gaps: &[String],
@@ -1047,6 +1292,7 @@ fn summarize(
             .count(),
         tasks: tasks.len(),
         explicit_source_references: sources.len(),
+        documentation_surfaces: documentation.len(),
         historical_events: history.len(),
         implementation_files,
         test_files,
@@ -1122,9 +1368,10 @@ pub fn render_human(report: &ImpactReport) -> String {
         output.push_str(&format!("Project: {project}\n"));
     }
     output.push_str(&format!(
-        "Summary: {} changed input(s), {} affected spec(s), {} explicit source reference(s), {} historical event(s), {} implementation file(s), {} test file(s), {} task(s), {} gap(s), max depth {}.\n",
+        "Summary: {} changed input(s), {} affected spec(s), {} documentation surface(s), {} explicit source reference(s), {} historical event(s), {} implementation file(s), {} test file(s), {} task(s), {} gap(s), max depth {}.\n",
         report.summary.changed_inputs,
         report.summary.affected_specs,
+        report.summary.documentation_surfaces,
         report.summary.explicit_source_references,
         report.summary.historical_events,
         report.summary.implementation_files,
@@ -1209,6 +1456,27 @@ pub fn render_human(report: &ImpactReport) -> String {
         }
     }
 
+    output.push_str("\n## Documentation surfaces\n\n");
+    if report.documentation_surfaces.is_empty() {
+        output.push_str("- None associated with the impact closure.\n");
+    } else {
+        for surface in &report.documentation_surfaces {
+            output.push_str(&format!(
+                "- `{}` ({}, {}) — {} [{}]\n",
+                surface.reference,
+                surface.collection,
+                surface.relationship,
+                surface
+                    .specifications
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                side_list(&surface.snapshots),
+            ));
+        }
+    }
+
     output.push_str("\n## Tasks\n\n");
     if report.tasks.is_empty() {
         output.push_str("- None attached to the impact closure.\n");
@@ -1266,11 +1534,12 @@ pub fn render_agent(report: &ImpactReport) -> String {
     }
     output.push_str(">\n");
     output.push_str(&format!(
-        "  <summary changed-inputs=\"{}\" affected-specs=\"{}\" requirements=\"{}\" tasks=\"{}\" explicit-source-references=\"{}\" historical-events=\"{}\" implementation-files=\"{}\" test-files=\"{}\" max-depth=\"{}\" coverage-gaps=\"{}\" />\n",
+        "  <summary changed-inputs=\"{}\" affected-specs=\"{}\" requirements=\"{}\" tasks=\"{}\" documentation-surfaces=\"{}\" explicit-source-references=\"{}\" historical-events=\"{}\" implementation-files=\"{}\" test-files=\"{}\" max-depth=\"{}\" coverage-gaps=\"{}\" />\n",
         report.summary.changed_inputs,
         report.summary.affected_specs,
         report.summary.requirements,
         report.summary.tasks,
+        report.summary.documentation_surfaces,
         report.summary.explicit_source_references,
         report.summary.historical_events,
         report.summary.implementation_files,
@@ -1336,7 +1605,29 @@ pub fn render_agent(report: &ImpactReport) -> String {
         }
         output.push_str("    </source>\n");
     }
-    output.push_str("  </implementation-surfaces>\n  <history>\n");
+    output.push_str("  </implementation-surfaces>\n  <documentation-surfaces>\n");
+    for surface in &report.documentation_surfaces {
+        output.push_str(&format!(
+            "    <documentation reference=\"{}\" path=\"{}\" collection=\"{}\" relationship=\"{}\" snapshots=\"{}\">\n",
+            escape_xml(&surface.reference),
+            escape_xml(&surface.path),
+            escape_xml(&surface.collection),
+            escape_xml(&surface.relationship),
+            side_list(&surface.snapshots),
+        ));
+        output.push_str(&format!(
+            "      <title>{}</title>\n",
+            escape_xml(&surface.title)
+        ));
+        for id in &surface.specifications {
+            output.push_str(&format!(
+                "      <associated-spec id=\"{}\" />\n",
+                escape_xml(id)
+            ));
+        }
+        output.push_str("    </documentation>\n");
+    }
+    output.push_str("  </documentation-surfaces>\n  <history>\n");
     for event in &report.history {
         output.push_str(&format!(
             "    <event spec-ref=\"{}\" kind=\"{}\" commit=\"{}\">\n",
@@ -1425,7 +1716,7 @@ mod tests {
         let specs = temp.path().join(".specs");
         write(
             &specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
         );
         write(&specs.join("_project.spec.md"), project());
         write(
@@ -1648,5 +1939,57 @@ mod tests {
             report.affected_specs[1].snapshots,
             BTreeSet::from([SnapshotSide::Base])
         );
+    }
+
+    #[test]
+    fn documentation_subject_and_diff_follow_spec_backlinks() {
+        let temp = fixture();
+        let specs = temp.path().join(".specs");
+        write(
+            &specs.join("_config.toml"),
+            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+        );
+        write(
+            &temp.path().join("docs/guide.md"),
+            "# Guide\n\n## Behavior\n\nCurrent behavior for [the root](spec:REQ:demo/root).\n",
+        );
+        let root_path = specs.join("root.spec.md");
+        let linked = format!(
+            "{}\n[Guide behavior](spec:doc:docs/guide.md#heading=Guide/Behavior)\n",
+            std::fs::read_to_string(&root_path).unwrap()
+        );
+        write(&root_path, &linked);
+
+        let report =
+            analyze_subject(&specs, "spec:doc:docs/guide.md#heading=Guide/Behavior").unwrap();
+        assert_eq!(
+            report
+                .affected_specs
+                .iter()
+                .map(|spec| (&spec.id, spec.depth))
+                .collect::<Vec<_>>(),
+            vec![
+                (&"REQ:demo/root".to_string(), 1),
+                (&"REQ:demo/child".to_string(), 2),
+                (&"TASK:demo/implement".to_string(), 3),
+            ]
+        );
+        assert_eq!(report.documentation_surfaces.len(), 2);
+        assert!(report
+            .documentation_surfaces
+            .iter()
+            .any(|surface| surface.relationship == "documents-specification"));
+
+        let repository = Repository::init(temp.path()).unwrap();
+        commit_all(&repository, "Base");
+        write(
+            &temp.path().join("docs/guide.md"),
+            "# Guide\n\n## Behavior\n\nChanged behavior for [the root](spec:REQ:demo/root).\n",
+        );
+        let report = analyze_diff(&specs, "HEAD", WORKING_TREE).unwrap();
+        assert!(report.inputs.iter().any(|input| {
+            input.reference == "spec:doc:docs/guide.md" && input.change == "modified"
+        }));
+        assert_eq!(report.summary.affected_specs, 3);
     }
 }

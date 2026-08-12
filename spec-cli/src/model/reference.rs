@@ -3,6 +3,8 @@ use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTRO
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use crate::documentation::DocumentationReference;
+
 const SYMBOL_SEGMENT_ENCODE_SET: &AsciiSet = &CONTROLS
     .add(b' ')
     .add(b'"')
@@ -70,6 +72,8 @@ pub enum SpecReference {
     Spec(QualifiedAnchor),
     /// Reference to a source file (and optional line range).
     Source(SourceReference),
+    /// Reference to configured generic Markdown documentation.
+    Documentation(DocumentationReference),
 }
 
 impl fmt::Display for SpecReference {
@@ -98,6 +102,7 @@ impl fmt::Display for SpecReference {
                     }
                 }
             }
+            Self::Documentation(documentation) => write!(f, "{documentation}"),
         }
     }
 }

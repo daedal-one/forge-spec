@@ -34,12 +34,16 @@ export class ForgeSpecService implements vscode.Disposable {
     const watcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(this.specsUri, '**/*'),
     )
+    const documentationWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(this.workspaceFolder, '**/*.md'),
+    )
     const gitHeadWatcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(this.workspaceFolder, '.git/HEAD'),
     )
     const scheduleForGit = () => this.scheduleReconcile()
     this.context.subscriptions.push(
       watcher,
+      documentationWatcher,
       gitHeadWatcher,
       gitHeadWatcher.onDidCreate(scheduleForGit),
       gitHeadWatcher.onDidChange(scheduleForGit),
@@ -59,9 +63,12 @@ export class ForgeSpecService implements vscode.Disposable {
       },
     }
     const clientOptions: LanguageClientOptions = {
-      documentSelector: [{ scheme: 'file', pattern: '**/*.spec.md' }],
+      documentSelector: [
+        { scheme: 'file', pattern: '**/*.spec.md' },
+        { scheme: 'file', pattern: '**/*.md' },
+      ],
       workspaceFolder: this.workspaceFolder,
-      synchronize: { fileEvents: watcher },
+      synchronize: { fileEvents: [watcher, documentationWatcher] },
       outputChannelName: 'Forge Spec',
     }
     this.client = new LanguageClient(

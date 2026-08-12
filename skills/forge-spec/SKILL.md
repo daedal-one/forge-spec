@@ -1,6 +1,6 @@
 ---
 name: forge-spec
-description: Introduce and maintain forge-spec as version-controlled project specifications. Use when asked to adopt forge-spec in a project, initialize or migrate a .specs tree, author or update requirements, invariants, interfaces, ADRs, glossary entries, scenarios, topics, or spec tasks, connect specs to source code, or validate spec-driven implementation work.
+description: Introduce and maintain forge-spec as version-controlled project specifications connected to source code and selected Markdown documentation. Use when asked to adopt forge-spec in a project, initialize or migrate a .specs tree, author or update requirements, invariants, interfaces, ADRs, glossary entries, scenarios, topics, or spec tasks, organize generic project documentation, connect specs to source or docs, or validate spec-driven implementation work.
 ---
 
 # Forge Spec
@@ -26,6 +26,11 @@ Use the `spec` CLI to create a small, coherent specification tree that is readab
    - If neither exists, run `spec init` from the project root, then replace the generated PROJECT placeholders with evidence-backed purpose, scope, non-goals, principles, summary, and owners.
    - If both exist, stop and resolve the intended tree or pass `--specs-dir` explicitly.
    - If a tree lacks `_config.toml` or declares an older baseline, run `spec migrate plan --target agent`, review the composed guidance, run `spec migrate apply`, then run `spec lint`. Never stamp the current baseline onto legacy content manually.
+5. Inspect existing Markdown before proposing documentation collections. Enroll
+   only stable project knowledge with bounded roots and include/exclude
+   patterns. Keep generated output, vendored material, private notes, and
+   incidental Markdown outside the index unless the user explicitly includes
+   them. Never infer collections during migration.
 
 ## Design the smallest useful tree
 
@@ -57,7 +62,12 @@ Leave new documents as `draft` until their content has been reviewed or is clear
 
 4. Add clause anchors such as `- {#c-idle} idle expiration` when children need to refine separate properties. Point children at the exact clause with `refines: [REQ:auth/session-management#c-idle]`; add `aspects:` for multiple parents.
 5. Connect claims to implementation using `spec:src:path/file.ts#symbol=Type/method` when possible. Run `spec inspect symbols <path> --query <name>` to discover resolvable symbols. Use line ranges only when symbol identity is unavailable and the range is stable.
-6. Record genuine cross-spec links. Do not invent dependencies, ownership, decisions, or guarantees that project evidence does not support.
+6. Connect stable explanatory context with `spec:doc:path/file.md` or an exact
+   hierarchical selector such as `spec:doc:path/file.md#heading=Parent/Child`.
+   Keep ordinary relative links between documentation files. Treat docs as
+   context and navigation, never as implied refinement, coverage, or normative
+   authority.
+7. Record genuine cross-spec links. Do not invent dependencies, ownership, decisions, or guarantees that project evidence does not support.
 
 ## Validate the result
 
@@ -65,10 +75,16 @@ Run at least:
 
 ```sh
 spec lint
-spec render <relevant-id> --target=agent --include-source
+spec render <relevant-id> --target=agent --include-source --include-docs
 ```
 
-Use `spec inspect coverage <parent-id>` for clause refinement, `spec inspect graph hierarchy` for the project hierarchy, `spec inspect graph refinement` for refinement alone, and `spec lint --require-symbols` when language-server availability is an enforced requirement. Fix errors before handoff and state warnings or unavailable source-symbol validation plainly.
+Use `spec inspect coverage <parent-id>` for clause refinement,
+`spec inspect documentation` and `spec inspect backlinks <reference>` for
+documentation organization, `spec inspect graph hierarchy` for the project
+hierarchy, `spec inspect graph refinement` for refinement alone, and
+`spec lint --require-symbols` when language-server availability is an enforced
+requirement. Fix errors before handoff and state warnings or unavailable
+source-symbol validation plainly.
 
 When changing an accepted spec or implementing from one, review impact before editing code:
 

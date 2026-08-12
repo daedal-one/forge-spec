@@ -59,6 +59,7 @@ pub fn lint_all_with_options(
     diags.extend(structural::check_project_root(registry));
     diags.extend(structural::check_unique_ids(registry));
     diags.extend(references::check_references(registry));
+    diags.extend(references::check_documentation_references(registry));
     diags.extend(references::check_source_references(
         registry,
         require_symbols,

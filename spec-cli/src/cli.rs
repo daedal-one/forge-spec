@@ -49,6 +49,9 @@ pub enum Commands {
         descendants: String,
         #[arg(long)]
         include_source: bool,
+        /// Embed directly referenced Markdown documentation or heading sections
+        #[arg(long)]
+        include_docs: bool,
     },
     /// Measure cascading specification and implementation impact
     Impact {
@@ -126,6 +129,19 @@ pub enum InspectCommands {
     Coverage { id: String },
     /// List specifications without refinement relationships
     Orphans,
+    /// List configured Markdown documentation and headings
+    Documentation {
+        #[arg(long)]
+        collection: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show incoming links to a specification, source, or documentation target
+    Backlinks {
+        reference: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Resolve a spec: URL to its canonical target
     Resolve {
         reference: String,
@@ -171,6 +187,8 @@ pub enum ChangeCommands {
     Adr(AdrArgs),
     /// Change headings, sections, typed blocks, and clauses
     Content(ContentArgs),
+    /// Configure generic Markdown documentation collections
+    Documentation(DocumentationArgs),
     /// Apply a versioned JSON change batch
     Batch {
         /// JSON request path, or - for standard input
@@ -179,6 +197,29 @@ pub enum ChangeCommands {
         /// Validate and print the deterministic plan without writing
         #[arg(long)]
         dry_run: bool,
+    },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct DocumentationArgs {
+    #[command(subcommand)]
+    pub command: DocumentationCommands,
+}
+
+#[derive(Subcommand)]
+pub enum DocumentationCommands {
+    /// Add one explicitly enrolled Markdown collection
+    CollectionAdd {
+        id: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        root: String,
+        #[arg(long, required = true, num_args = 1..)]
+        include: Vec<String>,
+        #[arg(long, num_args = 1..)]
+        exclude: Vec<String>,
     },
 }
 

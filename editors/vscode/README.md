@@ -3,12 +3,15 @@
 Forge Spec adds a focused specifications workbench to VS Code:
 
 - a collapsible tree from root topics and requirements through refinements,
-  clauses, tasks, and explicit `spec:src:` links;
+  clauses, tasks, explicit `spec:src:` links, and associated documentation;
+- a parallel Documentation tree organized by configured collection, directory,
+  file, and hierarchical heading, with backlinks shown on specifications;
 - a themed CommonMark viewer for each `.spec.md` file;
 - status, summary, owners, requirement level, and task progress editing through
   Rust's typed mutation engine and the normal VS Code undo, dirty, and save flow;
 - a read-only source inspection surface, kept separate from typed authoring;
-- navigation for specification, source-range, and source-symbol links;
+- navigation for specification, documentation-file, documentation-heading,
+  source-range, and source-symbol links;
 - a Rust-owned in-memory index with a per-workspace SQLite cache.
 
 ## Run from this checkout
@@ -32,9 +35,12 @@ with `forgeSpec.cache.enabled`.
 
 The extension deliberately remains a thin client. The Rust language service is
 authoritative for parsing, validation, graph construction, cache invalidation,
-reference resolution, and mutation planning. Viewer controls send
+reference resolution, documentation indexing, and mutation planning. Viewer controls send
 `forge-spec-change/v1` operations through `forgeSpec/applyChanges`; Rust returns
 versioned workspace edits, and VS Code applies them only while the document
-version still matches. File watcher events are scoped to `.specs`, while
-window focus and Git branch changes trigger a metadata reconciliation that only
-reparses stale files.
+version still matches. File watchers cover `.specs` plus Markdown, but the Rust
+service indexes only files matched by configured documentation collections.
+Enrolled Markdown keeps the normal editable Markdown editor and receives
+diagnostics, heading symbols, completion, hover, definition, and references.
+Window focus and Git branch changes trigger a metadata reconciliation that
+only reparses stale spec or documentation files.

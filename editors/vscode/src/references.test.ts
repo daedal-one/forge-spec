@@ -34,6 +34,22 @@ describe('reference presentation', () => {
     )
   })
 
+  it('presents documentation files and hierarchical headings', () => {
+    expect(referencePresentation('spec:doc:docs/architecture.md')?.label).toBe(
+      'architecture.md',
+    )
+    expect(
+      referencePresentation(
+        'spec:doc:docs/architecture.md#heading=System%20design/Request%20flow',
+      )?.label,
+    ).toBe('architecture.md › System design / Request flow')
+    expect(
+      matchForgeReference(
+        'spec:doc:docs/architecture.md#heading=System%20design/Request%20flow, then continue',
+      ),
+    ).toBe('spec:doc:docs/architecture.md#heading=System%20design/Request%20flow')
+  })
+
   it('keeps specification anchors for native-viewer navigation only', () => {
     expect(specificationAnchor('spec:REQ:explorer/workbench#viewer')).toBe('viewer')
     expect(specificationAnchor('spec:REQ:explorer/workbench')).toBeUndefined()

@@ -3,6 +3,9 @@ import * as vscode from 'vscode'
 import type {
   ExplorerBlock,
   ExplorerDocument,
+  ExplorerDocumentation,
+  ExplorerDocumentationCollection,
+  ExplorerDocumentationHeading,
   ExplorerSnapshot,
   ExplorerSource,
 } from './protocol'
@@ -14,6 +17,13 @@ export type ExplorerNode =
   | { kind: 'block'; owner: ExplorerDocument; block: ExplorerBlock; ancestry: string[] }
   | { kind: 'code'; owner: ExplorerDocument; ancestry: string[] }
   | { kind: 'source'; source: ExplorerSource }
+  | { kind: 'documentation-root' }
+  | { kind: 'documentation-collection'; collection: ExplorerDocumentationCollection }
+  | { kind: 'documentation-directory'; collection: ExplorerDocumentationCollection; prefix: string }
+  | { kind: 'documentation'; document: ExplorerDocumentation }
+  | { kind: 'documentation-heading'; document: ExplorerDocumentation; heading: ExplorerDocumentationHeading }
+  | { kind: 'spec-documentation-group'; owner: ExplorerDocument; direction: 'outgoing' | 'incoming' }
+  | { kind: 'documentation-reference'; reference: string; label: string; description?: string }
   | { kind: 'cycle'; id: string }
 
 export class ForgeSpecTreeProvider implements vscode.TreeDataProvider<ExplorerNode> {
@@ -24,6 +34,8 @@ export class ForgeSpecTreeProvider implements vscode.TreeDataProvider<ExplorerNo
     stats: { parsed: 0, loadedFromCache: 0, removed: 0 },
     projectId: undefined,
     documents: [],
+    documentationCollections: [],
+    documentation: [],
   }
   private documentsById = new Map<string, ExplorerDocument>()
   private placements = new Map<string, string[]>()
@@ -91,6 +103,92 @@ export class ForgeSpecTreeProvider implements vscode.TreeDataProvider<ExplorerNo
         item.contextValue = 'forgeSpec.source'
         return item
       }
+      case 'documentation-root': {
+        const item = new vscode.TreeItem('Documentation', vscode.TreeItemCollapsibleState.Expanded)
+        item.description = String(this.snapshotValue.documentation.length)
+        item.iconPath = new vscode.ThemeIcon('book')
+        item.contextValue = 'forgeSpec.documentationRoot'
+        return item
+      }
+      case 'documentation-collection': {
+        const item = new vscode.TreeItem(node.collection.title, vscode.TreeItemCollapsibleState.Collapsed)
+        const count = this.snapshotValue.documentation.filter(
+          document => document.collectionId === node.collection.id,
+        ).length
+        item.description = String(count)
+        item.tooltip = `Documentation collection ${node.collection.id} · ${node.collection.root}`
+        item.iconPath = new vscode.ThemeIcon('library')
+        item.contextValue = 'forgeSpec.documentationCollection'
+        return item
+      }
+      case 'documentation-directory': {
+        const item = new vscode.TreeItem(
+          path.basename(node.prefix),
+          vscode.TreeItemCollapsibleState.Collapsed,
+        )
+        item.iconPath = new vscode.ThemeIcon('folder')
+        item.contextValue = 'forgeSpec.documentationDirectory'
+        return item
+      }
+      case 'documentation': {
+        const item = new vscode.TreeItem(
+          node.document.title,
+          node.document.headings.length > 0
+            ? vscode.TreeItemCollapsibleState.Collapsed
+            : vscode.TreeItemCollapsibleState.None,
+        )
+        item.description = path.basename(node.document.path)
+        const tooltip = new vscode.MarkdownString()
+        tooltip.appendMarkdown(`**${node.document.title}**\n\n`)
+        tooltip.appendCodeblock(node.document.path)
+        if (node.document.summary) tooltip.appendMarkdown(`\n${node.document.summary}`)
+        item.tooltip = tooltip
+        item.iconPath = new vscode.ThemeIcon('markdown')
+        item.resourceUri = vscode.Uri.parse(node.document.uri)
+        item.command = {
+          command: 'forgeSpec.openReference',
+          title: 'Open documentation',
+          arguments: [`spec:doc:${node.document.path}`],
+        }
+        item.contextValue = 'forgeSpec.documentation'
+        return item
+      }
+      case 'documentation-heading': {
+        const item = new vscode.TreeItem(node.heading.title, vscode.TreeItemCollapsibleState.None)
+        item.description = `H${node.heading.level}`
+        item.iconPath = new vscode.ThemeIcon('symbol-key')
+        item.command = {
+          command: 'forgeSpec.openReference',
+          title: 'Open documentation heading',
+          arguments: [node.heading.reference],
+        }
+        item.contextValue = 'forgeSpec.documentationHeading'
+        return item
+      }
+      case 'spec-documentation-group': {
+        const count = node.direction === 'outgoing'
+          ? node.owner.documentation.length
+          : node.owner.documentedBy.length
+        const item = new vscode.TreeItem(
+          node.direction === 'outgoing' ? 'Documentation' : 'Referenced by documentation',
+          vscode.TreeItemCollapsibleState.Collapsed,
+        )
+        item.description = String(count)
+        item.iconPath = new vscode.ThemeIcon(node.direction === 'outgoing' ? 'book' : 'references')
+        return item
+      }
+      case 'documentation-reference': {
+        const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None)
+        item.description = node.description
+        item.tooltip = node.reference
+        item.iconPath = new vscode.ThemeIcon('markdown')
+        item.command = {
+          command: 'forgeSpec.openReference',
+          title: 'Open documentation reference',
+          arguments: [node.reference],
+        }
+        return item
+      }
       case 'cycle': {
         const item = new vscode.TreeItem(`${node.id} (cycle)`, vscode.TreeItemCollapsibleState.None)
         item.iconPath = new vscode.ThemeIcon('warning')
@@ -104,19 +202,66 @@ export class ForgeSpecTreeProvider implements vscode.TreeDataProvider<ExplorerNo
       const project = this.snapshotValue.projectId
         ? this.documentsById.get(this.snapshotValue.projectId)
         : undefined
-      if (project) return [{ kind: 'spec', document: project, ancestry: [] }]
-
-      const placed = new Set<string>()
-      for (const children of this.placements.values()) {
-        for (const child of children) placed.add(child)
+      const roots: ExplorerNode[] = []
+      if (project) {
+        roots.push({ kind: 'spec', document: project, ancestry: [] })
+      } else {
+        const placed = new Set<string>()
+        for (const children of this.placements.values()) {
+          for (const child of children) placed.add(child)
+        }
+        roots.push(...this.snapshotValue.documents
+          .filter(document => !placed.has(document.id))
+          .sort(compareDocuments)
+          .map(document => ({ kind: 'spec', document, ancestry: [] } as ExplorerNode)))
       }
-      return this.snapshotValue.documents
-        .filter(document => !placed.has(document.id))
-        .sort(compareDocuments)
-        .map(document => ({ kind: 'spec', document, ancestry: [] }))
+      if (this.snapshotValue.documentationCollections.length > 0) {
+        roots.push({ kind: 'documentation-root' })
+      }
+      return roots
     }
 
-    if (node.kind === 'source' || node.kind === 'cycle') return []
+    if (
+      node.kind === 'source' ||
+      node.kind === 'cycle' ||
+      node.kind === 'documentation-heading' ||
+      node.kind === 'documentation-reference'
+    ) return []
+    if (node.kind === 'documentation-root') {
+      return this.snapshotValue.documentationCollections.map(collection => ({
+        kind: 'documentation-collection',
+        collection,
+      }))
+    }
+    if (node.kind === 'documentation-collection') {
+      return this.documentationChildren(node.collection, '')
+    }
+    if (node.kind === 'documentation-directory') {
+      return this.documentationChildren(node.collection, node.prefix)
+    }
+    if (node.kind === 'documentation') {
+      return node.document.headings.map(heading => ({
+        kind: 'documentation-heading',
+        document: node.document,
+        heading,
+      }))
+    }
+    if (node.kind === 'spec-documentation-group') {
+      if (node.direction === 'outgoing') {
+        return node.owner.documentation.map(reference => ({
+          kind: 'documentation-reference',
+          reference: reference.reference,
+          label: reference.label || reference.reference,
+        }))
+      }
+      return node.owner.documentedBy.map(backlink => ({
+        kind: 'documentation-reference',
+        reference: `spec:doc:${backlink.source}`,
+        label: backlink.label || path.basename(backlink.source),
+        description: `line ${backlink.line}`,
+      }))
+    }
+
     if (node.kind === 'code') {
       return node.owner.sources.map(source => ({ kind: 'source', source }))
     }
@@ -133,7 +278,48 @@ export class ForgeSpecTreeProvider implements vscode.TreeDataProvider<ExplorerNo
     if (node.document.sources.length > 0) {
       children.push({ kind: 'code', owner: node.document, ancestry })
     }
+    if (node.document.documentation.length > 0) {
+      children.push({ kind: 'spec-documentation-group', owner: node.document, direction: 'outgoing' })
+    }
+    if (node.document.documentedBy.length > 0) {
+      children.push({ kind: 'spec-documentation-group', owner: node.document, direction: 'incoming' })
+    }
     return children
+  }
+
+  private documentationChildren(
+    collection: ExplorerDocumentationCollection,
+    prefix: string,
+  ): ExplorerNode[] {
+    const directories = new Set<string>()
+    const documents: ExplorerNode[] = []
+    const root = collection.root === '.' ? '' : `${collection.root.replace(/\/$/, '')}/`
+    const prefixWithSlash = prefix ? `${prefix}/` : ''
+    for (const document of this.snapshotValue.documentation) {
+      if (document.collectionId !== collection.id) continue
+      const relative = root && document.path.startsWith(root)
+        ? document.path.slice(root.length)
+        : document.path
+      if (!relative.startsWith(prefixWithSlash)) continue
+      const remaining = relative.slice(prefixWithSlash.length)
+      const slash = remaining.indexOf('/')
+      if (slash >= 0) {
+        directories.add(prefixWithSlash + remaining.slice(0, slash))
+      } else {
+        documents.push({ kind: 'documentation', document })
+      }
+    }
+    return [
+      ...[...directories].sort().map(directory => ({
+        kind: 'documentation-directory',
+        collection,
+        prefix: directory,
+      }) as ExplorerNode),
+      ...documents.sort((left, right) => {
+        if (left.kind !== 'documentation' || right.kind !== 'documentation') return 0
+        return left.document.title.localeCompare(right.document.title)
+      }),
+    ]
   }
 
   private specChildren(parent: string, ancestry: string[]): ExplorerNode[] {
@@ -150,6 +336,8 @@ export class ForgeSpecTreeProvider implements vscode.TreeDataProvider<ExplorerNo
     const hasChildren =
       node.document.blocks.length > 0 ||
       node.document.sources.length > 0 ||
+      node.document.documentation.length > 0 ||
+      node.document.documentedBy.length > 0 ||
       (this.placements.get(node.document.id) ?? []).length > 0
     const item = new vscode.TreeItem(
       specificationDisplayName(node.document.id, node.document.title),

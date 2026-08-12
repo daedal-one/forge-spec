@@ -167,10 +167,20 @@ pub enum Operation {
 
     #[serde(rename = "spec.rename")]
     SpecRename { spec: String, new_id: String },
+
+    #[serde(rename = "documentation.collection.add")]
+    DocumentationCollectionAdd {
+        id: String,
+        title: String,
+        root: String,
+        include: Vec<String>,
+        #[serde(default)]
+        exclude: Vec<String>,
+    },
 }
 
 impl Operation {
-    pub fn primary_spec(&self) -> &str {
+    pub fn primary_spec(&self) -> Option<&str> {
         match self {
             Self::SummaryReplace { spec, .. }
             | Self::OwnerAdd { spec, .. }
@@ -220,7 +230,8 @@ impl Operation {
             | Self::TaskAssigneeClear { spec }
             | Self::TaskEtaSet { spec, .. }
             | Self::TaskEtaClear { spec }
-            | Self::SpecRename { spec, .. } => spec,
+            | Self::SpecRename { spec, .. } => Some(spec),
+            Self::DocumentationCollectionAdd { .. } => None,
         }
     }
 
@@ -275,6 +286,7 @@ impl Operation {
             Self::TaskEtaSet { .. } => "task.eta.set",
             Self::TaskEtaClear { .. } => "task.eta.clear",
             Self::SpecRename { .. } => "spec.rename",
+            Self::DocumentationCollectionAdd { .. } => "documentation.collection.add",
         }
     }
 }

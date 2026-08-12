@@ -7,6 +7,7 @@ use walkdir::WalkDir;
 use super::config::SpecConfig;
 use super::document::SpecDocument;
 use super::id::EntityType;
+use crate::documentation::DocumentationIndex;
 use crate::parse;
 
 /// A redirect entry from `_redirects.toml`.
@@ -27,6 +28,7 @@ pub struct SpecRegistry {
     pub redirects: Vec<Redirect>,
     pub specs_dir: PathBuf,
     pub config: SpecConfig,
+    pub documentation: DocumentationIndex,
 }
 
 impl SpecRegistry {
@@ -80,6 +82,21 @@ impl SpecRegistry {
         documents: Vec<SpecDocument>,
         config: SpecConfig,
     ) -> Result<Self> {
+        let documentation = DocumentationIndex::load(specs_dir, &config)?;
+        Self::from_documents_with_config_and_documentation(
+            specs_dir,
+            documents,
+            config,
+            documentation,
+        )
+    }
+
+    pub(crate) fn from_documents_with_config_and_documentation(
+        specs_dir: &Path,
+        documents: Vec<SpecDocument>,
+        config: SpecConfig,
+        mut documentation: DocumentationIndex,
+    ) -> Result<Self> {
         let redirects_path = specs_dir.join("_redirects.toml");
         let redirects = if redirects_path.exists() {
             parse::redirects::load_redirects(&redirects_path)
@@ -88,6 +105,18 @@ impl SpecRegistry {
             Vec::new()
         };
 
+        for document in &documents {
+            let source = document.id_str();
+            for located in &document.references {
+                documentation.add_specification_backlink(
+                    &located.reference,
+                    &source,
+                    &located.link_text,
+                    located.line,
+                );
+            }
+        }
+
         let mut registry = Self {
             documents,
             id_index: BTreeMap::new(),
@@ -95,6 +124,7 @@ impl SpecRegistry {
             redirects,
             specs_dir: specs_dir.to_path_buf(),
             config,
+            documentation,
         };
         registry.rebuild_indexes();
         Ok(registry)
@@ -120,6 +150,45 @@ impl SpecRegistry {
             registry.documents.push(document);
         }
         registry.rebuild_indexes();
+        registry.documentation = DocumentationIndex::load(&registry.specs_dir, &registry.config)?;
+        for document in &registry.documents {
+            let source = document.id_str();
+            for located in &document.references {
+                registry.documentation.add_specification_backlink(
+                    &located.reference,
+                    &source,
+                    &located.link_text,
+                    located.line,
+                );
+            }
+        }
+        Ok(registry)
+    }
+
+    /// Overlay one enrolled Markdown document for unsaved editor navigation.
+    pub fn documentation_with_override(
+        &self,
+        source_path: &Path,
+        content: &str,
+    ) -> Result<DocumentationIndex> {
+        self.documentation.with_override(source_path, content)
+    }
+
+    /// Clone the registry and overlay one enrolled Markdown document.
+    pub fn with_documentation_override(&self, source_path: &Path, content: &str) -> Result<Self> {
+        let mut registry = self.clone();
+        registry.documentation = self.documentation.with_override(source_path, content)?;
+        for document in &registry.documents {
+            let source = document.id_str();
+            for located in &document.references {
+                registry.documentation.add_specification_backlink(
+                    &located.reference,
+                    &source,
+                    &located.link_text,
+                    located.line,
+                );
+            }
+        }
         Ok(registry)
     }
 

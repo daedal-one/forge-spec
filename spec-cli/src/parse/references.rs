@@ -1,5 +1,8 @@
+use std::path::Path;
+
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
+use crate::documentation::{decode_heading_segments, DocumentationReference};
 use crate::model::id::QualifiedAnchor;
 use crate::model::reference::{
     decode_symbol_segments, LocatedReference, SourceReference, SpecReference,
@@ -9,7 +12,22 @@ use crate::model::reference::{
 pub fn parse_spec_url(url: &str) -> Option<SpecReference> {
     let rest = url.strip_prefix("spec:")?;
 
-    if let Some(src_path) = rest.strip_prefix("src:") {
+    if let Some(doc_path) = rest.strip_prefix("doc:") {
+        if let Some((path, heading)) = doc_path.split_once("#heading=") {
+            if path.is_empty() || path.contains('#') || Path::new(path).is_absolute() {
+                return None;
+            }
+            return Some(SpecReference::Documentation(
+                DocumentationReference::heading(path, decode_heading_segments(heading)?),
+            ));
+        }
+        if doc_path.is_empty() || doc_path.contains('#') || Path::new(doc_path).is_absolute() {
+            return None;
+        }
+        Some(SpecReference::Documentation(DocumentationReference::file(
+            doc_path,
+        )))
+    } else if let Some(src_path) = rest.strip_prefix("src:") {
         if let Some((path, symbol)) = src_path.split_once("#symbol=") {
             if path.is_empty() || path.contains('#') {
                 return None;
@@ -220,5 +238,31 @@ Also check [session.ts](spec:src:packages/auth/session.ts:42-78).
 "#;
         let refs = extract_references(body, 1);
         assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn parse_documentation_heading_ref() {
+        let reference =
+            parse_spec_url("spec:doc:docs/architecture.md#heading=System%20design/Request%20flow")
+                .unwrap();
+        assert_eq!(
+            reference,
+            SpecReference::Documentation(DocumentationReference::heading(
+                "docs/architecture.md",
+                vec!["System design".into(), "Request flow".into()],
+            ))
+        );
+        assert_eq!(
+            reference.to_string(),
+            "spec:doc:docs/architecture.md#heading=System%20design/Request%20flow"
+        );
+    }
+
+    #[test]
+    fn rejects_unsafe_or_unknown_documentation_selectors() {
+        assert!(parse_spec_url("spec:doc:").is_none());
+        assert!(parse_spec_url("spec:doc:/absolute.md").is_none());
+        assert!(parse_spec_url("spec:doc:docs/a.md#heading=").is_none());
+        assert!(parse_spec_url("spec:doc:docs/a.md#other=heading").is_none());
     }
 }

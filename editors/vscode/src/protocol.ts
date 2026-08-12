@@ -9,6 +9,8 @@ export interface ExplorerSnapshot {
   stats: IndexStats
   projectId?: string
   documents: ExplorerDocument[]
+  documentationCollections: ExplorerDocumentationCollection[]
+  documentation: ExplorerDocumentation[]
 }
 
 export interface ExplorerDocument {
@@ -25,6 +27,53 @@ export interface ExplorerDocument {
   categorizedUnder: string[]
   blocks: ExplorerBlock[]
   sources: ExplorerSource[]
+  documentation: ExplorerReference[]
+  documentedBy: DocumentationBacklink[]
+}
+
+export interface ExplorerReference {
+  reference: string
+  label: string
+  line: number
+}
+
+export interface DocumentationBacklink {
+  sourceKind: 'specification' | 'documentation'
+  source: string
+  label: string
+  line: number
+  target: string
+}
+
+export interface ExplorerDocumentationCollection {
+  id: string
+  title: string
+  root: string
+}
+
+export interface ExplorerDocumentation {
+  collectionId: string
+  collectionTitle: string
+  path: string
+  title: string
+  summary?: string
+  uri: string
+  headings: ExplorerDocumentationHeading[]
+  links: ExplorerDocumentationLink[]
+  backlinks: DocumentationBacklink[]
+}
+
+export interface ExplorerDocumentationHeading {
+  title: string
+  reference: string
+  level: number
+  line: number
+}
+
+export interface ExplorerDocumentationLink {
+  reference: string
+  label: string
+  line: number
 }
 
 export interface ExplorerBlock {
@@ -62,7 +111,7 @@ export type ResolvedLocation = ProtocolLocation | null
 
 export interface ChangeOperation {
   op: string
-  spec: string
+  spec?: string
   [key: string]: unknown
 }
 
@@ -71,7 +120,7 @@ export interface ApplyChangesResult {
   plan: {
     schema: string
     dry_run: boolean
-    operations: Array<{ index: number; operation: string; spec: string }>
+    operations: Array<{ index: number; operation: string; spec?: string; config?: string }>
     files: string[]
     warnings: string[]
   }
