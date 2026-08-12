@@ -72,7 +72,7 @@ pub fn check_spec_config(registry: &SpecRegistry) -> Vec<Diagnostic> {
         return vec![Diagnostic::warning(
             "R024",
             format!(
-                "missing _config.toml; run `spec migrate --guide --target agent`, then `spec migrate` to {CURRENT_SPEC_BASELINE}"
+                "missing _config.toml; run `spec migrate plan --target agent`, then `spec migrate apply` to {CURRENT_SPEC_BASELINE}"
             ),
             path,
         )];
@@ -81,7 +81,7 @@ pub fn check_spec_config(registry: &SpecRegistry) -> Vec<Diagnostic> {
         return vec![Diagnostic::error(
             "R024",
             format!(
-                "baseline '{}' is not the active baseline {CURRENT_SPEC_BASELINE}; run `spec migrate --guide --target agent` or upgrade the CLI",
+                "baseline '{}' is not the active baseline {CURRENT_SPEC_BASELINE}; run `spec migrate plan --target agent` or upgrade the CLI",
                 registry.config.baseline
             ),
             path,
@@ -107,7 +107,7 @@ pub fn check_project_root(registry: &SpecRegistry) -> Vec<Diagnostic> {
         return vec![Diagnostic::error(
             "R025",
             format!(
-                "expected exactly one PROJECT document, found {}; run `spec init` for a new tree or `spec migrate` for an older tree",
+                "expected exactly one PROJECT document, found {}; run `spec init` for a new tree or `spec migrate apply` for an older tree",
                 project_documents.len()
             ),
             config_path,

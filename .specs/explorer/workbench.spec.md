@@ -37,9 +37,9 @@ semantic unit, including direct navigation to specifications that refine it.
 :::
 
 :::{requirement id="metadata" level="MUST"}
-The viewer MUST expose universal and type-specific frontmatter and MUST permit
-supported metadata fields to be edited through the editor's normal undo,
-dirty-state, save, and validation flows.
+The viewer MUST expose universal and type-specific frontmatter and MUST compile
+supported changes into the Rust-owned typed mutation protocol while retaining
+the editor's normal undo, dirty-state, save, and version checks.
 :::
 
 :::{requirement id="navigation" level="MUST"}
@@ -55,6 +55,6 @@ reparse stale, created, or explicitly invalidated files during reconciliation.
 
 :::{requirement id="authority" level="MUST"}
 The forge-spec Rust implementation MUST remain authoritative for parsing,
-validation, graph construction, and source-reference resolution so editor
-clients do not drift from the CLI.
+validation, graph construction, source-reference resolution, and every
+supported mutation so editor clients do not drift from the CLI.
 :::

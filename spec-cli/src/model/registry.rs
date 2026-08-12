@@ -75,7 +75,7 @@ impl SpecRegistry {
         Self::from_documents_with_config(specs_dir, documents, config)
     }
 
-    fn from_documents_with_config(
+    pub(crate) fn from_documents_with_config(
         specs_dir: &Path,
         documents: Vec<SpecDocument>,
         config: SpecConfig,

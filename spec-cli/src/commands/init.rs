@@ -16,7 +16,7 @@ pub fn run(specs_dir: &Path) -> Result<()> {
         let config = SpecConfig::load(specs_dir)?;
         if config.baseline != CURRENT_SPEC_BASELINE {
             bail!(
-                "{} declares baseline '{}'; run `spec migrate --guide --target agent` before changing it",
+                "{} declares baseline '{}'; run `spec migrate plan --target agent` before changing it",
                 config_path.display(),
                 config.baseline
             );
@@ -38,7 +38,7 @@ pub fn run(specs_dir: &Path) -> Result<()> {
 
     if has_spec_files(specs_dir) {
         bail!(
-            "{} contains specs without _config.toml; run `spec migrate --guide --target agent`, then `spec migrate`",
+            "{} contains specs without _config.toml; run `spec migrate plan --target agent`, then `spec migrate apply`",
             specs_dir.display()
         );
     }
@@ -46,13 +46,14 @@ pub fn run(specs_dir: &Path) -> Result<()> {
     std::fs::create_dir_all(specs_dir)
         .with_context(|| format!("creating {}", specs_dir.display()))?;
     let project = ensure_project_document(specs_dir, None)?;
-    std::fs::write(
-        &config_path,
+    crate::mutation::atomic_write_files(&[(
+        config_path.clone(),
         format!(
             "baseline = \"{CURRENT_SPEC_BASELINE}\"\nproject = {:?}\n",
             project.id
-        ),
-    )
+        )
+        .into_bytes(),
+    )])
     .with_context(|| format!("writing {}", config_path.display()))?;
 
     println!("Initialized {}", specs_dir.display());
@@ -143,7 +144,7 @@ mod tests {
 
         let error = run(&specs_dir).unwrap_err().to_string();
 
-        assert!(error.contains("run `spec migrate --guide --target agent`"));
+        assert!(error.contains("run `spec migrate plan --target agent`"));
         assert_eq!(
             std::fs::read_to_string(specs_dir.join("_config.toml")).unwrap(),
             "baseline = \"forge-spec-v0.1.0\"\n"

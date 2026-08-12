@@ -84,7 +84,10 @@ impl Diagnostic {
     pub fn display_colored(&self) -> String {
         let sev_str = match self.severity {
             Severity::Error => format!("error[{}]", self.code).red().bold().to_string(),
-            Severity::Warning => format!("warning[{}]", self.code).yellow().bold().to_string(),
+            Severity::Warning => format!("warning[{}]", self.code)
+                .yellow()
+                .bold()
+                .to_string(),
             Severity::Info => format!("info[{}]", self.code).blue().bold().to_string(),
         };
 

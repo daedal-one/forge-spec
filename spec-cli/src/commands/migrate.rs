@@ -21,7 +21,7 @@ pub fn run(
 
     if !guide && detected.declared && source != detected.baseline {
         bail!(
-            "--from '{source}' does not match the declared baseline '{}'; use --guide to inspect another route without applying it",
+            "--from '{source}' does not match the declared baseline '{}'; use `spec migrate plan` to inspect another route without applying it",
             detected.baseline
         );
     }
@@ -92,6 +92,7 @@ fn apply_redirects(specs_dir: &Path) -> Result<usize> {
 
     println!("Processing {} redirect(s)...", registry.redirects.len());
     let mut total_rewrites = 0;
+    let mut writes = Vec::new();
 
     for document in &registry.documents {
         let content = std::fs::read_to_string(&document.source_path)?;
@@ -112,7 +113,7 @@ fn apply_redirects(specs_dir: &Path) -> Result<usize> {
         }
 
         if migrated != content {
-            std::fs::write(&document.source_path, migrated)?;
+            writes.push((document.source_path.clone(), migrated.into_bytes()));
             println!(
                 "  {} — {} rewrite(s)",
                 document.source_path.display(),
@@ -121,6 +122,8 @@ fn apply_redirects(specs_dir: &Path) -> Result<usize> {
             total_rewrites += document_rewrites;
         }
     }
+
+    crate::mutation::atomic_write_files(&writes)?;
 
     Ok(total_rewrites)
 }

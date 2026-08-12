@@ -3,9 +3,7 @@ id: REQ:explorer/spec-viewer
 type: requirement
 status: accepted
 level: MUST
-summary: >
-  Each .spec.md file has a rendered viewer with status, metadata inspection and
-  editing, hyperlinks, and a direct path back to raw Markdown.
+summary: 'Each .spec.md file has a rendered viewer with validated typed metadata editing, hyperlinks, and read-only source inspection.'
 owners: [carlo]
 refines:
   - REQ:explorer/workbench#viewer
@@ -28,9 +26,10 @@ and applicable type-specific fields such as requirement level or task progress.
 :::
 
 :::{requirement id="metadata-edit" level="MUST"}
-Edits to supported metadata MUST be applied as minimal workspace text edits,
-MUST preserve unrelated frontmatter, and MUST fail rather than overwrite a
-newer document version.
+Supported metadata edits MUST compile into `forge-spec-change/v1` operations,
+MUST be validated by the Rust mutation engine, and MUST be returned as
+versioned workspace text edits. VS Code MUST apply those edits only while the
+document version matches.
 :::
 
 :::{requirement id="links" level="MUST"}
@@ -54,11 +53,12 @@ MUST update with the workspace index.
 :::
 
 :::{requirement id="source-mode" level="MUST"}
-The viewer MUST provide an explicit command to open the same document in the
-normal Markdown text editor.
+The viewer MUST provide an explicit read-only source inspection surface
+separate from typed authoring controls.
 :::
 
 The implementation is split between the
 [custom editor](spec:src:editors/vscode/src/viewer.ts), the
 [reference-aware Markdown renderer](spec:src:editors/vscode/src/markdown.ts),
-and [minimal frontmatter edits](spec:src:editors/vscode/src/frontmatter.ts).
+the [typed operation compiler](spec:src:editors/vscode/src/frontmatter.ts), and
+the Rust-owned [LSP mutation bridge](spec:src:spec-cli/src/lsp.rs).

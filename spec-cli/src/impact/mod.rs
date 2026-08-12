@@ -1241,7 +1241,7 @@ pub fn render_human(report: &ImpactReport) -> String {
     output.push_str("\n## Agent handoff\n\n");
     output.push_str("1. Review every affected path and evidence gap; impact is explicit or historically inferred, not a code-dependency proof.\n");
     output.push_str("2. Render affected specs with `spec render <id> --target agent --include-source` before editing.\n");
-    output.push_str("3. Create missing TASK specs deliberately, then use `spec start <task-id>` when implementation begins.\n");
+    output.push_str("3. Create missing TASK specs deliberately, then use `spec task start <task-id>` when implementation begins.\n");
     output.push_str(
         "4. Validate with `spec lint --require-symbols` and the affected project tests.\n",
     );
@@ -1370,7 +1370,7 @@ pub fn render_agent(report: &ImpactReport) -> String {
     output.push_str("  </notes>\n  <agent-handoff>\n");
     output.push_str("    <instruction>Review every affected path and evidence gap; this report is not a code-dependency proof.</instruction>\n");
     output.push_str("    <instruction>Render affected specifications with spec render ID --target agent --include-source before editing.</instruction>\n");
-    output.push_str("    <instruction>Create missing TASK specifications deliberately and run spec start TASK-ID when implementation begins.</instruction>\n");
+    output.push_str("    <instruction>Create missing TASK specifications deliberately and run spec task start TASK-ID when implementation begins.</instruction>\n");
     output.push_str("    <validation>spec lint --require-symbols</validation>\n");
     output.push_str("  </agent-handoff>\n</forge-spec-impact>\n");
     output

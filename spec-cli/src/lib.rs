@@ -6,6 +6,7 @@
 
 pub mod cli;
 pub mod commands;
+pub mod editable;
 pub mod graph;
 pub mod history;
 pub mod impact;
@@ -13,6 +14,7 @@ pub mod lint;
 pub mod lsp;
 pub mod migration;
 pub mod model;
+pub mod mutation;
 pub mod parse;
 pub mod project;
 pub mod projection;

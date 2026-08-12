@@ -6,7 +6,8 @@ Forge Spec adds a focused specifications workbench to VS Code:
   clauses, tasks, and explicit `spec:src:` links;
 - a themed CommonMark viewer for each `.spec.md` file;
 - status, summary, owners, requirement level, and task progress editing through
-  the normal VS Code undo, dirty, and save flow;
+  Rust's typed mutation engine and the normal VS Code undo, dirty, and save flow;
+- a read-only source inspection surface, kept separate from typed authoring;
 - navigation for specification, source-range, and source-symbol links;
 - a Rust-owned in-memory index with a per-workspace SQLite cache.
 
@@ -31,6 +32,9 @@ with `forgeSpec.cache.enabled`.
 
 The extension deliberately remains a thin client. The Rust language service is
 authoritative for parsing, validation, graph construction, cache invalidation,
-and reference resolution. File watcher events are scoped to `.specs`, while
+reference resolution, and mutation planning. Viewer controls send
+`forge-spec-change/v1` operations through `forgeSpec/applyChanges`; Rust returns
+versioned workspace edits, and VS Code applies them only while the document
+version still matches. File watcher events are scoped to `.specs`, while
 window focus and Git branch changes trigger a metadata reconciliation that only
 reparses stale files.

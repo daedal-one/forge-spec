@@ -7,7 +7,7 @@ This repo uses the **Specs Format v0.3** to capture project intent, requirements
 - Specs live in `.specs/` as `.spec.md` files with YAML frontmatter + CommonMark body.
 - The singleton root uses `PROJECT:slug`; every other spec uses `TYPE:namespace/slug` (e.g. `REQ:auth/session-expiry`).
 - `.specs/_config.toml` declares `baseline = "forge-spec-v0.3.0"` and selects `project = "PROJECT:slug"`; per-file revisions are derived from Git.
-- Before changing an older tree, run `spec migrate --guide --target agent`; then run `spec migrate` and `spec lint`.
+- Before changing an older tree, run `spec migrate plan --target agent`; then run `spec migrate apply` and `spec lint`.
 - Types: `PROJECT` root description, `REQ` requirement, `INV` invariant, `IFC` interface, `ADR` decision record, `GLO` glossary, `TOPIC` grouping, `SCN` scenario, `TASK` implementation work.
 - Documents without an explicit refinement or categorization parent implicitly descend from PROJECT; containment never implies refinement.
 - Cross-reference with `[text](spec:REQ:auth/session-expiry)` links. Source refs: `spec:src:path/file.ts:42-78` or `spec:src:path/file.ts#symbol=Type/method`.
@@ -26,13 +26,14 @@ spec init                      # initialize a new .specs tree
 spec new REQ auth/foo          # scaffold
 spec lint                      # validate all rules (pre-commit)
 spec render REQ:auth/foo --target=agent   # XML envelope for LLM context
-spec children REQ:auth/foo     # who refines this?
-spec coverage REQ:auth/foo     # clause-by-clause coverage
+spec inspect relations REQ:auth/foo     # incoming and outgoing relationships
+spec inspect coverage REQ:auth/foo      # clause-by-clause coverage
 spec impact REQ:auth/foo#c-id  # cascading spec, task, source, and history impact
 spec impact --base origin/main --target agent  # review changed specs before coding
-spec graph                     # DOT output of project hierarchy
-spec graph --refinement        # DOT output of refinement DAG only
-spec migrate --guide --target agent   # composed migration context
+spec inspect graph hierarchy   # DOT output of project hierarchy
+spec inspect graph refinement  # DOT output of refinement DAG only
+spec migrate plan --target agent      # composed migration context
+spec change batch --from changes.json --dry-run
 ```
 
 ## Specification reference
@@ -47,7 +48,7 @@ Full spec: `specification.md`. Key sections by line number:
 | Reference syntax & resolution | 290-329 | 5 |
 | Project containment, refinement, categorization | 330-398 | 6 |
 | Git trailers & history | 399-453 | 7 |
-| Render targets (human & agent XML) | 454-538 | 8 |
-| Lint rules R001-R025 | 539-578 | 9 |
-| CLI initialization, migration, impact, and LSP integration | 579-728 | 10-10.3 |
-| Worked file template | 729-781 | 11 |
+| Render targets (human & agent XML) | 454-537 | 8 |
+| Lint rules R001-R025 | 538-577 | 9 |
+| CLI, typed mutation, migration, impact, and LSP integration | 578-785 | 10-10.4 |
+| Worked file template | 786-838 | 11 |

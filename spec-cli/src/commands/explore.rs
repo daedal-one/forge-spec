@@ -4,9 +4,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::Result;
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+};
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -238,7 +242,12 @@ impl App {
             }
             let ns = doc.universal.id.namespace.clone();
             let ty = doc.universal.entity_type.prefix();
-            grouped.entry(ns).or_default().entry(ty).or_default().push(idx);
+            grouped
+                .entry(ns)
+                .or_default()
+                .entry(ty)
+                .or_default()
+                .push(idx);
         }
 
         let mut all_nodes = Vec::new();
@@ -420,7 +429,11 @@ impl App {
         if self.visible.is_empty() {
             self.list_state.select(None);
         } else {
-            let sel = self.list_state.selected().unwrap_or(0).min(self.visible.len() - 1);
+            let sel = self
+                .list_state
+                .selected()
+                .unwrap_or(0)
+                .min(self.visible.len() - 1);
             self.list_state.select(Some(sel));
         }
     }
@@ -497,7 +510,9 @@ impl App {
     /// Open the context menu for the currently-selected spec (no-op for
     /// group nodes).
     fn open_action_menu(&mut self) {
-        let Some(node) = self.current_node() else { return };
+        let Some(node) = self.current_node() else {
+            return;
+        };
         let Some(doc_idx) = node.doc_idx else { return };
         let doc = &self.registry.documents[doc_idx];
         let id_str = doc.id_str();
@@ -508,9 +523,9 @@ impl App {
         // preserve clause anchors in the label.
         let mut seen = std::collections::HashSet::<String>::new();
         let push_jump = |actions: &mut Vec<Action>,
-                             seen: &mut std::collections::HashSet<String>,
-                             cat: &'static str,
-                             raw: &str| {
+                         seen: &mut std::collections::HashSet<String>,
+                         cat: &'static str,
+                         raw: &str| {
             let target_id = strip_anchor(raw);
             let key = format!("{cat}::{raw}");
             if !seen.insert(key) {
@@ -645,8 +660,9 @@ impl App {
                 label,
             } => {
                 if !resolvable {
-                    self.status_message =
-                        Some(format!("can't jump: '{label}' ({category}) is not in this .specs/"));
+                    self.status_message = Some(format!(
+                        "can't jump: '{label}' ({category}) is not in this .specs/"
+                    ));
                     self.close_modal();
                     return;
                 }
@@ -696,9 +712,8 @@ impl App {
         let action: Option<(String, NodeKind, String, Option<&'static str>)> =
             self.current_node().map(|node| {
                 (
-                    Self::group_key(node).unwrap_or_else(|| {
-                        Self::parent_key_of(node).unwrap_or_default()
-                    }),
+                    Self::group_key(node)
+                        .unwrap_or_else(|| Self::parent_key_of(node).unwrap_or_default()),
                     node.kind,
                     node.namespace.clone(),
                     node.entity_type,
@@ -707,14 +722,12 @@ impl App {
         if let Some((key, kind, parent_ns, parent_ty)) = action {
             self.collapsed.insert(key);
             if matches!(kind, NodeKind::Spec) {
-                if let Some((vi, _)) =
-                    self.visible.iter().enumerate().find(|(_, &abs)| {
-                        let n = &self.all_nodes[abs];
-                        matches!(n.kind, NodeKind::Type)
-                            && n.namespace == parent_ns
-                            && n.entity_type == parent_ty
-                    })
-                {
+                if let Some((vi, _)) = self.visible.iter().enumerate().find(|(_, &abs)| {
+                    let n = &self.all_nodes[abs];
+                    matches!(n.kind, NodeKind::Type)
+                        && n.namespace == parent_ns
+                        && n.entity_type == parent_ty
+                }) {
                     self.list_state.select(Some(vi));
                 }
             }
@@ -798,17 +811,19 @@ fn draw_tree(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
                         Span::raw(" "),
                         Span::styled(
                             node.label.clone(),
-                            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
                         ),
                     ]))
                 }
                 NodeKind::Type => {
-                    let key = format!(
-                        "{}::{}",
-                        node.namespace,
-                        node.entity_type.unwrap_or("")
-                    );
-                    let marker = if app.collapsed.contains(&key) { "▸" } else { "▾" };
+                    let key = format!("{}::{}", node.namespace, node.entity_type.unwrap_or(""));
+                    let marker = if app.collapsed.contains(&key) {
+                        "▸"
+                    } else {
+                        "▾"
+                    };
                     ListItem::new(Line::from(vec![
                         Span::raw(indent),
                         Span::raw(marker),
@@ -827,10 +842,7 @@ fn draw_tree(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
                     ];
                     if let TypeSpecificFields::Task { progress, .. } = &doc.type_fields {
                         let (glyph, _) = progress_glyph(*progress);
-                        spans.push(Span::styled(
-                            format!("{glyph} "),
-                            progress_style(*progress),
-                        ));
+                        spans.push(Span::styled(format!("{glyph} "), progress_style(*progress)));
                     }
                     spans.push(Span::styled(
                         format!("[{}]", doc.universal.status.as_str()),
@@ -843,7 +855,11 @@ fn draw_tree(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
         .collect();
 
     let title = if app.filter_mode || !app.filter.is_empty() {
-        format!("Specs ({} matches) — filter: {}", app.visible.len(), app.filter)
+        format!(
+            "Specs ({} matches) — filter: {}",
+            app.visible.len(),
+            app.filter
+        )
     } else {
         format!("Specs ({} items)", app.visible.len())
     };
@@ -873,7 +889,9 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                 Span::styled("id      ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     doc.id_str(),
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]));
             lines.push(Line::from(vec![
@@ -933,7 +951,9 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                         Span::styled("level   ", Style::default().fg(Color::DarkGray)),
                         Span::styled(
                             level.as_str().to_string(),
-                            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
                         ),
                     ]));
                     if !refines.is_empty() {
@@ -1032,7 +1052,9 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     "Summary",
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 for l in summary.lines() {
                     lines.push(Line::from(l.to_string()));
@@ -1048,7 +1070,9 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     "Refines",
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 for a in &refines_targets {
                     lines.push(Line::from(format!("  ↑ {a}")));
@@ -1058,7 +1082,9 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     "Refined by",
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 for c in &refined_by {
                     lines.push(Line::from(format!("  ↓ {c}")));
@@ -1082,11 +1108,7 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                         )));
                         last_cat = cat;
                     }
-                    lines.push(Line::from(format!(
-                        "  {} {}",
-                        reverse_glyph(cat),
-                        other_id
-                    )));
+                    lines.push(Line::from(format!("  {} {}", reverse_glyph(cat), other_id)));
                 }
             }
 
@@ -1095,19 +1117,22 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     "Body blocks",
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
                 )));
                 for b in &doc.blocks {
                     lines.push(Line::from(vec![
                         Span::raw("  "),
-                        Span::styled(
-                            b.kind.tag().to_string(),
-                            Style::default().fg(Color::Blue),
-                        ),
+                        Span::styled(b.kind.tag().to_string(), Style::default().fg(Color::Blue)),
                         Span::raw(format!(" #{}", b.id)),
                     ]));
                     for c in &b.clauses {
-                        lines.push(Line::from(format!("    · #{}  {}", c.id, truncate(&c.text, 70))));
+                        lines.push(Line::from(format!(
+                            "    · #{}  {}",
+                            c.id,
+                            truncate(&c.text, 70)
+                        )));
                     }
                 }
             }
@@ -1170,7 +1195,9 @@ fn draw_status(f: &mut ratatui::Frame, app: &App, area: Rect) {
 }
 
 fn draw_modal(f: &mut ratatui::Frame, app: &App, area: Rect) {
-    let Some(modal) = app.modal.as_ref() else { return };
+    let Some(modal) = app.modal.as_ref() else {
+        return;
+    };
 
     let popup_w = area.width.saturating_sub(8).min(72);
     let popup_h = (modal.actions.len() as u16 + 4).min(area.height.saturating_sub(4));
@@ -1321,8 +1348,10 @@ fn launch_editor(terminal: &mut Term, path: &Path, app: &mut App) -> Result<()> 
             }
         }
         Ok(s) => {
-            app.status_message =
-                Some(format!("{editor} exited with status {}", s.code().unwrap_or(-1)));
+            app.status_message = Some(format!(
+                "{editor} exited with status {}",
+                s.code().unwrap_or(-1)
+            ));
         }
         Err(e) => {
             app.status_message = Some(format!("failed to launch {editor}: {e}"));
@@ -1440,10 +1469,24 @@ fn reverse_refs(registry: &SpecRegistry, target_id: &str) -> Vec<(&'static str, 
         }
 
         // superseded-by / supersedes — universal pointers.
-        if other.universal.supersedes.as_deref().map(strip_anchor).as_deref() == Some(me) {
+        if other
+            .universal
+            .supersedes
+            .as_deref()
+            .map(strip_anchor)
+            .as_deref()
+            == Some(me)
+        {
             out.push(("superseded-by", other_id.clone()));
         }
-        if other.universal.superseded_by.as_deref().map(strip_anchor).as_deref() == Some(me) {
+        if other
+            .universal
+            .superseded_by
+            .as_deref()
+            .map(strip_anchor)
+            .as_deref()
+            == Some(me)
+        {
             out.push(("supersedes-from", other_id));
         }
     }

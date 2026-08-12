@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use petgraph::graph::DiGraph;
 use petgraph::algo::is_cyclic_directed;
+use petgraph::graph::DiGraph;
 
 use crate::model::frontmatter::{Level, TypeSpecificFields};
 use crate::model::registry::SpecRegistry;
@@ -49,8 +49,7 @@ pub fn check_refinement(registry: &SpecRegistry) -> Vec<Diagnostic> {
             if let Some(anchor) = refine_target.find('#').map(|p| &refine_target[p + 1..]) {
                 if let Some(parent_doc) = registry.get_by_id(parent_doc_id) {
                     let has_clause = parent_doc.blocks.iter().any(|block| {
-                        block.clauses.iter().any(|c| c.id == anchor)
-                            || block.id == anchor
+                        block.clauses.iter().any(|c| c.id == anchor) || block.id == anchor
                     });
                     if !has_clause {
                         diags.push(Diagnostic::error(
@@ -126,9 +125,7 @@ fn check_level_monotonicity(registry: &SpecRegistry) -> Vec<Diagnostic> {
                     let clause_ref = format!("{}#{}", parent_id, clause.id);
                     let child_levels = find_refining_levels(registry, &clause_ref);
 
-                    if !child_levels.is_empty()
-                        && !child_levels.contains(&Level::Must)
-                    {
+                    if !child_levels.is_empty() && !child_levels.contains(&Level::Must) {
                         diags.push(
                             Diagnostic::error(
                                 "R009",
@@ -229,8 +226,12 @@ fn check_aspects(registry: &SpecRegistry) -> Vec<Diagnostic> {
 
     for doc in &registry.documents {
         let (refines, aspects): (&[String], &[String]) = match &doc.type_fields {
-            TypeSpecificFields::Requirement { refines, aspects, .. } => (refines, aspects),
-            TypeSpecificFields::Task { refines, aspects, .. } => (refines, aspects),
+            TypeSpecificFields::Requirement {
+                refines, aspects, ..
+            } => (refines, aspects),
+            TypeSpecificFields::Task {
+                refines, aspects, ..
+            } => (refines, aspects),
             _ => continue,
         };
         {

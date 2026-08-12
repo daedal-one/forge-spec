@@ -59,3 +59,34 @@ export interface ProtocolLocation {
 }
 
 export type ResolvedLocation = ProtocolLocation | null
+
+export interface ChangeOperation {
+  op: string
+  spec: string
+  [key: string]: unknown
+}
+
+export interface ApplyChangesResult {
+  schema: 'forge-spec-workspace-edit/v1'
+  plan: {
+    schema: string
+    dry_run: boolean
+    operations: Array<{ index: number; operation: string; spec: string }>
+    files: string[]
+    warnings: string[]
+  }
+  edit: {
+    documentChanges: WorkspaceDocumentChange[]
+  }
+}
+
+export type WorkspaceDocumentChange =
+  | {
+      kind: 'rename'
+      oldUri: string
+      newUri: string
+    }
+  | {
+      textDocument: { uri: string; version: number | null }
+      edits: Array<{ range: ProtocolLocation['range']; newText: string }>
+    }

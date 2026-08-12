@@ -99,7 +99,8 @@ pub fn ensure_project_document(
         .with_context(|| format!("creating {}", specs_dir.display()))?;
     let owners = collect_owners(specs_dir)?;
     let content = project_template(&id, &parsed.slug, &owners);
-    std::fs::write(&path, content).with_context(|| format!("writing {}", path.display()))?;
+    crate::mutation::atomic_write_files(&[(path.clone(), content.into_bytes())])
+        .with_context(|| format!("writing {}", path.display()))?;
 
     Ok(ProjectScaffold {
         id,
@@ -113,8 +114,11 @@ pub fn write_project_config(specs_dir: &Path, project_id: &str) -> Result<bool> 
     let path = specs_dir.join("_config.toml");
     let replacement = format!("project = {project_id:?}");
     if !path.exists() {
-        std::fs::write(&path, format!("{replacement}\n"))
-            .with_context(|| format!("writing {}", path.display()))?;
+        crate::mutation::atomic_write_files(&[(
+            path.clone(),
+            format!("{replacement}\n").into_bytes(),
+        )])
+        .with_context(|| format!("writing {}", path.display()))?;
         return Ok(true);
     }
 
@@ -143,7 +147,8 @@ pub fn write_project_config(specs_dir: &Path, project_id: &str) -> Result<bool> 
     if output == content {
         return Ok(false);
     }
-    std::fs::write(&path, output).with_context(|| format!("writing {}", path.display()))?;
+    crate::mutation::atomic_write_files(&[(path.clone(), output.into_bytes())])
+        .with_context(|| format!("writing {}", path.display()))?;
     Ok(true)
 }
 

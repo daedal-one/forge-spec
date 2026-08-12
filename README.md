@@ -69,16 +69,18 @@ spec lint                           # validate .specs/
 spec render REQ:auth/session-expiry --target=agent
 spec render project --target=agent    # project intent alone
 spec render REQ:auth/session-expiry --target=agent --include-source
-spec symbols src/session.rs --query expire
-spec resolve 'spec:src:src/session.rs#symbol=SessionStore/expire'
+spec inspect symbols src/session.rs --query expire
+spec inspect resolve 'spec:src:src/session.rs#symbol=SessionStore/expire'
 spec lsp                            # editor LSP over stdio
-spec children REQ:auth/session-management
-spec coverage REQ:auth/session-management
+spec inspect relations REQ:auth/session-management
+spec inspect coverage REQ:auth/session-management
 spec impact REQ:auth/session-management#c-lifetime
 spec impact --base origin/main --head working-tree --target agent
-spec graph                          # project-rooted hierarchy as DOT
-spec graph --refinement             # refinement DAG only
-spec tree                           # printed tree of all specs
+spec inspect graph hierarchy        # project-rooted hierarchy as DOT
+spec inspect graph refinement       # refinement DAG only
+spec inspect tree                   # printed tree of all specs
+spec change summary replace REQ:auth/session-expiry 'Sessions expire.'
+spec task start TASK:auth/update-session
 spec explore                        # interactive TUI browser
 ```
 
@@ -116,13 +118,14 @@ outputs identify missing task, implementation, and test evidence and state the
 boundary explicitly: source links and Git history are traceability evidence,
 not proof of every runtime code dependency. `spec impact` never creates tasks
 or changes task state; review the report, add missing TASK specs deliberately,
-then use `spec start <task-id>` when work actually begins.
+then use `spec task start <task-id>` when work actually begins.
 
 ## Shell completion
 
 `spec completions <shell>` prints a completion script for `bash`, `zsh`, or `fish`.
-It completes subcommands, flags, and — for id-taking subcommands — actual spec IDs
-from the current `.specs/` directory (powered by a hidden `spec __complete ids`).
+The command levels are generated from the Clap tree; dynamic candidates include
+filtered spec IDs, anchors, block and clause IDs, headings, relation targets,
+task IDs, and progress states from the current workspace.
 
 ```sh
 # fish
@@ -204,15 +207,45 @@ repository can move from any supported historical baseline to the current one
 in a single invocation.
 
 ```sh
-spec migrate --guide                  # combined changelog and human instructions
-spec migrate --guide --target agent   # structured XML context for an agent
-spec migrate                          # apply all mechanical steps and redirects
+spec migrate plan                     # combined changelog and human instructions
+spec migrate plan --target agent      # structured XML context for an agent
+spec migrate apply                    # apply all mechanical steps and redirects
 spec lint                             # validate the migrated tree
 ```
 
 Use `--from` when an unconfigured legacy tree cannot be inferred and `--to` to
 target a specific supported baseline. The baseline is updated only after every
 format transformation and reference redirect succeeds.
+
+## Typed changes in CLI v0.4
+
+The executable is `spec 0.4.0`; the stored document format remains
+`forge-spec-v0.3.0`. Supported writers compile human commands and editor
+actions into the same closed Rust operation enum. A versioned batch can group
+changes across the workspace:
+
+```json
+{
+  "schema": "forge-spec-change/v1",
+  "if_match": {
+    "REQ:auth/session-expiry": "git-blob:<content-fingerprint>"
+  },
+  "operations": [
+    {
+      "op": "summary.replace",
+      "spec": "REQ:auth/session-expiry",
+      "value": "Sessions expire after inactivity."
+    }
+  ]
+}
+```
+
+Preview with `spec change batch --from changes.json --dry-run`; omit
+`--dry-run` only after reviewing the deterministic plan. Unknown operations or
+fields, stale fingerprints, type-incompatible changes, and newly introduced
+lint errors fail before any file is written. Multi-document writes are
+all-or-nothing, untouched bytes remain identical, and no document-deletion
+operation exists.
 
 Source symbols use the repository's language server. Built-in providers are
 `rust-analyzer`, `typescript-language-server --stdio`,

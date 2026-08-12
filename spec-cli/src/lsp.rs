@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use url::Url;
 
@@ -233,6 +234,7 @@ fn handle_request(
             .reconcile()
             .and_then(|_| serde_json::to_value(workspace.snapshot()).map_err(Into::into)),
         "forgeSpec/resolveReference" => resolve_reference(workspace, &request.params),
+        "forgeSpec/applyChanges" => apply_changes(workspace, documents, &request.params),
         _ => {
             return Response::new_err(
                 id,
@@ -244,6 +246,140 @@ fn handle_request(
     match result {
         Ok(value) => Response::new_ok(id, value),
         Err(error) => Response::new_err(id, ErrorCode::InvalidParams as i32, format!("{error:#}")),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ApplyChangesParams {
+    text_document: VersionedDocument,
+    change: crate::mutation::ChangeRequest,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VersionedDocument {
+    uri: String,
+    version: i64,
+}
+
+fn apply_changes(
+    workspace: &WorkspaceIndex,
+    documents: &HashMap<String, OpenDocument>,
+    params: &Value,
+) -> Result<Value> {
+    let params: ApplyChangesParams = serde_json::from_value(params.clone())?;
+    let open = documents
+        .get(&params.text_document.uri)
+        .context("target document is not open")?;
+    if open.version != params.text_document.version {
+        anyhow::bail!(
+            "document version changed: expected {}, current {}",
+            params.text_document.version,
+            open.version
+        );
+    }
+    let saved = std::fs::read_to_string(&open.path)
+        .with_context(|| format!("reading {}", open.path.display()))?;
+    if saved != open.text {
+        anyhow::bail!("document has unsaved changes; save it before applying a typed mutation");
+    }
+
+    let outcome = crate::mutation::MutationEngine::new(workspace.specs_dir())
+        .execute(&params.change, true)?;
+    let mut document_changes = Vec::new();
+    for edit in &outcome.edits {
+        let origin = edit.origin.as_deref().unwrap_or(&edit.destination);
+        let old_text = std::fs::read_to_string(origin).unwrap_or_default();
+        if origin != edit.destination {
+            document_changes.push(json!({
+                "kind": "rename",
+                "oldUri": path_uri(origin),
+                "newUri": path_uri(&edit.destination)
+            }));
+        }
+        let uri = path_uri(&edit.destination);
+        let version = if same_path(&edit.destination, &open.path) {
+            Value::from(open.version)
+        } else {
+            documents
+                .values()
+                .find(|document| {
+                    same_path(&document.path, origin) && same_path(origin, &edit.destination)
+                })
+                .map(|document| Value::from(document.version))
+                .unwrap_or(Value::Null)
+        };
+        let (range, new_text) = minimal_text_edit(&old_text, &edit.new_text);
+        document_changes.push(json!({
+            "textDocument": { "uri": uri, "version": version },
+            "edits": [{ "range": range, "newText": new_text }]
+        }));
+    }
+    Ok(json!({
+        "schema": "forge-spec-workspace-edit/v1",
+        "plan": outcome.plan,
+        "edit": { "documentChanges": document_changes }
+    }))
+}
+
+fn minimal_text_edit(old: &str, new: &str) -> (Value, String) {
+    let mut prefix = old
+        .bytes()
+        .zip(new.bytes())
+        .take_while(|(left, right)| left == right)
+        .count();
+    while !old.is_char_boundary(prefix) || !new.is_char_boundary(prefix) {
+        prefix -= 1;
+    }
+    let old_remaining = &old[prefix..];
+    let new_remaining = &new[prefix..];
+    let mut suffix = old_remaining
+        .bytes()
+        .rev()
+        .zip(new_remaining.bytes().rev())
+        .take_while(|(left, right)| left == right)
+        .count()
+        .min(old_remaining.len())
+        .min(new_remaining.len());
+    while !old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix) {
+        suffix -= 1;
+    }
+    let old_end = old.len() - suffix;
+    let new_end = new.len() - suffix;
+    let (start_line, start_character) = byte_position(old, prefix);
+    let (end_line, end_character) = byte_position(old, old_end);
+    (
+        range(start_line, start_character, end_line, end_character),
+        new[prefix..new_end].to_string(),
+    )
+}
+
+fn byte_position(text: &str, offset: usize) -> (u32, u32) {
+    let before = &text[..offset];
+    let line = before.bytes().filter(|byte| *byte == b'\n').count() as u32;
+    let column = before
+        .rsplit_once('\n')
+        .map(|(_, tail)| tail)
+        .unwrap_or(before)
+        .encode_utf16()
+        .count() as u32;
+    (line, column)
+}
+
+fn path_uri(path: &Path) -> String {
+    Url::from_file_path(path)
+        .map(|uri| uri.to_string())
+        .unwrap_or_default()
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
     }
 }
 
@@ -694,6 +830,63 @@ mod tests {
             source_symbol_context("[x](spec:src:src/lib.rs#symbol=Ser"),
             Some(("src/lib.rs", "Ser"))
         );
+    }
+
+    #[test]
+    fn apply_changes_returns_a_versioned_edit_without_writing() {
+        let temp = tempfile::tempdir().unwrap();
+        let specs_dir = temp.path().join(".specs");
+        std::fs::create_dir_all(&specs_dir).unwrap();
+        std::fs::write(
+            specs_dir.join("_config.toml"),
+            "baseline = \"forge-spec-v0.3.0\"\nproject = \"PROJECT:demo\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            specs_dir.join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [carlo]\n---\n# Demo\n",
+        )
+        .unwrap();
+        let path = specs_dir.join("example.spec.md");
+        let saved = "---\nid: REQ:demo/example\ntype: requirement\nstatus: accepted\nsummary: Example.\nowners: [carlo]\nlevel: MUST\nrefines: []\n---\n# Example\n";
+        std::fs::write(&path, saved).unwrap();
+        let uri = Url::from_file_path(&path).unwrap().to_string();
+        let workspace = WorkspaceIndex::open(&specs_dir, None).unwrap();
+        let documents = HashMap::from([(
+            uri.clone(),
+            OpenDocument {
+                path: path.clone(),
+                text: saved.into(),
+                version: 7,
+            },
+        )]);
+        let result = apply_changes(
+            &workspace,
+            &documents,
+            &json!({
+                "textDocument": { "uri": uri, "version": 7 },
+                "change": {
+                    "schema": "forge-spec-change/v1",
+                    "if_match": {},
+                    "operations": [{
+                        "op": "owner.add",
+                        "spec": "REQ:demo/example",
+                        "owner": "maya"
+                    }]
+                }
+            }),
+        )
+        .unwrap();
+        assert_eq!(result["schema"], "forge-spec-workspace-edit/v1");
+        assert_eq!(
+            result["edit"]["documentChanges"][0]["textDocument"]["version"], 7,
+            "{result}"
+        );
+        assert!(result["edit"]["documentChanges"][0]["edits"][0]["newText"]
+            .as_str()
+            .unwrap()
+            .contains("maya"));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), saved);
     }
 
     #[test]

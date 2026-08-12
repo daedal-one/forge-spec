@@ -2,7 +2,7 @@
   "name": "forge-spec",
   "displayName": "Forge Spec",
   "description": "Explore forge-spec from project intent through specifications to source code.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "daedal-one",
   "license": "MIT",
   "engines": {
@@ -60,8 +60,8 @@
         "title": "Forge Spec: Open Reference"
       },
       {
-        "command": "forgeSpec.openText",
-        "title": "Forge Spec: Open Raw Markdown"
+        "command": "forgeSpec.inspectSource",
+        "title": "Forge Spec: Inspect Source (Read-only)"
       }
     ],
     "menus": {
@@ -80,7 +80,7 @@
           "type": "string",
           "default": "spec",
           "scope": "resource",
-          "description": "Path to a forge-spec 0.3-compatible `spec` executable."
+          "description": "Path to a forge-spec 0.4-compatible `spec` executable."
         },
         "forgeSpec.cache.enabled": {
           "type": "boolean",

@@ -1,9 +1,14 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
-#[command(name = "spec", about = "Specs format toolchain", version)]
+#[command(
+    name = "spec",
+    about = "Repository-native specifications for humans and coding agents",
+    version,
+    after_help = "Agent workflow:\n  spec impact --base HEAD~1 --target agent\n  spec render REQ:auth/session --target agent --include-source\n  spec change batch --from changes.json --dry-run\n  spec task start TASK:auth/update-session\n  spec lint"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -17,215 +22,503 @@ pub struct Cli {
 pub enum Commands {
     /// Initialize a forge-spec tree in the current project
     Init,
-    /// Scaffold a new spec from a per-type template
+    /// Scaffold a new specification
     New {
-        /// Entity type (req, inv, ifc, adr, glo, topic, scn, task)
         #[arg(value_parser = parse_entity_type)]
         entity_type: String,
-        /// Namespace/slug (e.g. auth/session-expiry)
         slug: String,
     },
     /// Run all validation checks
     Lint {
-        /// Specific paths to lint (default: entire .specs/ directory)
         paths: Vec<PathBuf>,
-        /// Fail when source symbols cannot be verified by a language server
         #[arg(long)]
         require_symbols: bool,
-        /// Trust custom language-server commands from _lsp.toml
         #[arg(long)]
         allow_custom_lsp: bool,
     },
-    /// Produce render bundles
+    /// Produce human or agent render bundles
     Render {
-        /// Spec ID, `project`, or query
         id_or_query: String,
-        /// Render target
         #[arg(long, default_value = "human", value_enum)]
         target: RenderTarget,
-        /// Traversal depth
         #[arg(long)]
         depth: Option<usize>,
-        /// Ancestor detail level
         #[arg(long, default_value = "full")]
         ancestors: String,
-        /// Descendant detail level
         #[arg(long, default_value = "summary")]
         descendants: String,
-        /// Include resolved source references
         #[arg(long)]
         include_source: bool,
     },
-    /// Emit DOT for the requested graph
-    Graph {
-        /// Show the synthesized project hierarchy
-        #[arg(long)]
-        hierarchy: bool,
-        /// Show the refinement graph
-        #[arg(long)]
-        refinement: bool,
-        /// Show the categorization graph
-        #[arg(long)]
-        categorization: bool,
-    },
-    /// Regenerate or query commit history per spec
-    History {
-        /// Regenerate all history files
-        #[arg(long)]
-        update: bool,
-        /// Query history for a specific spec ID
-        id: Option<String>,
-    },
-    /// List direct refining children
-    Children {
-        /// Spec ID
-        id: String,
-    },
-    /// List direct refined-by parents
-    Ancestors {
-        /// Spec ID
-        id: String,
-    },
-    /// Clause-by-clause refinement-coverage report
-    Coverage {
-        /// Spec ID
-        id: String,
-    },
-    /// Measure the specification and code impact of a selected or changed spec
+    /// Measure cascading specification and implementation impact
     Impact {
-        /// Spec ID or clause anchor to analyze (for example REQ:auth/session#c-idle)
         subject: Option<String>,
-        /// Git revision to compare from; omit when selecting an explicit subject
         #[arg(long)]
         base: Option<String>,
-        /// Git revision to compare to, or `working-tree` (default with --base)
         #[arg(long)]
         head: Option<String>,
-        /// Report render target
         #[arg(long, default_value = "human", value_enum)]
         target: RenderTarget,
     },
-    /// List specs with no refinement relationships
-    Orphans,
-    /// Explain or apply composable format migrations and reference redirects
-    Migrate {
-        /// Print the composed changelog and migration instructions without changing files
-        #[arg(long)]
-        guide: bool,
-        /// Guide render target
-        #[arg(long, default_value = "human", value_enum)]
-        target: RenderTarget,
-        /// Override the detected source baseline
-        #[arg(long)]
-        from: Option<String>,
-        /// Target baseline (default: latest supported by this CLI)
-        #[arg(long)]
-        to: Option<String>,
-    },
-    /// List code symbols in a repository-relative source file
-    Symbols {
-        /// Repository-relative source path
-        path: String,
-        /// Filter by symbol or qualified name
-        #[arg(long)]
-        query: Option<String>,
-        /// Emit machine-readable JSON
-        #[arg(long)]
-        json: bool,
-        /// Trust custom language-server commands from _lsp.toml
-        #[arg(long)]
-        allow_custom_lsp: bool,
-    },
-    /// Resolve a spec: URL to its canonical target
-    Resolve {
-        /// Full spec: URL
-        reference: String,
-        /// Emit machine-readable JSON
-        #[arg(long)]
-        json: bool,
-        /// Trust custom language-server commands from _lsp.toml
-        #[arg(long)]
-        allow_custom_lsp: bool,
-    },
+    /// Interactive terminal explorer
+    Explore,
+    /// Inspect workspace structure and references
+    Inspect(InspectArgs),
+    /// Apply typed, validated document changes
+    Change(ChangeArgs),
+    /// Rename a specification and all incoming references
+    Rename { id: String, new_id: String },
+    /// Change document lifecycle state
+    Lifecycle(LifecycleArgs),
+    /// Manage structural and informational relationships
+    Relation(RelationArgs),
+    /// Query and update implementation tasks
+    Task(TaskArgs),
+    /// Query or rebuild derived Git history
+    History(HistoryArgs),
+    /// Plan or apply document-format migrations
+    Migrate(MigrateArgs),
     /// Run the forge-spec language server over standard I/O
     Lsp {
-        /// Compatibility flag supplied by standard editor language clients
         #[arg(long, hide = true)]
         stdio: bool,
     },
-    /// List open tasks (pending, in-progress, blocked).
-    Todo {
-        /// Filter by progress state (pending|in-progress|done|blocked|deferred)
-        #[arg(long)]
-        state: Option<String>,
-        /// Filter to tasks refining the given REQ id (matches doc id, with or without #anchor)
-        #[arg(long)]
-        under: Option<String>,
-        /// Show all tasks, including done/deferred (shorthand for `--state all`)
-        #[arg(long)]
-        all: bool,
-    },
-    /// Mark a task as in-progress.
-    Start {
-        /// TASK spec id (e.g. TASK:codon/session-actions)
-        id: String,
-    },
-    /// Mark a task as done.
-    Done {
-        /// TASK spec id
-        id: String,
-    },
-    /// Mark a task as blocked, optionally citing a blocker.
-    Block {
-        /// TASK spec id
-        id: String,
-        /// Optional blocker — another spec id, e.g. ADR:foo/bar
-        #[arg(long)]
-        on: Option<String>,
-    },
-    /// Mark a task as pending (clear in-progress / blocked / done).
-    Reset {
-        /// TASK spec id
-        id: String,
-    },
-    /// Mark a task as deferred (out of scope for current iteration).
-    Defer {
-        /// TASK spec id
-        id: String,
-    },
-    /// Mark a task as wontdo (intentionally not implemented; the parent
-    /// clause stays in place for traceability but no work is planned).
-    Wontdo {
-        /// TASK spec id
-        id: String,
-    },
-    /// Print the project root and specs grouped by namespace, then type.
-    Tree {
-        /// Restrict to a single namespace prefix (e.g. `auth`)
-        #[arg(long)]
-        namespace: Option<String>,
-        /// Restrict to a single entity type (e.g. `REQ`, `TASK`)
-        #[arg(long, value_parser = parse_entity_type)]
-        r#type: Option<String>,
-        /// Disable colored output
-        #[arg(long)]
-        no_color: bool,
-    },
-    /// Interactive TUI to browse specs from the project root.
-    Explore,
-    /// Print a shell completion script (bash, zsh, fish).
+    /// Generate shell completion scripts
     Completions {
-        /// Shell to generate completions for
         #[arg(value_enum)]
         shell: Shell,
     },
-    /// Internal: emit machine-readable data for shell completion.
-    #[command(hide = true)]
-    #[command(name = "__complete")]
+    /// Internal machine-readable completion provider
+    #[command(hide = true, name = "__complete")]
     Complete {
-        /// What to list (currently only `ids`)
         what: String,
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
+        context: Vec<String>,
     },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct InspectArgs {
+    #[command(subcommand)]
+    pub command: InspectCommands,
+}
+
+#[derive(Subcommand)]
+pub enum InspectCommands {
+    /// Print the project-rooted specification tree
+    Tree {
+        #[arg(long)]
+        namespace: Option<String>,
+        #[arg(long, value_parser = parse_entity_type)]
+        r#type: Option<String>,
+        #[arg(long)]
+        no_color: bool,
+    },
+    /// Emit one typed graph as DOT
+    Graph {
+        #[arg(value_enum, default_value = "hierarchy")]
+        view: GraphView,
+    },
+    /// Show incoming and outgoing relationships for one specification
+    Relations { id: String },
+    /// Show clause-by-clause refinement coverage
+    Coverage { id: String },
+    /// List specifications without refinement relationships
+    Orphans,
+    /// Resolve a spec: URL to its canonical target
+    Resolve {
+        reference: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        allow_custom_lsp: bool,
+    },
+    /// List symbols from a repository-relative source path
+    Symbols {
+        path: String,
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        allow_custom_lsp: bool,
+    },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct ChangeArgs {
+    #[command(subcommand)]
+    pub command: ChangeCommands,
+}
+
+#[derive(Subcommand)]
+pub enum ChangeCommands {
+    /// Replace a document summary
+    Summary(SummaryArgs),
+    /// Add or remove an owner
+    Owner(OwnerArgs),
+    /// Set or clear pinned_at
+    Pin(PinArgs),
+    /// Change requirement-specific metadata
+    Requirement(RequirementArgs),
+    /// Change invariant-specific metadata
+    Invariant(InvariantArgs),
+    /// Change interface-specific metadata
+    Interface(InterfaceArgs),
+    /// Change ADR-specific metadata
+    Adr(AdrArgs),
+    /// Change headings, sections, typed blocks, and clauses
+    Content(ContentArgs),
+    /// Apply a versioned JSON change batch
+    Batch {
+        /// JSON request path, or - for standard input
+        #[arg(long)]
+        from: String,
+        /// Validate and print the deterministic plan without writing
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct SummaryArgs {
+    #[command(subcommand)]
+    pub command: SummaryCommands,
+}
+
+#[derive(Subcommand)]
+pub enum SummaryCommands {
+    Replace { id: String, value: String },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct OwnerArgs {
+    #[command(subcommand)]
+    pub command: OwnerCommands,
+}
+
+#[derive(Subcommand)]
+pub enum OwnerCommands {
+    Add { id: String, owner: String },
+    Remove { id: String, owner: String },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct PinArgs {
+    #[command(subcommand)]
+    pub command: PinCommands,
+}
+
+#[derive(Subcommand)]
+pub enum PinCommands {
+    Set { id: String, value: String },
+    Clear { id: String },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct RequirementArgs {
+    #[command(subcommand)]
+    pub command: RequirementCommands,
+}
+
+#[derive(Subcommand)]
+pub enum RequirementCommands {
+    Level { id: String, level: String },
+    KindSet { id: String, kind: String },
+    KindClear { id: String },
+    Monotonicity { id: String, value: bool },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct InvariantArgs {
+    #[command(subcommand)]
+    pub command: InvariantCommands,
+}
+
+#[derive(Subcommand)]
+pub enum InvariantCommands {
+    EnforcementAdd { id: String, value: String },
+    EnforcementRemove { id: String, value: String },
+    RequirementAdd { id: String, requirement: String },
+    RequirementRemove { id: String, requirement: String },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct InterfaceArgs {
+    #[command(subcommand)]
+    pub command: InterfaceCommands,
+}
+
+#[derive(Subcommand)]
+pub enum InterfaceCommands {
+    Stability { id: String, stability: String },
+    ConsumerAdd { id: String, consumer: String },
+    ConsumerRemove { id: String, consumer: String },
+    ProviderAdd { id: String, provider: String },
+    ProviderRemove { id: String, provider: String },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct AdrArgs {
+    #[command(subcommand)]
+    pub command: AdrCommands,
+}
+
+#[derive(Subcommand)]
+pub enum AdrCommands {
+    DecisionDate { id: String, value: String },
+    DecisionMakerAdd { id: String, owner: String },
+    DecisionMakerRemove { id: String, owner: String },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct ContentArgs {
+    #[command(subcommand)]
+    pub command: ContentCommands,
+}
+
+#[derive(Subcommand)]
+pub enum ContentCommands {
+    TitleReplace {
+        id: String,
+        value: String,
+    },
+    SectionReplace {
+        id: String,
+        #[arg(long, required = true, num_args = 1..)]
+        heading: Vec<String>,
+        #[arg(long)]
+        markdown: String,
+    },
+    BlockAdd {
+        id: String,
+        #[arg(long, required = true, num_args = 1..)]
+        heading: Vec<String>,
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        block: String,
+        #[arg(long)]
+        level: Option<String>,
+        #[arg(long)]
+        markdown: String,
+    },
+    BlockReplace {
+        id: String,
+        block: String,
+        #[arg(long)]
+        markdown: String,
+    },
+    BlockRemove {
+        id: String,
+        block: String,
+    },
+    ClauseAdd {
+        id: String,
+        block: String,
+        clause: String,
+        #[arg(long)]
+        markdown: String,
+    },
+    ClauseReplace {
+        id: String,
+        block: String,
+        clause: String,
+        #[arg(long)]
+        markdown: String,
+    },
+    ClauseRemove {
+        id: String,
+        block: String,
+        clause: String,
+    },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct LifecycleArgs {
+    #[command(subcommand)]
+    pub command: LifecycleCommands,
+}
+
+#[derive(Subcommand)]
+pub enum LifecycleCommands {
+    Draft { id: String },
+    Accept { id: String },
+    Deprecate { id: String },
+    Supersede { id: String, replacement: String },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct RelationArgs {
+    #[command(subcommand)]
+    pub command: RelationCommands,
+}
+
+#[derive(Subcommand)]
+pub enum RelationCommands {
+    Refine {
+        id: String,
+        target: String,
+        #[arg(long)]
+        aspect: Vec<String>,
+    },
+    Unrefine {
+        id: String,
+        target: String,
+    },
+    Categorize {
+        id: String,
+        topic: String,
+    },
+    Uncategorize {
+        id: String,
+        topic: String,
+    },
+    Relate {
+        id: String,
+        target: String,
+    },
+    Unrelate {
+        id: String,
+        target: String,
+    },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct TaskArgs {
+    #[command(subcommand)]
+    pub command: TaskCommands,
+}
+
+#[derive(Subcommand)]
+pub enum TaskCommands {
+    List {
+        #[arg(long, value_enum)]
+        state: Option<TaskState>,
+        #[arg(long)]
+        under: Option<String>,
+        #[arg(long)]
+        all: bool,
+    },
+    Start {
+        id: String,
+    },
+    Done {
+        id: String,
+    },
+    Block {
+        id: String,
+        #[arg(long)]
+        on: Vec<String>,
+    },
+    Reset {
+        id: String,
+    },
+    Defer {
+        id: String,
+    },
+    Wontdo {
+        id: String,
+    },
+    Assign {
+        id: String,
+        assignee: String,
+    },
+    Unassign {
+        id: String,
+    },
+    Schedule {
+        id: String,
+        eta: String,
+    },
+    Unschedule {
+        id: String,
+    },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct HistoryArgs {
+    #[command(subcommand)]
+    pub command: HistoryCommands,
+}
+
+#[derive(Subcommand)]
+pub enum HistoryCommands {
+    Show { id: Option<String> },
+    Rebuild,
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct MigrateArgs {
+    #[command(subcommand)]
+    pub command: MigrateCommands,
+}
+
+#[derive(Subcommand)]
+pub enum MigrateCommands {
+    /// Print a migration plan; never writes
+    Plan {
+        #[arg(long, default_value = "human", value_enum)]
+        target: RenderTarget,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+    },
+    /// Apply the selected migration route
+    Apply {
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum GraphView {
+    Hierarchy,
+    Refinement,
+    Categorization,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum TaskState {
+    Pending,
+    InProgress,
+    Done,
+    Blocked,
+    Deferred,
+    Wontdo,
+    All,
+}
+
+impl TaskState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in-progress",
+            Self::Done => "done",
+            Self::Blocked => "blocked",
+            Self::Deferred => "deferred",
+            Self::Wontdo => "wontdo",
+            Self::All => "all",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -241,8 +534,8 @@ pub enum RenderTarget {
     Agent,
 }
 
-pub fn parse_entity_type(s: &str) -> Result<String, String> {
-    let normalized = s.to_lowercase();
+pub fn parse_entity_type(value: &str) -> Result<String, String> {
+    let normalized = value.to_lowercase();
     match normalized.as_str() {
         "project" => Err("PROJECT is the singleton root created by `spec init`".to_string()),
         "req" | "requirement" => Ok("REQ".to_string()),
@@ -253,6 +546,6 @@ pub fn parse_entity_type(s: &str) -> Result<String, String> {
         "topic" => Ok("TOPIC".to_string()),
         "scn" | "scenario" => Ok("SCN".to_string()),
         "task" => Ok("TASK".to_string()),
-        _ => Err(format!("unknown entity type: {s}")),
+        _ => Err(format!("unknown entity type: {value}")),
     }
 }

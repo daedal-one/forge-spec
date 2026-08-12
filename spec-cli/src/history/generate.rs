@@ -39,6 +39,7 @@ pub fn update_history(specs_dir: &Path) -> Result<Vec<String>> {
     }
 
     let mut written = Vec::new();
+    let mut writes = Vec::new();
 
     for (spec_id, events) in &by_spec {
         let history = HistoryFile {
@@ -65,10 +66,12 @@ pub fn update_history(specs_dir: &Path) -> Result<Vec<String>> {
         };
 
         if should_write {
-            std::fs::write(&path, &json)?;
+            writes.push((path, json.into_bytes()));
             written.push(spec_id.clone());
         }
     }
+
+    crate::mutation::atomic_write_files(&writes)?;
 
     Ok(written)
 }

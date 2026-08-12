@@ -208,19 +208,20 @@ pub fn coverage(registry: &SpecRegistry, id: &str) -> Vec<CoverageEntry> {
                     }
                 }
             }
-            TypeSpecificFields::Task { refines, progress, .. } => {
+            TypeSpecificFields::Task {
+                refines, progress, ..
+            } => {
                 for refine_target in refines {
                     if let Some(anchor_pos) = refine_target.find('#') {
                         let doc_id = &refine_target[..anchor_pos];
                         let anchor = &refine_target[anchor_pos + 1..];
                         if doc_id == id {
-                            task_children
-                                .entry(anchor.to_string())
-                                .or_default()
-                                .push(TaskCoverage {
+                            task_children.entry(anchor.to_string()).or_default().push(
+                                TaskCoverage {
                                     id: child_doc.id_str(),
                                     progress: *progress,
-                                });
+                                },
+                            );
                         }
                     }
                 }

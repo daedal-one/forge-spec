@@ -103,20 +103,21 @@ spec lint                                  # validate (use as pre-commit)
 spec render REQ:auth/foo                   # human-target Markdown bundle
 spec render REQ:auth/foo --target=agent    # structured envelope for LLMs
 spec render project --target=agent         # configured project description
-spec children REQ:auth/foo                 # direct refining children
-spec ancestors REQ:auth/foo                # direct refined-by parents
-spec coverage REQ:auth/foo                 # clause-by-clause coverage
+spec inspect relations REQ:auth/foo        # incoming + outgoing relationships
+spec inspect coverage REQ:auth/foo         # clause-by-clause coverage
 spec impact REQ:auth/foo#c-clause          # transitive spec/code impact
 spec impact --base origin/main --target=agent # changed-spec impact XML
-spec symbols src/lib.rs --query Resolver   # discover source symbols via LSP
-spec resolve 'spec:src:src/lib.rs#symbol=Resolver/resolve'
+spec inspect symbols src/lib.rs --query Resolver
+spec inspect resolve 'spec:src:src/lib.rs#symbol=Resolver/resolve'
 spec lsp                                   # forge-spec editor language server
-spec graph                                 # DOT of the project hierarchy
-spec graph --refinement                    # DOT of the refinement DAG only
-spec history --update                      # rebuild .specs/_history/
-spec migrate --guide --target agent        # composed changelog + agent instructions
-spec migrate                               # migrate format + apply _redirects.toml
-spec orphans                               # leaf specs with no children
+spec inspect graph hierarchy               # DOT of project hierarchy
+spec inspect graph refinement              # DOT of refinement DAG only
+spec history rebuild                       # rebuild .specs/_history/
+spec migrate plan --target agent           # composed migration context
+spec migrate apply                         # migrate format + apply redirects
+spec inspect orphans                       # leaf specs with no children
+spec change batch --from changes.json --dry-run
+spec task start TASK:auth/foo              # begin implementation work
 ```
 
 ## Git trailer
@@ -133,7 +134,7 @@ referencing an `ADR:` in the same commit.
 
 | code     | meaning                                                            | fix                                       |
 |----------|--------------------------------------------------------------------|-------------------------------------------|
-| `R005`   | dangling reference                                                 | fix the link or run `spec migrate`        |
+| `R005`   | dangling reference                                                 | fix the link or run `spec migrate apply`  |
 | `R007`   | refinement cycle                                                   | break the loop                            |
 | `R008`   | refinement points at non-existent clause                           | add the clause or fix the ref             |
 | `R009`   | level-monotonicity violation                                       | raise child level or set `level_monotonic: false` on parent |
@@ -151,5 +152,5 @@ only for scratch work; remove before merging to main.
 ## Pre-commit hook
 
 ```sh
-spec lint && spec history --update
+spec lint && spec history rebuild
 ```

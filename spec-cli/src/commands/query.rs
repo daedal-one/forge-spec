@@ -5,6 +5,47 @@ use anyhow::Result;
 use crate::graph;
 use crate::model::registry::SpecRegistry;
 
+pub fn relations(specs_dir: &Path, id: &str) -> Result<()> {
+    let registry = SpecRegistry::load(specs_dir)?;
+    let document = registry
+        .get_by_id(id)
+        .ok_or_else(|| anyhow::anyhow!("no spec with id '{id}'"))?;
+    println!("Relations for {id}:");
+    let ancestors = graph::query::ancestors(&registry, id);
+    let children = graph::query::children(&registry, id);
+    print_group("refines", &ancestors);
+    print_group("refined by", &children);
+    let categorized = match &document.type_fields {
+        crate::model::frontmatter::TypeSpecificFields::Requirement {
+            categorized_under, ..
+        }
+        | crate::model::frontmatter::TypeSpecificFields::Task {
+            categorized_under, ..
+        } => categorized_under.as_slice(),
+        _ => &[],
+    };
+    print_group("categorized under", categorized);
+    print_group("related", &document.universal.related);
+    if let Some(value) = &document.universal.supersedes {
+        print_group("supersedes", std::slice::from_ref(value));
+    }
+    if let Some(value) = &document.universal.superseded_by {
+        print_group("superseded by", std::slice::from_ref(value));
+    }
+    Ok(())
+}
+
+fn print_group(label: &str, values: &[String]) {
+    if values.is_empty() {
+        println!("  {label}: (none)");
+    } else {
+        println!("  {label}:");
+        for value in values {
+            println!("    {value}");
+        }
+    }
+}
+
 pub fn children(specs_dir: &Path, id: &str) -> Result<()> {
     let registry = SpecRegistry::load(specs_dir)?;
     let children = graph::query::children(&registry, id);
@@ -106,7 +147,10 @@ pub fn coverage(specs_dir: &Path, id: &str) -> Result<()> {
                 }
             }
         };
-        println!("  #{} ({}) — {}", entry.clause_id, status, entry.clause_text);
+        println!(
+            "  #{} ({}) — {}",
+            entry.clause_id, status, entry.clause_text
+        );
         for child in &entry.refined_by {
             println!("    refined by: {child}");
         }

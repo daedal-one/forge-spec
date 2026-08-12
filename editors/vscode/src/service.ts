@@ -6,7 +6,12 @@ import {
   ServerOptions,
   TransportKind,
 } from 'vscode-languageclient/node'
-import type { ExplorerSnapshot, ResolvedLocation } from './protocol'
+import type {
+  ApplyChangesResult,
+  ChangeOperation,
+  ExplorerSnapshot,
+  ResolvedLocation,
+} from './protocol'
 
 export class ForgeSpecService implements vscode.Disposable {
   private client: LanguageClient | undefined
@@ -99,6 +104,54 @@ export class ForgeSpecService implements vscode.Disposable {
   async resolveReference(reference: string): Promise<ResolvedLocation> {
     const client = this.requireClient()
     return client.sendRequest<ResolvedLocation>('forgeSpec/resolveReference', { reference })
+  }
+
+  async applyChanges(
+    document: vscode.TextDocument,
+    operations: ChangeOperation[],
+  ): Promise<boolean> {
+    const expectedVersion = document.version
+    const result = await this.requireClient().sendRequest<ApplyChangesResult>(
+      'forgeSpec/applyChanges',
+      {
+        textDocument: { uri: document.uri.toString(), version: expectedVersion },
+        change: { schema: 'forge-spec-change/v1', if_match: {}, operations },
+      },
+    )
+    if (result.schema !== 'forge-spec-workspace-edit/v1') {
+      throw new Error(`Unsupported workspace-edit schema: ${result.schema}`)
+    }
+    if (document.version !== expectedVersion) {
+      throw new Error('The specification changed while Rust was validating the mutation. Review and retry.')
+    }
+    const workspaceEdit = new vscode.WorkspaceEdit()
+    for (const change of result.edit.documentChanges) {
+      if ('kind' in change) {
+        workspaceEdit.renameFile(vscode.Uri.parse(change.oldUri), vscode.Uri.parse(change.newUri))
+        continue
+      }
+      const uri = vscode.Uri.parse(change.textDocument.uri)
+      const open = vscode.workspace.textDocuments.find(candidate => candidate.uri.toString() === uri.toString())
+      if (
+        change.textDocument.version !== null &&
+        (!open || open.version !== change.textDocument.version)
+      ) {
+        throw new Error('A document changed before the validated workspace edit could be applied.')
+      }
+      for (const edit of change.edits) {
+        workspaceEdit.replace(
+          uri,
+          new vscode.Range(
+            edit.range.start.line,
+            edit.range.start.character,
+            edit.range.end.line,
+            edit.range.end.character,
+          ),
+          edit.newText,
+        )
+      }
+    }
+    return vscode.workspace.applyEdit(workspaceEdit)
   }
 
   async stop(): Promise<void> {

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import * as path from 'node:path'
 import * as vscode from 'vscode'
-import { computeMetadataEdits, MetadataUpdates, parseSpecText } from './frontmatter'
+import { metadataOperations, MetadataUpdates, parseSpecText } from './frontmatter'
 import { renderSpecBody } from './markdown'
 import type { ExplorerSnapshot, ProtocolLocation } from './protocol'
 import { referencePresentation, specificationAnchor } from './references'
@@ -59,14 +59,15 @@ export class SpecViewerProvider implements vscode.CustomTextEditorProvider {
     webviewPanel.webview.onDidReceiveMessage(async message => {
       try {
         switch (message.type) {
-          case 'openText':
-            await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default')
+          case 'openSource':
+            await vscode.commands.executeCommand('forgeSpec.inspectSource', document.uri)
             break
           case 'openReference':
             await this.openLink(document.uri, String(message.href))
             break
           case 'updateMetadata':
-            await applyMetadataEdits(
+            await applyMetadataChanges(
+              this.service,
               document,
               message.updates as MetadataUpdates,
               Number(message.expectedVersion),
@@ -171,7 +172,8 @@ export class SpecViewerProvider implements vscode.CustomTextEditorProvider {
   }
 }
 
-async function applyMetadataEdits(
+async function applyMetadataChanges(
+  service: ForgeSpecService,
   document: vscode.TextDocument,
   updates: MetadataUpdates,
   expectedVersion: number,
@@ -179,16 +181,10 @@ async function applyMetadataEdits(
   if (document.version !== expectedVersion) {
     throw new Error('The specification changed while its metadata was being edited. Review and retry.')
   }
-  const edits = computeMetadataEdits(document.getText(), updates)
-  const workspaceEdit = new vscode.WorkspaceEdit()
-  for (const edit of edits) {
-    workspaceEdit.replace(
-      document.uri,
-      new vscode.Range(edit.startLine, 0, edit.endLine, 0),
-      edit.newText,
-    )
-  }
-  if (!(await vscode.workspace.applyEdit(workspaceEdit))) {
+  const metadata = parseSpecText(document.getText()).metadata
+  const operations = metadataOperations(metadata, updates)
+  if (operations.length === 0) return
+  if (!(await service.applyChanges(document, operations))) {
     throw new Error('VS Code rejected the metadata edit')
   }
 }
@@ -236,6 +232,9 @@ function renderViewer(
   const renderedBody = error
     ? `<div class="error">${escapeHtml(error)}</div><pre>${escapeHtml(text)}</pre>`
     : renderSpecBody(body)
+  const statusControl = status === 'superseded'
+    ? '<input name="status" value="superseded" readonly>'
+    : `<select name="status">${options(['draft', 'accepted', 'deprecated'], status)}</select>`
 
   return `<!doctype html>
 <html lang="en">
@@ -254,7 +253,7 @@ function renderViewer(
       ${progress ? `<span class="progress">${escapeHtml(progress)}</span>` : ''}
     </div>
     <p>${escapeHtml(summary)}</p>
-    <button id="open-text" type="button">Open Markdown</button>
+    <button id="inspect-source" type="button">Inspect source</button>
   </header>
   <main>
     <article>${renderedBody}</article>
@@ -264,16 +263,14 @@ function renderViewer(
       <form id="metadata-form" data-version="${version}">
         <label>ID<input value="${escapeAttribute(id)}" disabled></label>
         <label>Type<input value="${escapeAttribute(entityType)}" disabled></label>
-        <label>Status
-          <select name="status">${options(['draft', 'accepted', 'deprecated', 'superseded'], status)}</select>
-        </label>
+        <label>Status${statusControl}</label>
         ${entityType === 'task' ? `<label>Progress<select name="progress">${options(['pending', 'in-progress', 'done', 'blocked', 'deferred', 'wontdo'], progress)}</select></label>` : ''}
         ${entityType === 'requirement' ? `<label>Level<select name="level">${options(['MUST', 'SHOULD', 'MAY', 'INFO'], level)}</select></label>` : ''}
         <label>Summary<textarea name="summary" rows="5">${escapeHtml(summary)}</textarea></label>
         <label>Owners<input name="owners" value="${escapeAttribute(owners.join(', '))}" placeholder="owner, owner"></label>
         ${relationships}
         <button class="primary" type="submit">Apply metadata</button>
-        <p class="hint">Changes use the document's normal undo, dirty, and save flow.</p>
+        <p class="hint">Rust validates typed changes before VS Code adds them to the normal undo, dirty, and save flow.</p>
       </form>
     </aside>
   </main>
@@ -338,7 +335,7 @@ function renderViewer(
         renderRefinementContext(currentAnchor, Array.isArray(event.data.refinements) ? event.data.refinements : []);
       }
     });
-    document.getElementById('open-text').addEventListener('click', () => vscode.postMessage({ type: 'openText' }));
+    document.getElementById('inspect-source').addEventListener('click', () => vscode.postMessage({ type: 'openSource' }));
     document.addEventListener('click', event => {
       const anchor = event.target instanceof Element ? event.target.closest('a') : null;
       const href = anchor?.getAttribute('href');

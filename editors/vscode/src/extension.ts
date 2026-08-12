@@ -3,6 +3,7 @@ import type { ExplorerDocument } from './protocol'
 import { findForgeSpecWorkspace, ForgeSpecService } from './service'
 import { ForgeSpecTreeProvider } from './tree'
 import { SpecViewerProvider } from './viewer'
+import { ForgeSpecSourceView } from './sourceView'
 
 let activeService: ForgeSpecService | undefined
 
@@ -30,12 +31,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const tree = new ForgeSpecTreeProvider(service)
   const viewer = new SpecViewerProvider(service)
+  const sourceView = new ForgeSpecSourceView()
   const refreshViews = async () => {
     await tree.refresh()
     viewer.setSnapshot(tree.snapshot)
   }
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('forgeSpec.explorer', tree),
+    vscode.workspace.registerTextDocumentContentProvider(
+      ForgeSpecSourceView.scheme,
+      sourceView,
+    ),
     vscode.window.registerCustomEditorProvider(
       SpecViewerProvider.viewType,
       viewer,
@@ -55,9 +61,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await viewer.openDocument(uri)
       },
     ),
-    vscode.commands.registerCommand('forgeSpec.openText', async (uri?: vscode.Uri) => {
+    vscode.commands.registerCommand('forgeSpec.inspectSource', async (uri?: vscode.Uri) => {
       const target = uri ?? vscode.window.activeTextEditor?.document.uri
-      if (target) await vscode.commands.executeCommand('vscode.openWith', target, 'default')
+      if (target) await sourceView.open(target)
     }),
     vscode.commands.registerCommand('forgeSpec.openReference', async (reference: string) => {
       try {

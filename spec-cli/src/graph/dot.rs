@@ -10,11 +10,7 @@ pub fn render_dot(graph: &SpecGraph, registry: &SpecRegistry, title: &str) -> St
 
     // Nodes
     for (id, &node_idx) in &graph.node_map {
-        let has_edges = graph
-            .graph
-            .neighbors_undirected(node_idx)
-            .next()
-            .is_some();
+        let has_edges = graph.graph.neighbors_undirected(node_idx).next().is_some();
         if !has_edges {
             continue; // Skip isolated nodes
         }

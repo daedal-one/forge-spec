@@ -11,7 +11,7 @@ pub fn run(specs_dir: &Path, entity_type: &str, slug: &str) -> Result<()> {
         let config = SpecConfig::load(specs_dir)?;
         if config.baseline != CURRENT_SPEC_BASELINE {
             bail!(
-                "{} declares baseline '{}'; run `spec migrate --guide --target agent`, then `spec migrate`",
+                "{} declares baseline '{}'; run `spec migrate plan --target agent`, then `spec migrate apply`",
                 config_path.display(),
                 config.baseline
             );
@@ -46,7 +46,7 @@ pub fn run(specs_dir: &Path, entity_type: &str, slug: &str) -> Result<()> {
     }
 
     let content = generate_template(entity_type, type_name, &id, slug);
-    std::fs::write(&file_path, content)?;
+    crate::mutation::atomic_write_files(&[(file_path.clone(), content.into_bytes())])?;
 
     println!("Created {}", file_path.display());
     Ok(())
@@ -229,9 +229,9 @@ TODO: what observable signal indicates this task is done.
 "#,
             title = slug_to_title(slug),
         ),
-        _ => format!(
-            "---\nid: {id}\ntype: {type_name}\nstatus: draft\nowners: []\n---\n\n# TODO\n"
-        ),
+        _ => {
+            format!("---\nid: {id}\ntype: {type_name}\nstatus: draft\nowners: []\n---\n\n# TODO\n")
+        }
     }
 }
 

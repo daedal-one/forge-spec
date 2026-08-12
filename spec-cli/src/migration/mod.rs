@@ -180,7 +180,7 @@ impl MigrationPlan {
         output.push_str("# Forge-spec migration guide\n\n");
         output.push_str(&format!("- From: `{}`\n", self.from));
         output.push_str(&format!("- To: `{}`\n", self.to));
-        output.push_str(&format!("- Apply: `spec migrate --to {}`\n", self.to));
+        output.push_str(&format!("- Apply: `spec migrate apply --to {}`\n", self.to));
 
         if self.steps.is_empty() {
             output.push_str("\nNo format migration is required.\n");
@@ -214,7 +214,7 @@ impl MigrationPlan {
             }
             output.push_str("\n### Validation\n\n");
             for validation in &guide.validation {
-                output.push_str(&format!("- `{}`", validation.command));
+                output.push_str(&format!("- `{}`", current_command(&validation.command)));
                 if let Some(condition) = &validation.when {
                     output.push_str(&format!(" — {condition}"));
                 }
@@ -235,7 +235,7 @@ impl MigrationPlan {
             self.steps.len()
         ));
         output.push_str(&format!(
-            "  <apply-command>spec migrate --to {}</apply-command>\n",
+            "  <apply-command>spec migrate apply --to {}</apply-command>\n",
             escape_xml(&self.to)
         ));
 
@@ -293,12 +293,12 @@ impl MigrationPlan {
                     output.push_str(&format!(
                         "      <command when=\"{}\">{}</command>\n",
                         escape_xml(condition),
-                        escape_xml(&validation.command)
+                        escape_xml(&current_command(&validation.command))
                     ));
                 } else {
                     output.push_str(&format!(
                         "      <command>{}</command>\n",
-                        escape_xml(&validation.command)
+                        escape_xml(&current_command(&validation.command))
                     ));
                 }
             }
@@ -338,8 +338,11 @@ pub fn write_baseline(specs_dir: &Path, baseline: &str) -> Result<bool> {
     let path = specs_dir.join("_config.toml");
     let replacement = format!("baseline = \"{baseline}\"");
     if !path.exists() {
-        std::fs::write(&path, format!("{replacement}\n"))
-            .with_context(|| format!("writing {}", path.display()))?;
+        crate::mutation::atomic_write_files(&[(
+            path.clone(),
+            format!("{replacement}\n").into_bytes(),
+        )])
+        .with_context(|| format!("writing {}", path.display()))?;
         return Ok(true);
     }
 
@@ -368,7 +371,8 @@ pub fn write_baseline(specs_dir: &Path, baseline: &str) -> Result<bool> {
     if output == content {
         return Ok(false);
     }
-    std::fs::write(&path, output).with_context(|| format!("writing {}", path.display()))?;
+    crate::mutation::atomic_write_files(&[(path.clone(), output.into_bytes())])
+        .with_context(|| format!("writing {}", path.display()))?;
     Ok(true)
 }
 
@@ -506,17 +510,18 @@ fn has_legacy_version_fields(specs_dir: &Path) -> Result<bool> {
 
 fn apply_v0_1_to_v0_2(specs_dir: &Path) -> Result<MigrationStepReport> {
     let mut report = MigrationStepReport::default();
+    let mut writes = Vec::new();
     for path in spec_paths(specs_dir)? {
         let content = std::fs::read_to_string(&path)
             .with_context(|| format!("reading {}", path.display()))?;
         let migrated = remove_derived_frontmatter(&content)
             .with_context(|| format!("migrating {}", path.display()))?;
         if migrated != content {
-            std::fs::write(&path, migrated)
-                .with_context(|| format!("writing {}", path.display()))?;
+            writes.push((path.clone(), migrated.into_bytes()));
             report.documents_changed += 1;
         }
     }
+    crate::mutation::atomic_write_files(&writes)?;
     Ok(report)
 }
 
@@ -610,6 +615,18 @@ fn escape_xml(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+fn current_command(command: &str) -> String {
+    match command {
+        "spec graph --hierarchy" => "spec inspect graph hierarchy".to_string(),
+        "spec graph --refinement" => "spec inspect graph refinement".to_string(),
+        "spec graph --categorization" => "spec inspect graph categorization".to_string(),
+        "spec tree" => "spec inspect tree".to_string(),
+        "spec coverage" => "spec inspect coverage".to_string(),
+        "spec orphans" => "spec inspect orphans".to_string(),
+        value => value.to_string(),
+    }
 }
 
 #[cfg(test)]

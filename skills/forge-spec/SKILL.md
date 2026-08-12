@@ -25,7 +25,7 @@ Use the `spec` CLI to create a small, coherent specification tree that is readab
 4. Locate `.specs/` or `specs/`:
    - If neither exists, run `spec init` from the project root, then replace the generated PROJECT placeholders with evidence-backed purpose, scope, non-goals, principles, summary, and owners.
    - If both exist, stop and resolve the intended tree or pass `--specs-dir` explicitly.
-   - If a tree lacks `_config.toml` or declares an older baseline, run `spec migrate --guide --target agent`, review the composed guidance, run `spec migrate`, then run `spec lint`. Never stamp the current baseline onto legacy content manually.
+   - If a tree lacks `_config.toml` or declares an older baseline, run `spec migrate plan --target agent`, review the composed guidance, run `spec migrate apply`, then run `spec lint`. Never stamp the current baseline onto legacy content manually.
 
 ## Design the smallest useful tree
 
@@ -56,7 +56,7 @@ Leave new documents as `draft` until their content has been reviewed or is clear
    ```
 
 4. Add clause anchors such as `- {#c-idle} idle expiration` when children need to refine separate properties. Point children at the exact clause with `refines: [REQ:auth/session-management#c-idle]`; add `aspects:` for multiple parents.
-5. Connect claims to implementation using `spec:src:path/file.ts#symbol=Type/method` when possible. Run `spec symbols <path> --query <name>` to discover resolvable symbols. Use line ranges only when symbol identity is unavailable and the range is stable.
+5. Connect claims to implementation using `spec:src:path/file.ts#symbol=Type/method` when possible. Run `spec inspect symbols <path> --query <name>` to discover resolvable symbols. Use line ranges only when symbol identity is unavailable and the range is stable.
 6. Record genuine cross-spec links. Do not invent dependencies, ownership, decisions, or guarantees that project evidence does not support.
 
 ## Validate the result
@@ -68,7 +68,7 @@ spec lint
 spec render <relevant-id> --target=agent --include-source
 ```
 
-Use `spec coverage <parent-id>` for clause refinement, `spec graph` for the project hierarchy, `spec graph --refinement` for refinement alone, and `spec lint --require-symbols` when language-server availability is an enforced requirement. Fix errors before handoff and state warnings or unavailable source-symbol validation plainly.
+Use `spec inspect coverage <parent-id>` for clause refinement, `spec inspect graph hierarchy` for the project hierarchy, `spec inspect graph refinement` for refinement alone, and `spec lint --require-symbols` when language-server availability is an enforced requirement. Fix errors before handoff and state warnings or unavailable source-symbol validation plainly.
 
 When changing an accepted spec or implementing from one, review impact before editing code:
 
@@ -78,7 +78,14 @@ spec impact <relevant-id-or-anchor> --target agent
 spec impact --base <merge-base-or-upstream> --target agent
 ```
 
-Treat explicit source references and Git-trailer history as traceability evidence, not a complete runtime dependency graph. Review every transitive refinement path and reported gap. Create missing TASK specs deliberately and use `spec start <task-id>` only when implementation begins; `spec impact` is read-only.
+Treat explicit source references and Git-trailer history as traceability evidence, not a complete runtime dependency graph. Review every transitive refinement path and reported gap. Create missing TASK specs deliberately and use `spec task start <task-id>` only when implementation begins; `spec impact` is read-only.
+
+For existing documents, prefer typed `spec change`, `spec lifecycle`,
+`spec relation`, and `spec task` commands. For coordinated agent edits, submit
+`forge-spec-change/v1` JSON through
+`spec change batch --from <file|-> --dry-run`, review the deterministic plan,
+then rerun without `--dry-run`. Do not invent raw property paths or document
+deletion: the CLI intentionally exposes neither.
 
 Then render the relevant scope before editing code and update specs when the agreed contract changes. For commits touching a spec or its implementation, add a trailer such as:
 

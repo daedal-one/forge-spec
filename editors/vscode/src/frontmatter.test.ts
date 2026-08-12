@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeMetadataEdits, parseSpecText } from './frontmatter'
+import { metadataOperations, parseSpecText } from './frontmatter'
 
 const source = `---
 id: TASK:demo/example
@@ -26,55 +26,52 @@ describe('spec frontmatter', () => {
     expect(parsed.body).toContain('# Example')
   })
 
-  it('updates supported fields without rewriting unrelated frontmatter', () => {
-    const updated = apply(
-      source,
-      computeMetadataEdits(source, {
+  it('compiles viewer controls to closed Rust operations', () => {
+    const metadata = parseSpecText(source).metadata
+    expect(
+      metadataOperations(metadata, {
         status: 'draft',
         progress: 'in-progress',
         summary: 'A newly focused summary.',
         owners: ['carlo', 'maya'],
       }),
-    )
-    expect(updated).toContain('status: draft')
-    expect(updated).toContain('progress: in-progress')
-    expect(updated).toContain('summary: "A newly focused summary."')
-    expect(updated).toContain('owners: ["carlo", "maya"]')
-    expect(updated).toContain('related: [REQ:demo/root]')
-    expect(updated).toContain('# Example')
+    ).toEqual([
+      { op: 'lifecycle.draft', spec: 'TASK:demo/example' },
+      {
+        op: 'summary.replace',
+        spec: 'TASK:demo/example',
+        value: 'A newly focused summary.',
+      },
+      { op: 'owner.add', spec: 'TASK:demo/example', owner: 'maya' },
+      {
+        op: 'task.progress.set',
+        spec: 'TASK:demo/example',
+        progress: 'in-progress',
+      },
+    ])
   })
 
-  it('refuses fields outside the supported metadata surface', () => {
-    expect(() => computeMetadataEdits(source, { id: 'REQ:other/id' })).toThrow(
-      "Metadata field 'id' is not editable",
-    )
+  it('refuses direct supersession from a generic metadata control', () => {
+    const metadata = parseSpecText(source).metadata
+    expect(() =>
+      metadataOperations(metadata, {
+        status: 'superseded',
+        progress: 'pending',
+        summary: 'Existing summary over two source lines.',
+        owners: ['carlo'],
+      }),
+    ).toThrow("Lifecycle state 'superseded' requires a dedicated command")
   })
 
-  it('inserts multiple missing fields as one non-overlapping edit', () => {
-    const minimal = `---\nid: REQ:demo/minimal\ntype: requirement\n---\n\n# Minimal\n`
-    const edits = computeMetadataEdits(minimal, {
-      status: 'draft',
-      summary: 'New summary',
-      owners: ['carlo'],
-      level: 'MUST',
-    })
-    const updated = apply(minimal, edits)
-
-    expect(edits).toHaveLength(1)
-    expect(updated).toContain('status: draft\nsummary: "New summary"\nowners: ["carlo"]\nlevel: MUST\n---')
+  it('emits no operation when metadata is unchanged', () => {
+    const metadata = parseSpecText(source).metadata
+    expect(
+      metadataOperations(metadata, {
+        status: 'accepted',
+        progress: 'pending',
+        summary: 'Existing summary over two source lines.',
+        owners: ['carlo'],
+      }),
+    ).toEqual([])
   })
 })
-
-function apply(
-  text: string,
-  edits: Array<{ startLine: number; endLine: number; newText: string }>,
-): string {
-  const lines = text.split('\n')
-  for (const edit of edits) {
-    const replacement = edit.newText.endsWith('\n')
-      ? edit.newText.slice(0, -1).split('\n')
-      : edit.newText.split('\n')
-    lines.splice(edit.startLine, edit.endLine - edit.startLine, ...replacement)
-  }
-  return lines.join('\n')
-}

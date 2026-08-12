@@ -137,7 +137,7 @@ body that may contain typed fenced divs.
 | `pinned_at`  | no                 | git SHA used to resolve `src:` references                          |
 | `related`    | no                 | list of related spec IDs (informational, no graph semantics)       |
 | `supersedes` | no                 | spec ID this one replaces                                          |
-| `superseded_by` | no              | reverse pointer; auto-managed by `spec migrate`                    |
+| `superseded_by` | no              | reverse pointer; auto-managed by `spec lifecycle supersede`        |
 
 File revisions are derived from Git rather than stored in frontmatter. The
 revision is the number of commits that touched the file, following renames.
@@ -351,8 +351,8 @@ parents. No containment field is repeated in document frontmatter.
 Containment means “belongs to this project.” It does not mean that an ADR,
 interface, glossary, scenario, topic, or requirement satisfies the project
 description. The refinement and categorization graphs therefore remain
-available independently. `spec graph` renders the synthesized project
-hierarchy by default; `--refinement` and `--categorization` render only their
+available independently. `spec inspect graph hierarchy` renders the synthesized project
+hierarchy; the `refinement` and `categorization` views render only their
 respective semantic relations.
 
 ### 6.2 Refinement
@@ -423,7 +423,7 @@ A bare `Spec-Ref: REQ:auth/foo` is parsed as `(touches)`.
 
 ### 7.2 History generation
 
-`spec history --update` walks the git log, parses `Spec-Ref:` trailers, and
+`spec history rebuild` walks the git log, parses `Spec-Ref:` trailers, and
 writes per-spec history files under `.specs/_history/`:
 
 ```json
@@ -508,8 +508,7 @@ Markdown source; only the surrounding envelope is structural.
 ```sh
 spec render REQ:auth/session-expiry --depth=2 --target=agent
 spec render project                    --target=agent
-spec render --query 'REQ:auth/*'    --target=human
-spec render --since=HEAD~10         --target=agent
+spec render 'REQ:auth/*'            --target=human
 ```
 
 Default scope:
@@ -526,7 +525,7 @@ Flags:
 - `--ancestors=full|summary|id-only|none`
 - `--descendants=full|summary|id-only|none`
 - `--depth=N`
-- `--include-source` / `--no-source`
+- `--include-source`
 
 ### 8.4 Determinism
 
@@ -589,21 +588,29 @@ Subcommands:
 | `spec new <type> <slug>`            | scaffold a new spec from a per-type template                  |
 | `spec lint [--require-symbols]`     | validate specs and source references                          |
 | `spec render <id-or-query> [flags]` | produce render bundles                                        |
-| `spec graph [--hierarchy\|--refinement\|--categorization]` | emit DOT for the requested graph       |
-| `spec history [--update\|<id>]`     | regenerate or query commit history per spec                   |
-| `spec children <id>`                | list direct refining children                                 |
-| `spec ancestors <id>`               | list direct refined-by parents                                |
-| `spec coverage <id>`                | clause-by-clause refinement-coverage report                   |
+| `spec inspect tree`                 | print the project-rooted specification tree                   |
+| `spec inspect graph [view]`         | emit hierarchy, refinement, or categorization DOT             |
+| `spec inspect relations <id>`       | report incoming and outgoing relationships                    |
+| `spec inspect coverage <id>`        | clause-by-clause refinement-coverage report                   |
+| `spec inspect orphans`              | list specs without refinement relationships                   |
+| `spec inspect resolve <reference>`  | resolve a spec or source reference                            |
+| `spec inspect symbols <path>`       | list language-server symbols for a source file                |
 | `spec impact <id-or-anchor> [--target agent]` | prospective transitive impact report                |
 | `spec impact --base B [--head H] [--target agent]` | impact of parsed Git/working-tree changes     |
-| `spec orphans`                      | list referenceless leaf specs                                 |
-| `spec migrate [--from B] [--to B]` | compose and apply format migrations, then rewrite redirects  |
-| `spec migrate --guide [--target agent]` | emit the composed changelog and migration instructions  |
-| `spec symbols <path> [--query Q]`   | list language-server symbols for a source file                |
-| `spec resolve <reference>`          | resolve a spec or source reference                            |
+| `spec change ...`                   | compile human changes into typed workspace operations         |
+| `spec change batch --from F`        | apply or dry-run a versioned multi-operation request          |
+| `spec rename <id> <new-id>`         | rename a spec, incoming references, config, and redirect      |
+| `spec lifecycle ...`                | draft, accept, deprecate, or atomically supersede             |
+| `spec relation ...`                 | refine, categorize, or relate specifications                  |
+| `spec task ...`                     | list and update typed TASK state, ownership, and schedule     |
+| `spec history show\|rebuild`        | query or atomically regenerate derived Git history            |
+| `spec migrate plan\|apply`          | safely inspect or apply composed format migrations            |
 | `spec lsp`                          | run the forge-spec language server over stdio                 |
+| `spec completions <shell>`          | generate nested, workspace-aware completions from Clap        |
 
-Recommended pre-commit hook chain: `spec lint && spec history --update`.
+There are no compatibility aliases or raw `edit`, `patch`, `set`, `delete`, or
+`remove-document` commands. Recommended pre-commit hook chain:
+`spec lint && spec history rebuild`.
 
 `spec init` creates `.specs/_config.toml` at the current baseline and a draft
 `.specs/_project.spec.md`, deriving its `PROJECT:<slug>` ID from the repository
@@ -623,19 +630,19 @@ describes exactly one adjacent baseline transition and contains:
 - final validation commands; and
 - an idempotent mechanical transformation implemented by the CLI.
 
-Migration artifacts compose in release order. Given a tree at
-`forge-spec-v0.1.0` and a CLI supporting `forge-spec-v0.4.0`, the CLI plans and
-applies `v0.1 -> v0.2 -> v0.3 -> v0.4` in one invocation rather than requiring
-a direct migration for every version pair. Historical artifacts remain shipped
-with future CLIs.
+Migration artifacts compose in format release order. Given a tree at
+`forge-spec-v0.1.0`, CLI v0.4 plans and applies `v0.1 -> v0.2 -> v0.3` in one
+invocation rather than requiring a direct migration for every version pair.
+The CLI release does not create a format migration when stored document syntax
+is unchanged. Historical artifacts remain shipped with future CLIs.
 
-`spec migrate --guide` renders the combined changelog and instructions as
-Markdown. `spec migrate --guide --target agent` renders the same plan as a
+`spec migrate plan` renders the combined changelog and instructions as
+Markdown. `spec migrate plan --target agent` renders the same plan as a
 structured XML envelope. The source baseline is normally read from
 `.specs/_config.toml`; `--from` handles an unconfigured or explicitly selected
 source, and `--to` defaults to the newest baseline supported by the CLI.
 
-Applying a migration executes each mechanical transformation and its verifier
+`spec migrate apply` executes each mechanical transformation and its verifier
 in order, then applies `_redirects.toml`, and writes the target baseline last.
 Every transformation must be deterministic and idempotent so an interrupted
 migration can be rerun safely. A CLI must reject unknown baselines, downgrades,
@@ -702,6 +709,13 @@ publishes lint diagnostics for unsaved buffers and provides completion, hover,
 definition, references, and document symbols. Source-symbol completion delegates
 to the downstream language server selected from the referenced file extension.
 
+The custom `forgeSpec/applyChanges` request accepts the same
+`forge-spec-change/v1` operation objects as `spec change batch`. Rust checks the
+open document version, computes a validated workspace edit, and returns a
+versioned `forge-spec-workspace-edit/v1` response. An editor applies that edit
+only while every addressed open document still matches its expected version;
+the editor does not maintain a second metadata rewrite implementation.
+
 Built-in providers are Rust (`rust-analyzer`), TypeScript/JavaScript
 (`typescript-language-server --stdio`), Python
 (`basedpyright-langserver --stdio`), and SQL (`sqls`). Provider configuration is
@@ -723,6 +737,49 @@ service boundary.
 Implementation language is open. A Rust binary using `tree-sitter-markdown`
 and `pulldown-cmark` is the recommended choice based on parsing throughput
 and the desire to ship a single static binary.
+
+### 10.4 Typed workspace mutation
+
+CLI v0.4 separates the executable release from the unchanged v0.3 document
+format. Every supported document writer uses one Rust transaction engine. The
+public batch envelope is:
+
+```json
+{
+  "schema": "forge-spec-change/v1",
+  "if_match": {"REQ:auth/session": "git-blob:<fingerprint>"},
+  "operations": [
+    {
+      "op": "content.clause.replace",
+      "spec": "REQ:auth/session",
+      "block": "session",
+      "clause": "c-lifetime",
+      "markdown": "The session MUST expire after 30 minutes."
+    }
+  ]
+}
+```
+
+The operation name selects a closed Serde-tagged Rust enum. Unknown names,
+extra fields, arbitrary property paths, type-incompatible targets, stale
+fingerprints, and document deletion are rejected. Human commands compile to
+the same enum.
+
+The editable-document index records original bytes, BOM, line endings,
+frontmatter key spans, CommonMark heading paths, typed blocks, clause anchors,
+and references. Missing or ambiguous headings fail. Applying a batch mutates
+candidate documents in memory, rebuilds the complete registry, checks
+structural/reference/refinement/content rules, and rejects newly introduced
+errors before preparing files. Warnings remain visible but do not block.
+
+Persistence prepares same-directory temporary files only after validation,
+commits every affected path together with rollback backups, reloads the written
+workspace, and validates it again before discarding backups. `--dry-run`
+performs the same planning and validation without writing. Rename is a typed
+workspace transaction that preserves entity type, prevents ID/path collision,
+updates incoming frontmatter and body references plus project configuration,
+and records a redirect. Supersession updates both lifecycle pointers in one
+transaction and rejects conflicts or cycles. No `--force` bypass exists.
 
 ---
 

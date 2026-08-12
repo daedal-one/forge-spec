@@ -41,29 +41,19 @@ pub fn run(specs_dir: &Path, update: bool, id: Option<&str>) -> Result<()> {
     if history_dir.exists() {
         let mut entries: Vec<_> = std::fs::read_dir(&history_dir)?
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .map_or(false, |ext| ext == "json")
-            })
+            .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
             .collect();
         entries.sort_by_key(|e| e.path());
 
         for entry in entries {
             if let Ok(content) = std::fs::read_to_string(entry.path()) {
-                if let Ok(history) =
-                    serde_json::from_str::<generate::HistoryFile>(&content)
-                {
-                    println!(
-                        "  {} ({} events)",
-                        history.id,
-                        history.events.len()
-                    );
+                if let Ok(history) = serde_json::from_str::<generate::HistoryFile>(&content) {
+                    println!("  {} ({} events)", history.id, history.events.len());
                 }
             }
         }
     } else {
-        println!("No history directory found. Run `spec history --update` to generate.");
+        println!("No history directory found. Run `spec history rebuild` to generate.");
     }
 
     Ok(())
