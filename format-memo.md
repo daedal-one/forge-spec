@@ -142,6 +142,9 @@ spec change batch --from changes.json --dry-run
 spec task start TASK:auth/foo              # begin implementation work
 spec implementation status                 # exact-workspace adherence snapshot
 spec implementation verify REQ:auth/foo    # verify + record full Git checkpoint
+spec implementation provider start         # ensure one background provider
+spec implementation provider status        # inspect this worktree's provider
+spec implementation provider stop          # authenticated shutdown
 ```
 
 ## Git trailer

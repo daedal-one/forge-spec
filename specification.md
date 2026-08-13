@@ -689,6 +689,7 @@ Subcommands:
 | `spec lifecycle ...`                | draft, accept, deprecate, or atomically supersede             |
 | `spec relation ...`                 | refine, categorize, or relate specifications                  |
 | `spec task ...`                     | list and update typed TASK state, ownership, and schedule     |
+| `spec implementation provider start\|status\|stop` | manage the shared worktree provider              |
 | `spec implementation status [id]`  | pull current adherence state from the intellect provider       |
 | `spec implementation verify <id>`  | verify adherence and record the exact successful checkpoint    |
 | `spec implementation clear <id>`   | remove the authored implementation checkpoint                  |
@@ -720,7 +721,7 @@ describes exactly one adjacent baseline transition and contains:
 - an idempotent mechanical transformation implemented by the CLI.
 
 Migration artifacts compose in format release order. Given a tree at
-`forge-spec-v0.1.0`, CLI v0.6 plans and applies
+`forge-spec-v0.1.0`, CLI v0.7 plans and applies
 `v0.1 -> v0.2 -> v0.3 -> v0.4 -> v0.5` in one
 invocation rather than requiring a direct migration for every version pair.
 The CLI release does not create a format migration when stored document syntax
@@ -854,7 +855,7 @@ and the desire to ship a single static binary.
 
 ### 10.4 Typed workspace mutation
 
-CLI v0.6 implements the v0.5 document format. Every supported document writer
+CLI v0.7 implements the v0.5 document format. Every supported document writer
 and documentation-collection mutation uses one Rust transaction engine. The
 public batch envelope is:
 
@@ -936,11 +937,26 @@ provider to assess those authored inputs against one exact repository state,
 then presents the result without writing it back into lifecycle or TASK
 fields. Forge-intellect is the only provider identity defined by v0.5.
 
-Adherence-aware commands start `forge-intellect provider --stdio` in the Git
-worktree root, perform a health handshake, issue one newline-delimited JSON
-request, receive one coherent snapshot, request shutdown, and wait for clean
-termination. The protocol schema is `forge-spec-intellect/v1`. Each request
-contains:
+Adherence-aware commands discover or atomically start one lightweight
+`forge-intellect provider serve` process scoped to the Git worktree. Concurrent
+commands reuse its authenticated loopback endpoint; they do not spawn one
+provider each. The server removes its registration and terminates after five
+idle minutes by default. `spec implementation provider start`, `status`, and
+`stop` expose explicit lifecycle control, and `start --idle-timeout-seconds N`
+selects another positive timeout.
+
+Registration, startup lock, PID, endpoint, bearer token, timeout, and log live
+beside the worktree-specific Git administrative directory, outside tracked
+workspace bytes. Startup uses exclusive file creation and a second health
+check under the lock, so concurrent callers converge on one process. Stale
+registration never counts as healthy and is replaced only while holding that
+lock. Shutdown is sent through the authenticated protocol rather than by
+killing an unverified PID. The direct `forge-intellect provider --stdio` mode
+remains available for protocol diagnostics, but ordinary forge-spec commands
+use the shared server.
+
+Every client performs a health handshake and requests one coherent snapshot.
+The protocol schema is `forge-spec-intellect/v1`. Each request contains:
 
 - the canonical workspace root, full HEAD object ID, and a deterministic
   identity for all tracked and untracked working-tree bytes;
@@ -996,7 +1012,8 @@ to the authored workflow state. Every state uses one bracket-free glyph plus a
 short color-coded name.
 
 `spec inspect tree`, `spec render`, `spec explore`, and
-`spec implementation status` pull one provider snapshot per invocation.
+`spec implementation status` pull one provider snapshot per invocation from
+the shared worktree server, starting it if necessary.
 Provider absence, timeout, malformed output, incomplete evidence, or abnormal
 termination is rendered explicitly as `unknown` with a warning; it is never
 converted to `current`. `spec implementation verify` is stricter: it records
@@ -1011,7 +1028,9 @@ dependency on forge-intellect. Read-only adherence surfaces are optional
 enrichment and remain successful with explicit incomplete `unknown` state when
 the provider is unavailable. Only the authoring operation that records a new
 verification checkpoint requires a successful provider assessment and fails
-closed without one.
+closed without one. Forge-intellect is installed independently as the global
+`forge-intellect` CLI from its locked `apps/cli` package; installing the
+provider does not require its optional CodeGraph sidecar or retained daemon.
 
 The v0.5 forge-intellect implementation does not treat a fresh candidate as
 self-verifying merely because no time has elapsed since it. Unless the same

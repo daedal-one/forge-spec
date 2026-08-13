@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Write};
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
-use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,11 @@ use crate::model::reference::SpecReference;
 use crate::model::registry::SpecRegistry;
 
 pub const INTELLECT_PROTOCOL: &str = "forge-spec-intellect/v1";
+pub const PROVIDER_CONTROL_SCHEMA: &str = "forge-intellect-provider-control/v1";
+pub const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 300;
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+const START_TIMEOUT: Duration = Duration::from_secs(5);
+const START_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceState {
@@ -127,15 +131,39 @@ impl AdherenceSnapshot {
 enum ProviderRequest {
     Health {
         schema: &'static str,
+        authorization: String,
     },
     Adherence {
         schema: &'static str,
+        authorization: String,
         workspace: WorkspaceState,
         specifications: Vec<SpecificationRequest>,
     },
     Shutdown {
         schema: &'static str,
+        authorization: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderControl {
+    pub schema: String,
+    pub provider: String,
+    pub protocol: String,
+    pub workspace_root: String,
+    pub endpoint: String,
+    pub authorization: String,
+    pub pid: u32,
+    pub started_at_micros: u64,
+    pub idle_timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderServiceStatus {
+    Running(ProviderControl),
+    Stopped,
+    Stale { reason: String },
 }
 
 #[derive(Debug, Serialize)]
@@ -231,9 +259,11 @@ pub fn fetch(
         .collect::<Result<Vec<_>>>()?;
     specifications.sort_by(|left, right| left.id.cmp(&right.id));
 
-    let mut client = ProviderClient::start(&root)?;
+    let control = ensure_service(&root, DEFAULT_IDLE_TIMEOUT_SECONDS)?;
+    let mut client = ProviderClient::connect(&control)?;
     let health: HealthResponse = client.exchange(&ProviderRequest::Health {
         schema: INTELLECT_PROTOCOL,
+        authorization: control.authorization.clone(),
     })?;
     if health.schema != INTELLECT_PROTOCOL
         || health.response != "health"
@@ -245,10 +275,10 @@ pub fn fetch(
 
     let response: AdherenceResponse = client.exchange(&ProviderRequest::Adherence {
         schema: INTELLECT_PROTOCOL,
+        authorization: control.authorization.clone(),
         workspace: workspace.clone(),
         specifications,
     })?;
-    client.shutdown()?;
 
     if response.schema != INTELLECT_PROTOCOL
         || response.response != "adherence"
@@ -290,6 +320,269 @@ pub fn fetch_or_unknown(registry: &SpecRegistry) -> Result<AdherenceSnapshot> {
             eprintln!("warning: {reason}");
             Ok(AdherenceSnapshot::unavailable(registry, reason))
         }
+    }
+}
+
+pub fn start_service(
+    registry: &SpecRegistry,
+    idle_timeout_seconds: u64,
+) -> Result<ProviderControl> {
+    validate_provider(registry)?;
+    if idle_timeout_seconds == 0 {
+        bail!("provider idle timeout must be greater than zero");
+    }
+    ensure_service(&workspace_root(&registry.specs_dir)?, idle_timeout_seconds)
+}
+
+pub fn service_status(registry: &SpecRegistry) -> Result<ProviderServiceStatus> {
+    validate_provider(registry)?;
+    inspect_service(&workspace_root(&registry.specs_dir)?)
+}
+
+pub fn stop_service(registry: &SpecRegistry) -> Result<ProviderServiceStatus> {
+    validate_provider(registry)?;
+    let root = workspace_root(&registry.specs_dir)?;
+    let paths = provider_paths(&root)?;
+    match inspect_service(&root)? {
+        ProviderServiceStatus::Running(control) => {
+            let mut client = ProviderClient::connect(&control)?;
+            let response: ShutdownResponse = client.exchange(&ProviderRequest::Shutdown {
+                schema: INTELLECT_PROTOCOL,
+                authorization: control.authorization.clone(),
+            })?;
+            if response.schema != INTELLECT_PROTOCOL || response.response != "shutdown" {
+                bail!("intellect provider returned an invalid shutdown response");
+            }
+            let deadline = Instant::now() + START_TIMEOUT;
+            while paths.control.exists() && Instant::now() < deadline {
+                thread::sleep(START_POLL_INTERVAL);
+            }
+            if paths.control.exists() {
+                bail!("intellect provider did not remove its control file after shutdown");
+            }
+            Ok(ProviderServiceStatus::Stopped)
+        }
+        ProviderServiceStatus::Stale { reason } => {
+            let _ = std::fs::remove_file(&paths.control);
+            Ok(ProviderServiceStatus::Stale { reason })
+        }
+        ProviderServiceStatus::Stopped => Ok(ProviderServiceStatus::Stopped),
+    }
+}
+
+fn validate_provider(registry: &SpecRegistry) -> Result<()> {
+    if registry.config.intellect_provider != DEFAULT_INTELLECT_PROVIDER {
+        bail!(
+            "unsupported intellect provider '{}'; this release supports only '{DEFAULT_INTELLECT_PROVIDER}'",
+            registry.config.intellect_provider
+        );
+    }
+    Ok(())
+}
+
+fn ensure_service(root: &Path, idle_timeout_seconds: u64) -> Result<ProviderControl> {
+    if let ProviderServiceStatus::Running(control) = inspect_service(root)? {
+        return Ok(control);
+    }
+    let paths = provider_paths(root)?;
+    std::fs::create_dir_all(&paths.directory).with_context(|| {
+        format!(
+            "creating intellect provider state directory {}",
+            paths.directory.display()
+        )
+    })?;
+
+    for attempt in 0..3 {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&paths.lock)
+        {
+            Ok(mut lock) => {
+                writeln!(lock, "{}", std::process::id())?;
+                let _guard = StartLock(paths.lock.clone());
+                if let ProviderServiceStatus::Running(control) = inspect_service(root)? {
+                    return Ok(control);
+                }
+                if paths.control.exists() {
+                    std::fs::remove_file(&paths.control).with_context(|| {
+                        format!(
+                            "removing stale provider registration {}",
+                            paths.control.display()
+                        )
+                    })?;
+                }
+                return launch_service(root, &paths, idle_timeout_seconds);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let deadline = Instant::now() + START_TIMEOUT;
+                while Instant::now() < deadline {
+                    if let ProviderServiceStatus::Running(control) = inspect_service(root)? {
+                        return Ok(control);
+                    }
+                    thread::sleep(START_POLL_INTERVAL);
+                }
+                if attempt < 2 {
+                    let _ = std::fs::remove_file(&paths.lock);
+                }
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("acquiring provider start lock {}", paths.lock.display())
+                });
+            }
+        }
+    }
+    bail!(
+        "timed out waiting for intellect provider startup lock {}",
+        paths.lock.display()
+    )
+}
+
+fn launch_service(
+    root: &Path,
+    paths: &ProviderPaths,
+    idle_timeout_seconds: u64,
+) -> Result<ProviderControl> {
+    let executable = std::env::var_os("FORGE_SPEC_INTELLECT_PROVIDER_BIN")
+        .unwrap_or_else(|| DEFAULT_INTELLECT_PROVIDER.into());
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&paths.log)
+        .with_context(|| format!("opening provider log {}", paths.log.display()))?;
+    let stderr = log.try_clone()?;
+    let mut child = Command::new(&executable)
+        .args(["provider", "serve", "--workspace-root"])
+        .arg(root)
+        .arg("--control-file")
+        .arg(&paths.control)
+        .arg("--idle-timeout-seconds")
+        .arg(idle_timeout_seconds.to_string())
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+        .with_context(|| {
+            format!(
+                "starting intellect provider {}",
+                executable.to_string_lossy()
+            )
+        })?;
+
+    let deadline = Instant::now() + START_TIMEOUT;
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait()? {
+            bail!(
+                "intellect provider exited during startup with {status}; log: {}",
+                paths.log.display()
+            );
+        }
+        if let ProviderServiceStatus::Running(control) = inspect_service(root)? {
+            return Ok(control);
+        }
+        thread::sleep(START_POLL_INTERVAL);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    bail!(
+        "timed out starting intellect provider; inspect {}",
+        paths.log.display()
+    )
+}
+
+fn inspect_service(root: &Path) -> Result<ProviderServiceStatus> {
+    let paths = provider_paths(root)?;
+    if !paths.control.exists() {
+        return Ok(ProviderServiceStatus::Stopped);
+    }
+    let control = match read_control(&paths.control, root) {
+        Ok(control) => control,
+        Err(error) => {
+            return Ok(ProviderServiceStatus::Stale {
+                reason: format!("invalid provider registration: {error:#}"),
+            });
+        }
+    };
+    match provider_health(&control) {
+        Ok(_) => Ok(ProviderServiceStatus::Running(control)),
+        Err(error) => Ok(ProviderServiceStatus::Stale {
+            reason: format!("registered provider is unreachable: {error:#}"),
+        }),
+    }
+}
+
+fn provider_health(control: &ProviderControl) -> Result<HealthResponse> {
+    let mut client = ProviderClient::connect(control)?;
+    let response: HealthResponse = client.exchange(&ProviderRequest::Health {
+        schema: INTELLECT_PROTOCOL,
+        authorization: control.authorization.clone(),
+    })?;
+    if response.schema != INTELLECT_PROTOCOL
+        || response.response != "health"
+        || response.provider != DEFAULT_INTELLECT_PROVIDER
+        || !response.ready
+    {
+        bail!("intellect provider returned an invalid health response");
+    }
+    Ok(response)
+}
+
+fn read_control(path: &Path, root: &Path) -> Result<ProviderControl> {
+    let bytes = std::fs::read(path)
+        .with_context(|| format!("reading provider registration {}", path.display()))?;
+    let control: ProviderControl = serde_json::from_slice(&bytes)
+        .with_context(|| format!("decoding provider registration {}", path.display()))?;
+    if control.schema != PROVIDER_CONTROL_SCHEMA
+        || control.provider != DEFAULT_INTELLECT_PROVIDER
+        || control.protocol != INTELLECT_PROTOCOL
+    {
+        bail!("provider registration uses an unsupported schema or provider");
+    }
+    if Path::new(&control.workspace_root) != root {
+        bail!(
+            "provider registration belongs to workspace {}",
+            control.workspace_root
+        );
+    }
+    let endpoint = control
+        .endpoint
+        .parse::<SocketAddr>()
+        .context("provider registration has an invalid endpoint")?;
+    if !endpoint.ip().is_loopback() {
+        bail!("provider registration endpoint is not loopback");
+    }
+    Ok(control)
+}
+
+fn provider_paths(root: &Path) -> Result<ProviderPaths> {
+    let repository = git2::Repository::open(root).context("opening workspace Git repository")?;
+    let git_dir = repository
+        .path()
+        .canonicalize()
+        .context("resolving worktree Git directory")?;
+    let directory = git_dir.join("forge-intellect");
+    Ok(ProviderPaths {
+        control: directory.join("provider.json"),
+        lock: directory.join("provider.start.lock"),
+        log: directory.join("provider.log"),
+        directory,
+    })
+}
+
+struct ProviderPaths {
+    directory: PathBuf,
+    control: PathBuf,
+    lock: PathBuf,
+    log: PathBuf,
+}
+
+struct StartLock(PathBuf);
+
+impl Drop for StartLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
     }
 }
 
@@ -403,92 +696,63 @@ fn git_hash_object(root: &Path, bytes: &[u8]) -> Result<String> {
 }
 
 struct ProviderClient {
-    child: Child,
-    stdin: ChildStdin,
-    responses: Receiver<std::result::Result<String, String>>,
-    reader: Option<JoinHandle<()>>,
-    stopped: bool,
+    reader: BufReader<TcpStream>,
+    writer: TcpStream,
 }
 
 impl ProviderClient {
-    fn start(root: &Path) -> Result<Self> {
-        let executable = std::env::var_os("FORGE_SPEC_INTELLECT_PROVIDER_BIN")
-            .unwrap_or_else(|| DEFAULT_INTELLECT_PROVIDER.into());
-        let mut child = Command::new(&executable)
-            .args(["provider", "--stdio"])
-            .current_dir(root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .with_context(|| {
-                format!(
-                    "starting intellect provider {}",
-                    executable.to_string_lossy()
-                )
-            })?;
-        let stdin = child.stdin.take().context("opening provider stdin")?;
-        let stdout = child.stdout.take().context("opening provider stdout")?;
-        let (sender, responses) = mpsc::channel();
-        let reader = thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                let result = line.map_err(|error| error.to_string());
-                if sender.send(result).is_err() {
-                    break;
-                }
-            }
-        });
-        Ok(Self {
-            child,
-            stdin,
-            responses,
-            reader: Some(reader),
-            stopped: false,
-        })
+    fn connect(control: &ProviderControl) -> Result<Self> {
+        let endpoint = control
+            .endpoint
+            .parse::<SocketAddr>()
+            .context("provider endpoint is invalid")?;
+        let writer = TcpStream::connect_timeout(&endpoint, RESPONSE_TIMEOUT)
+            .with_context(|| format!("connecting to intellect provider at {endpoint}"))?;
+        writer.set_read_timeout(Some(RESPONSE_TIMEOUT))?;
+        writer.set_write_timeout(Some(RESPONSE_TIMEOUT))?;
+        let reader = BufReader::new(writer.try_clone()?);
+        Ok(Self { reader, writer })
     }
 
     fn exchange<T: for<'de> Deserialize<'de>>(&mut self, request: &ProviderRequest) -> Result<T> {
-        serde_json::to_writer(&mut self.stdin, request).context("encoding provider request")?;
-        self.stdin.write_all(b"\n")?;
-        self.stdin.flush()?;
-        let line = self
-            .responses
-            .recv_timeout(RESPONSE_TIMEOUT)
-            .context("timed out waiting for intellect provider")?
-            .map_err(anyhow::Error::msg)?;
+        serde_json::to_writer(&mut self.writer, request).context("encoding provider request")?;
+        self.writer.write_all(b"\n")?;
+        self.writer.flush()?;
+        let mut line = String::new();
+        let read = self
+            .reader
+            .read_line(&mut line)
+            .context("reading intellect provider response")?;
+        if read == 0 {
+            bail!("intellect provider closed the connection without a response");
+        }
         serde_json::from_str(&line).context("decoding intellect provider response")
-    }
-
-    fn shutdown(&mut self) -> Result<()> {
-        let response: ShutdownResponse = self.exchange(&ProviderRequest::Shutdown {
-            schema: INTELLECT_PROTOCOL,
-        })?;
-        if response.schema != INTELLECT_PROTOCOL || response.response != "shutdown" {
-            bail!("intellect provider returned an invalid shutdown response");
-        }
-        let status = self
-            .child
-            .wait()
-            .context("waiting for intellect provider")?;
-        self.stopped = true;
-        if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
-        }
-        if !status.success() {
-            bail!("intellect provider exited with {status}");
-        }
-        Ok(())
     }
 }
 
-impl Drop for ProviderClient {
-    fn drop(&mut self) {
-        if !self.stopped {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
-        }
-        if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_registration_must_use_loopback() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let path = root.join("provider.json");
+        let control = ProviderControl {
+            schema: PROVIDER_CONTROL_SCHEMA.into(),
+            provider: DEFAULT_INTELLECT_PROVIDER.into(),
+            protocol: INTELLECT_PROTOCOL.into(),
+            workspace_root: root.to_string_lossy().into_owned(),
+            endpoint: "192.0.2.1:4000".into(),
+            authorization: "secret".into(),
+            pid: 1,
+            started_at_micros: 1,
+            idle_timeout_seconds: DEFAULT_IDLE_TIMEOUT_SECONDS,
+        };
+        std::fs::write(&path, serde_json::to_vec(&control).unwrap()).unwrap();
+
+        let error = read_control(&path, &root).unwrap_err();
+        assert!(error.to_string().contains("not loopback"));
     }
 }

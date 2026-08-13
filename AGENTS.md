@@ -29,6 +29,7 @@ spec new REQ auth/foo          # scaffold
 spec lint                      # validate all rules (pre-commit)
 spec implementation status    # provider-derived adherence for the exact workspace
 spec implementation verify REQ:auth/foo
+spec implementation provider status  # shared worktree-scoped background provider
 spec render REQ:auth/foo --target=agent --include-docs  # XML with referenced docs
 spec inspect documentation        # enrolled Markdown and headings
 spec inspect backlinks 'spec:doc:README.md'
@@ -57,5 +58,5 @@ Full spec: `specification.md`. Key sections by line number:
 | Git trailers, checkpoints & history | 454-521 | 7 |
 | Render targets (human & agent XML) | 523-612 | 8 |
 | Lint rules R001-R031 | 614-658 | 9 |
-| CLI, mutation, migration, impact, LSP, projection & adherence | 660-1010 | 10-10.6 |
-| Worked file template | 1012-1063 | 11 |
+| CLI, mutation, migration, impact, LSP, projection & adherence | 660-1048 | 10-10.6 |
+| Worked file template | 1050-1101 | 11 |

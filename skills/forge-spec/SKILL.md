@@ -80,6 +80,7 @@ Run at least:
 ```sh
 spec lint
 spec implementation status <relevant-id>
+spec implementation provider status
 spec render <relevant-id> --target=agent --include-source --include-docs
 ```
 

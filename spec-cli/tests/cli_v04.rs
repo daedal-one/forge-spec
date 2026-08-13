@@ -149,6 +149,7 @@ fn every_bare_namespace_prints_contextual_help() {
         vec!["relation"],
         vec!["task"],
         vec!["implementation"],
+        vec!["implementation", "provider"],
         vec!["history"],
         vec!["migrate"],
     ] {

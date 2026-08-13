@@ -516,6 +516,8 @@ pub struct ImplementationArgs {
 
 #[derive(Subcommand)]
 pub enum ImplementationCommands {
+    /// Manage the shared background intellect provider
+    Provider(ImplementationProviderArgs),
     /// Pull and print derived adherence state
     Status {
         id: Option<String>,
@@ -530,6 +532,27 @@ pub enum ImplementationCommands {
     },
     /// Remove an authored implementation checkpoint
     Clear { id: String },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct ImplementationProviderArgs {
+    #[command(subcommand)]
+    pub command: ImplementationProviderCommands,
+}
+
+#[derive(Subcommand)]
+pub enum ImplementationProviderCommands {
+    /// Ensure one worktree-scoped provider is running
+    Start {
+        /// Stop automatically after this many idle seconds
+        #[arg(long, default_value_t = crate::intellect::DEFAULT_IDLE_TIMEOUT_SECONDS)]
+        idle_timeout_seconds: u64,
+    },
+    /// Inspect the registered worktree-scoped provider
+    Status,
+    /// Stop the registered worktree-scoped provider
+    Stop,
 }
 
 #[derive(Args)]

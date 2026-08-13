@@ -27,10 +27,12 @@ related:
 - {#c-protocol} Forge-spec MUST exchange a versioned, deterministic adherence
   request and response with the provider, keyed by specification ID and one
   exact workspace state.
-- {#c-lifecycle} Adherence-aware commands MUST start the configured provider,
-  complete a health handshake, request one coherent state, and terminate the
-  provider cleanly. Provider absence, timeout, malformed output, or incomplete
-  evidence MUST remain explicit and MUST NOT be reported as current adherence.
+- {#c-lifecycle} Adherence-aware commands MUST discover or atomically start one
+  healthy worktree-scoped background provider, complete a health handshake,
+  and request one coherent state without stopping the shared process. The
+  provider MUST self-terminate after a bounded idle interval. Provider absence,
+  timeout, malformed output, or incomplete evidence MUST remain explicit and
+  MUST NOT be reported as current adherence.
 - {#c-state} Derived adherence MUST distinguish `unverified`, `current`,
   `stale`, `partial`, `violated`, `unknown`, `unresolved`, and
   `not-applicable`, with provider identity, completeness, exact state identity,
@@ -49,6 +51,11 @@ related:
   runtime dependency on an intellect provider. Read-only adherence surfaces
   MUST remain usable with explicit `unknown` state when the provider is absent;
   only recording a new verification checkpoint MUST fail closed.
+- {#c-service} `spec implementation provider start|status|stop` MUST manage an
+  authenticated loopback provider in the background. Its endpoint, process,
+  and log metadata MUST live outside tracked workspace bytes, be isolated per
+  Git worktree, reject mismatched workspace roots, and tolerate stale control
+  metadata without reporting the service as healthy.
 - {#c-mutation} Setting or clearing an implementation checkpoint and changing
   the configured provider MUST use the shared typed mutation engine.
 :::

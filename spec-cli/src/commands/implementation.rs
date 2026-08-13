@@ -18,6 +18,60 @@ struct StatusOutput<'a> {
     specifications: Vec<&'a SpecAdherence>,
 }
 
+pub fn provider_start(specs_dir: &Path, idle_timeout_seconds: u64) -> Result<()> {
+    let registry = SpecRegistry::load(specs_dir)?;
+    let control = intellect::start_service(&registry, idle_timeout_seconds)?;
+    println!(
+        "Provider {} {} is running for {} (pid {}, endpoint {}, idle timeout {}s)",
+        control.provider,
+        control.protocol,
+        control.workspace_root,
+        control.pid,
+        control.endpoint,
+        control.idle_timeout_seconds
+    );
+    Ok(())
+}
+
+pub fn provider_status(specs_dir: &Path) -> Result<()> {
+    let registry = SpecRegistry::load(specs_dir)?;
+    match intellect::service_status(&registry)? {
+        intellect::ProviderServiceStatus::Running(control) => println!(
+            "Provider {} is running for {} (pid {}, endpoint {}, idle timeout {}s)",
+            control.provider,
+            control.workspace_root,
+            control.pid,
+            control.endpoint,
+            control.idle_timeout_seconds
+        ),
+        intellect::ProviderServiceStatus::Stopped => {
+            println!("Provider {} is stopped", registry.config.intellect_provider)
+        }
+        intellect::ProviderServiceStatus::Stale { reason } => println!(
+            "Provider {} has stale registration — {}",
+            registry.config.intellect_provider, reason
+        ),
+    }
+    Ok(())
+}
+
+pub fn provider_stop(specs_dir: &Path) -> Result<()> {
+    let registry = SpecRegistry::load(specs_dir)?;
+    match intellect::stop_service(&registry)? {
+        intellect::ProviderServiceStatus::Stopped => {
+            println!("Provider {} is stopped", registry.config.intellect_provider)
+        }
+        intellect::ProviderServiceStatus::Stale { reason } => println!(
+            "Removed stale {} registration — {}",
+            registry.config.intellect_provider, reason
+        ),
+        intellect::ProviderServiceStatus::Running(_) => {
+            unreachable!("stop returns a terminal state")
+        }
+    }
+    Ok(())
+}
+
 pub fn status(specs_dir: &Path, id: Option<&str>, json: bool) -> Result<()> {
     let registry = SpecRegistry::load(specs_dir)?;
     if let Some(id) = id {

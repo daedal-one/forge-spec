@@ -87,6 +87,7 @@ spec inspect graph refinement       # refinement DAG only
 spec inspect tree                   # printed tree of all specs
 spec implementation status         # provider-derived code adherence
 spec implementation verify REQ:auth/session-expiry
+spec implementation provider status # shared background provider
 spec change summary replace REQ:auth/session-expiry 'Sessions expire.'
 spec task start TASK:auth/update-session
 spec explore                        # interactive TUI browser
@@ -223,14 +224,19 @@ implemented: 0123456789abcdef0123456789abcdef01234567
 ```
 
 This means complete adherence was last verified at that exact commit; it is
-not a manually maintained current/stale flag. Adherence-aware commands start
-the configured local provider, validate the exact HEAD and working-tree state,
-and pull one evidence-qualified snapshot:
+not a manually maintained current/stale flag. Adherence-aware commands
+atomically ensure one lightweight provider is running for the Git worktree,
+validate the exact HEAD and working-tree state, and pull one evidence-qualified
+snapshot. Concurrent commands reuse the same process, which exits after five
+idle minutes by default:
 
 ```sh
 spec implementation status
 spec implementation status REQ:auth/session-expiry --json
 spec implementation verify REQ:auth/session-expiry
+spec implementation provider start
+spec implementation provider status
+spec implementation provider stop
 spec inspect tree
 spec render REQ:auth/session-expiry --target agent
 ```
@@ -244,6 +250,18 @@ without the provider. Read-only adherence surfaces such as tree, render,
 explore, and status also remain usable when it is absent: they warn and show
 `unknown`, never `current`. Only verification fails closed, writing nothing
 unless the provider reports complete current adherence.
+
+Install the provider separately when adherence is wanted:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/daedal-one/forge-intellect/main/install.sh | sh
+forge-intellect --version
+```
+
+The provider binds only to loopback and publishes its authenticated endpoint,
+PID, timeout, and log beside the worktree's Git administrative data—not in
+tracked project bytes. `spec implementation provider start
+--idle-timeout-seconds N` overrides the idle lifetime for an explicit start.
 
 For a fresh checkpoint, the v0.5 forge-intellect provider also requires the
 candidate commit to carry `Spec-Ref: <id> (implements)`. This prevents
@@ -299,9 +317,9 @@ Use `--from` when an unconfigured legacy tree cannot be inferred and `--to` to
 target a specific supported baseline. The baseline is updated only after every
 format transformation and reference redirect succeeds.
 
-## Typed changes in CLI v0.6
+## Typed changes in CLI v0.7
 
-The executable is `spec 0.6.0`; the stored document format is
+The executable is `spec 0.7.0`; the stored document format is
 `forge-spec-v0.5.0`. Supported writers compile human commands and editor
 actions into the same closed Rust operation enum. A versioned batch can group
 changes across the workspace:

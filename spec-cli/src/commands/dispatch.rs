@@ -290,6 +290,17 @@ fn change(specs_dir: PathBuf, command: ChangeCommands) -> Result<()> {
 
 fn implementation(specs_dir: PathBuf, command: ImplementationCommands) -> Result<()> {
     match command {
+        ImplementationCommands::Provider(args) => match args.command {
+            ImplementationProviderCommands::Start {
+                idle_timeout_seconds,
+            } => commands::implementation::provider_start(&specs_dir, idle_timeout_seconds),
+            ImplementationProviderCommands::Status => {
+                commands::implementation::provider_status(&specs_dir)
+            }
+            ImplementationProviderCommands::Stop => {
+                commands::implementation::provider_stop(&specs_dir)
+            }
+        },
         ImplementationCommands::Status { id, json } => {
             commands::implementation::status(&specs_dir, id.as_deref(), json)
         }
