@@ -35,6 +35,12 @@ related:
   `stale`, `partial`, `violated`, `unknown`, `unresolved`, and
   `not-applicable`, with provider identity, completeness, exact state identity,
   and reasons retained separately from authored lifecycle and TASK progress.
+- {#c-display} A human tree row MUST render exactly one compact effective state
+  as a symbol and name. A non-accepted lifecycle controls first; otherwise an
+  unfinished TASK's progress controls; otherwise applicable adherence replaces
+  `accepted` or `done`. `not-applicable` falls back to `accepted` or `done`, and
+  a missing provider result fails closed to `unknown`. The underlying lifecycle,
+  TASK progress, checkpoint, and adherence values remain independently available.
 - {#c-surfaces} Tree, render, interactive exploration, and implementation
   status or verification commands MUST consume the same provider snapshot;
   lint, migration, structural inspection, and unrelated mutations MUST remain

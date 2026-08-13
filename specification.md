@@ -971,10 +971,29 @@ The derived state vocabulary is:
 | `not-applicable` | the entity has no code-adherence predicate, such as a pure topic or glossary entry |
 
 Lifecycle, TASK progress, authored checkpoint, and derived adherence remain
-separate values. Human tree output may therefore show, for example,
-`[accepted] [current]`, while a completed TASK can independently be
-`✓ done [accepted] [stale]`. Render bundles expose the same snapshot and agent
-XML retains provider, workspace, completeness, reasons, and evidence.
+separate values. Render bundles and agent XML retain the full snapshot,
+including provider, workspace, completeness, reasons, and evidence. Human tree
+output derives exactly one compact effective state per row instead of printing
+those independent values as adjacent badges.
+
+The display FSA uses this precedence:
+
+| priority | condition | effective display state |
+|----------|-----------|-------------------------|
+| 1 | lifecycle is `draft`, `deprecated`, or `superseded` | that lifecycle state |
+| 2 | accepted TASK progress is not `done` | `pending`, `in-progress`, `blocked`, `deferred`, or `wontdo` |
+| 3 | accepted entity has applicable adherence | `unverified`, `current`, `stale`, `partial`, `violated`, `unknown`, or `unresolved` |
+| 4 | adherence is `not-applicable` | `accepted`, or `done` for a completed TASK |
+| 5 | a required provider result is absent | `unknown` |
+
+Thus an accepted requirement moves from `? unverified` to `✓ current` after
+verification and to `↻ stale` after relevant drift. An accepted TASK stays
+`○ pending`, `◐ in-progress`, or another authored workflow state until it is
+marked done; `done` enters the adherence gate rather than implying verified
+implementation. A completed unverified TASK is therefore `? unverified`, and
+only complete evidence makes it `✓ current`. Reopening it returns the display
+to the authored workflow state. Every state uses one bracket-free glyph plus a
+short color-coded name.
 
 `spec inspect tree`, `spec render`, `spec explore`, and
 `spec implementation status` pull one provider snapshot per invocation.

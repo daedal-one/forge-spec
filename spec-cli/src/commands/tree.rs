@@ -55,10 +55,8 @@ pub fn run(
     }
 
     let tree_prefix = if let Some(project) = project {
-        let status = status_label(project.universal.status);
-        let implementation = adherence
-            .get(&project.id_str())
-            .map(|state| adherence_label(&state.state));
+        let implementation = adherence.get(&project.id_str()).map(|state| &state.state);
+        let state = effective_state_label(project.universal.status, None, implementation);
         let summary = project
             .universal
             .summary
@@ -67,13 +65,10 @@ pub fn run(
             .unwrap_or_default();
         let summary = first_line(summary);
         println!(
-            "{} {} {}{} {}",
+            "{} {} {} {}",
             colorize_type("PROJECT"),
             project.universal.id.slug,
-            status,
-            implementation
-                .map(|label| format!(" {label}"))
-                .unwrap_or_default(),
+            state,
             summary.dimmed()
         );
         if grouped.is_empty() {
@@ -115,13 +110,7 @@ pub fn run(
             let branch = if last { "└──" } else { "├──" };
             let doc = &registry.documents[*idx];
             let slug = &doc.universal.id.slug;
-            let status_label = status_label(doc.universal.status);
-            let adherence_label = adherence
-                .get(&doc.id_str())
-                .map(|state| adherence_label(&state.state));
-            let adherence_part = adherence_label
-                .map(|label| format!(" {label}"))
-                .unwrap_or_default();
+            let adherence_state = adherence.get(&doc.id_str()).map(|state| &state.state);
             let summary = doc
                 .universal
                 .summary
@@ -130,19 +119,16 @@ pub fn run(
                 .unwrap_or("");
             let summary_trimmed = first_line(summary);
             let ty_colored = colorize_type(ty);
-            let progress_glyph = match &doc.type_fields {
-                TypeSpecificFields::Task { progress, .. } => Some(progress_label(*progress)),
+            let progress = match &doc.type_fields {
+                TypeSpecificFields::Task { progress, .. } => Some(*progress),
                 _ => None,
             };
-            let progress_part = match &progress_glyph {
-                Some(g) => format!("{g} "),
-                None => String::new(),
-            };
+            let state = effective_state_label(doc.universal.status, progress, adherence_state);
             let line = if summary_trimmed.is_empty() {
-                format!("{ty_colored:<5} {slug} {progress_part}{status_label}{adherence_part}")
+                format!("{ty_colored:<5} {slug} {state}")
             } else {
                 format!(
-                    "{ty_colored:<5} {slug} {progress_part}{status_label}{adherence_part} {}",
+                    "{ty_colored:<5} {slug} {state} {}",
                     summary_trimmed.dimmed()
                 )
             };
@@ -153,16 +139,119 @@ pub fn run(
     Ok(())
 }
 
-fn adherence_label(state: &AdherenceState) -> colored::ColoredString {
-    let label = format!("[{}]", state.as_str());
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DisplayState {
+    Draft,
+    Accepted,
+    Deprecated,
+    Superseded,
+    Pending,
+    InProgress,
+    Done,
+    Blocked,
+    Deferred,
+    WontDo,
+    Unverified,
+    Current,
+    Stale,
+    Partial,
+    Violated,
+    Unknown,
+    Unresolved,
+}
+
+fn effective_state(
+    status: Status,
+    progress: Option<Progress>,
+    adherence: Option<&AdherenceState>,
+) -> DisplayState {
+    match status {
+        Status::Draft => DisplayState::Draft,
+        Status::Deprecated => DisplayState::Deprecated,
+        Status::Superseded => DisplayState::Superseded,
+        Status::Accepted => match progress {
+            Some(Progress::Pending) => DisplayState::Pending,
+            Some(Progress::InProgress) => DisplayState::InProgress,
+            Some(Progress::Blocked) => DisplayState::Blocked,
+            Some(Progress::Deferred) => DisplayState::Deferred,
+            Some(Progress::WontDo) => DisplayState::WontDo,
+            Some(Progress::Done) => match adherence {
+                Some(AdherenceState::NotApplicable) => DisplayState::Done,
+                Some(state) => adherence_state(state),
+                None => DisplayState::Unknown,
+            },
+            None => match adherence {
+                Some(AdherenceState::NotApplicable) => DisplayState::Accepted,
+                Some(state) => adherence_state(state),
+                None => DisplayState::Unknown,
+            },
+        },
+    }
+}
+
+fn adherence_state(state: &AdherenceState) -> DisplayState {
     match state {
-        AdherenceState::Current => label.green().bold(),
-        AdherenceState::Stale | AdherenceState::Partial => label.yellow(),
-        AdherenceState::Violated => label.red().bold(),
-        AdherenceState::Unverified
-        | AdherenceState::Unknown
-        | AdherenceState::Unresolved
-        | AdherenceState::NotApplicable => label.bright_black(),
+        AdherenceState::Unverified => DisplayState::Unverified,
+        AdherenceState::Current => DisplayState::Current,
+        AdherenceState::Stale => DisplayState::Stale,
+        AdherenceState::Partial => DisplayState::Partial,
+        AdherenceState::Violated => DisplayState::Violated,
+        AdherenceState::Unknown => DisplayState::Unknown,
+        AdherenceState::Unresolved => DisplayState::Unresolved,
+        AdherenceState::NotApplicable => unreachable!("not-applicable is a fallback state"),
+    }
+}
+
+fn effective_state_label(
+    status: Status,
+    progress: Option<Progress>,
+    adherence: Option<&AdherenceState>,
+) -> colored::ColoredString {
+    state_label(effective_state(status, progress, adherence))
+}
+
+fn state_label(state: DisplayState) -> colored::ColoredString {
+    let (glyph, name) = state_identity(state);
+    let label = format!("{glyph} {name}");
+    match state {
+        DisplayState::Current | DisplayState::Done => label.green().bold(),
+        DisplayState::Accepted => label.green(),
+        DisplayState::Draft
+        | DisplayState::Pending
+        | DisplayState::Stale
+        | DisplayState::Partial => label.yellow(),
+        DisplayState::InProgress => label.cyan(),
+        DisplayState::Blocked | DisplayState::Violated | DisplayState::Unresolved => {
+            label.red().bold()
+        }
+        DisplayState::Deprecated
+        | DisplayState::Superseded
+        | DisplayState::Deferred
+        | DisplayState::WontDo
+        | DisplayState::Unverified
+        | DisplayState::Unknown => label.bright_black(),
+    }
+}
+
+fn state_identity(state: DisplayState) -> (&'static str, &'static str) {
+    match state {
+        DisplayState::Draft => ("◇", "draft"),
+        DisplayState::Accepted => ("◆", "accepted"),
+        DisplayState::Deprecated => ("−", "deprecated"),
+        DisplayState::Superseded => ("↪", "superseded"),
+        DisplayState::Pending => ("○", "pending"),
+        DisplayState::InProgress => ("◐", "in-progress"),
+        DisplayState::Done => ("✓", "done"),
+        DisplayState::Blocked => ("⊘", "blocked"),
+        DisplayState::Deferred => ("◌", "deferred"),
+        DisplayState::WontDo => ("✗", "wontdo"),
+        DisplayState::Unverified => ("?", "unverified"),
+        DisplayState::Current => ("✓", "current"),
+        DisplayState::Stale => ("↻", "stale"),
+        DisplayState::Partial => ("◐", "partial"),
+        DisplayState::Violated => ("✗", "violated"),
+        DisplayState::Unknown => ("?", "unknown"),
+        DisplayState::Unresolved => ("!", "unresolved"),
     }
 }
 
@@ -195,29 +284,6 @@ fn colorize_type(ty: &str) -> colored::ColoredString {
     }
 }
 
-fn status_label(status: Status) -> colored::ColoredString {
-    let s = format!("[{}]", status.as_str());
-    match status {
-        Status::Accepted => s.green(),
-        Status::Draft => s.yellow(),
-        Status::Deprecated => s.bright_black(),
-        Status::Superseded => s.bright_black(),
-    }
-}
-
-fn progress_label(progress: Progress) -> colored::ColoredString {
-    let (glyph, name) = progress_glyph(progress);
-    let label = format!("{glyph} {name}");
-    match progress {
-        Progress::Done => label.green().bold(),
-        Progress::InProgress => label.cyan(),
-        Progress::Blocked => label.red(),
-        Progress::Pending => label.yellow(),
-        Progress::Deferred => label.bright_black(),
-        Progress::WontDo => label.bright_black(),
-    }
-}
-
 /// (glyph, short-name). Glyphs chosen to render in most terminal fonts.
 pub fn progress_glyph(progress: Progress) -> (&'static str, &'static str) {
     match progress {
@@ -227,5 +293,107 @@ pub fn progress_glyph(progress: Progress) -> (&'static str, &'static str) {
         Progress::Blocked => ("⊘", "blocked"),
         Progress::Deferred => ("◌", "deferred"),
         Progress::WontDo => ("✗", "wontdo"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_accepted_lifecycle_controls_the_display_state() {
+        for (status, expected) in [
+            (Status::Draft, DisplayState::Draft),
+            (Status::Deprecated, DisplayState::Deprecated),
+            (Status::Superseded, DisplayState::Superseded),
+        ] {
+            assert_eq!(
+                effective_state(status, Some(Progress::Done), Some(&AdherenceState::Current)),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn open_task_progress_controls_the_display_state() {
+        for (progress, expected) in [
+            (Progress::Pending, DisplayState::Pending),
+            (Progress::InProgress, DisplayState::InProgress),
+            (Progress::Blocked, DisplayState::Blocked),
+            (Progress::Deferred, DisplayState::Deferred),
+            (Progress::WontDo, DisplayState::WontDo),
+        ] {
+            assert_eq!(
+                effective_state(
+                    Status::Accepted,
+                    Some(progress),
+                    Some(&AdherenceState::Violated)
+                ),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn done_task_enters_the_adherence_states() {
+        for (adherence, expected) in [
+            (AdherenceState::Unverified, DisplayState::Unverified),
+            (AdherenceState::Current, DisplayState::Current),
+            (AdherenceState::Stale, DisplayState::Stale),
+            (AdherenceState::Partial, DisplayState::Partial),
+            (AdherenceState::Violated, DisplayState::Violated),
+            (AdherenceState::Unknown, DisplayState::Unknown),
+            (AdherenceState::Unresolved, DisplayState::Unresolved),
+            (AdherenceState::NotApplicable, DisplayState::Done),
+        ] {
+            assert_eq!(
+                effective_state(Status::Accepted, Some(Progress::Done), Some(&adherence)),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn accepted_non_task_uses_adherence_or_lifecycle_fallback() {
+        assert_eq!(
+            effective_state(Status::Accepted, None, Some(&AdherenceState::Current)),
+            DisplayState::Current
+        );
+        assert_eq!(
+            effective_state(Status::Accepted, None, Some(&AdherenceState::NotApplicable)),
+            DisplayState::Accepted
+        );
+        assert_eq!(
+            effective_state(Status::Accepted, None, None),
+            DisplayState::Unknown
+        );
+    }
+
+    #[test]
+    fn every_state_has_one_compact_bracket_free_identity() {
+        for state in [
+            DisplayState::Draft,
+            DisplayState::Accepted,
+            DisplayState::Deprecated,
+            DisplayState::Superseded,
+            DisplayState::Pending,
+            DisplayState::InProgress,
+            DisplayState::Done,
+            DisplayState::Blocked,
+            DisplayState::Deferred,
+            DisplayState::WontDo,
+            DisplayState::Unverified,
+            DisplayState::Current,
+            DisplayState::Stale,
+            DisplayState::Partial,
+            DisplayState::Violated,
+            DisplayState::Unknown,
+            DisplayState::Unresolved,
+        ] {
+            let (glyph, name) = state_identity(state);
+            assert_eq!(glyph.chars().count(), 1);
+            assert!(!name.contains('['));
+            assert!(!name.contains(']'));
+        }
     }
 }
