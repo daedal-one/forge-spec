@@ -6,7 +6,7 @@ use spec_cli::projection::{
     RelationshipKind, SPEC_DELTA_SCHEMA_VERSION, SPEC_STATE_SCHEMA_VERSION,
 };
 
-const CONFIG: &str = "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n";
+const CONFIG: &str = "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n";
 
 const PROJECT: &str = r#"---
 id: PROJECT:demo
@@ -60,6 +60,7 @@ status: accepted
 level: MUST
 summary: Child requirement.
 owners: [dev]
+implemented: 0123456789abcdef0123456789abcdef01234567
 refines: [REQ:demo/parent-a#c-a, REQ:demo/parent-b#c-b]
 aspects: [first, second]
 categorized_under: [TOPIC:demo/security]
@@ -160,6 +161,17 @@ fn saved_and_multi_file_overlay_bytes_converge_without_writes() {
     let saved = project(&expected_specs, &Overlay::new()).unwrap();
 
     assert_eq!(projected.schema_version, SPEC_STATE_SCHEMA_VERSION);
+    assert_eq!(projected.config.intellect_provider, "forge-intellect");
+    assert_eq!(
+        projected
+            .specifications
+            .iter()
+            .find(|specification| specification.id == "REQ:demo/child")
+            .unwrap()
+            .implemented
+            .as_deref(),
+        Some("0123456789abcdef0123456789abcdef01234567")
+    );
     assert_eq!(
         projected.canonical_json().unwrap(),
         saved.canonical_json().unwrap()
@@ -324,7 +336,7 @@ fn projects_configured_documentation_links_headings_and_overlay_deltas() {
     let specs = temp.path().join(".specs");
     write(
         &specs.join("_config.toml"),
-        "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+        "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
     );
     write(
         &specs.join("_project.spec.md"),

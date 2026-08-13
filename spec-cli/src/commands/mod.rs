@@ -7,6 +7,7 @@ pub mod explore;
 pub mod graph;
 pub mod history;
 pub mod impact;
+pub mod implementation;
 pub mod init;
 pub mod lifecycle;
 pub mod lint;

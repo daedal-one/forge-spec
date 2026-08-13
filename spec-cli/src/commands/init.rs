@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use walkdir::WalkDir;
 
-use crate::model::config::{SpecConfig, CURRENT_SPEC_BASELINE};
+use crate::model::config::{SpecConfig, CURRENT_SPEC_BASELINE, DEFAULT_INTELLECT_PROVIDER};
 use crate::project::{ensure_project_document, write_project_config};
 
 pub fn run(specs_dir: &Path) -> Result<()> {
@@ -49,8 +49,8 @@ pub fn run(specs_dir: &Path) -> Result<()> {
     crate::mutation::atomic_write_files(&[(
         config_path.clone(),
         format!(
-            "baseline = \"{CURRENT_SPEC_BASELINE}\"\nproject = {:?}\n",
-            project.id
+            "baseline = \"{CURRENT_SPEC_BASELINE}\"\nproject = {:?}\nintellect_provider = \"{DEFAULT_INTELLECT_PROVIDER}\"\n",
+            project.id,
         )
         .into_bytes(),
     )])
@@ -94,7 +94,7 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(specs_dir.join("_config.toml")).unwrap(),
             format!(
-                "baseline = \"{CURRENT_SPEC_BASELINE}\"\nproject = {:?}\n",
+                "baseline = \"{CURRENT_SPEC_BASELINE}\"\nproject = {:?}\nintellect_provider = \"{DEFAULT_INTELLECT_PROVIDER}\"\n",
                 SpecConfig::load(&specs_dir).unwrap().project.unwrap()
             )
         );
@@ -112,7 +112,7 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(specs_dir.join("_config.toml")).unwrap(),
             format!(
-                "baseline = \"{CURRENT_SPEC_BASELINE}\"\nproject = {:?}\n",
+                "baseline = \"{CURRENT_SPEC_BASELINE}\"\nproject = {:?}\nintellect_provider = \"{DEFAULT_INTELLECT_PROVIDER}\"\n",
                 SpecConfig::load(&specs_dir).unwrap().project.unwrap()
             )
         );

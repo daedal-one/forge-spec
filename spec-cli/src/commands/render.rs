@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::{bail, Result};
 
 use crate::cli::RenderTarget;
+use crate::intellect;
 use crate::model::reference::{SourceTarget, SpecReference};
 use crate::model::registry::SpecRegistry;
 use crate::render::scope::{compute_scope, DetailLevel};
@@ -19,6 +20,7 @@ pub struct RenderOptions<'a> {
 
 pub fn run(specs_dir: &Path, id_or_query: &str, options: &RenderOptions<'_>) -> Result<()> {
     let registry = SpecRegistry::load(specs_dir)?;
+    let adherence = intellect::fetch_or_unknown(&registry)?;
 
     // Resolve the query — support exact ID or simple glob
     let focal_ids = resolve_query(&registry, id_or_query)?;
@@ -40,8 +42,8 @@ pub fn run(specs_dir: &Path, id_or_query: &str, options: &RenderOptions<'_>) -> 
         );
 
         let mut output = match options.target {
-            RenderTarget::Human => human::render_human(&registry, &entries),
-            RenderTarget::Agent => agent::render_agent(&registry, &entries),
+            RenderTarget::Human => human::render_human(&registry, &entries, Some(&adherence)),
+            RenderTarget::Agent => agent::render_agent(&registry, &entries, Some(&adherence)),
         };
 
         if options.include_source {

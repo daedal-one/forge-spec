@@ -77,6 +77,8 @@ pub enum Commands {
     Relation(RelationArgs),
     /// Query and update implementation tasks
     Task(TaskArgs),
+    /// Inspect or verify specification implementation adherence
+    Implementation(ImplementationArgs),
     /// Query or rebuild derived Git history
     History(HistoryArgs),
     /// Plan or apply document-format migrations
@@ -189,6 +191,8 @@ pub enum ChangeCommands {
     Content(ContentArgs),
     /// Configure generic Markdown documentation collections
     Documentation(DocumentationArgs),
+    /// Configure the intellect provider used for adherence
+    Intellect(IntellectArgs),
     /// Apply a versioned JSON change batch
     Batch {
         /// JSON request path, or - for standard input
@@ -198,6 +202,19 @@ pub enum ChangeCommands {
         #[arg(long)]
         dry_run: bool,
     },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct IntellectArgs {
+    #[command(subcommand)]
+    pub command: IntellectCommands,
+}
+
+#[derive(Subcommand)]
+pub enum IntellectCommands {
+    /// Select the named adherence provider
+    Provider { provider: String },
 }
 
 #[derive(Args)]
@@ -488,6 +505,31 @@ pub enum TaskCommands {
     Unschedule {
         id: String,
     },
+}
+
+#[derive(Args)]
+#[command(arg_required_else_help = true)]
+pub struct ImplementationArgs {
+    #[command(subcommand)]
+    pub command: ImplementationCommands,
+}
+
+#[derive(Subcommand)]
+pub enum ImplementationCommands {
+    /// Pull and print derived adherence state
+    Status {
+        id: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify adherence and record its exact Git checkpoint
+    Verify {
+        id: String,
+        #[arg(long)]
+        at: Option<String>,
+    },
+    /// Remove an authored implementation checkpoint
+    Clear { id: String },
 }
 
 #[derive(Args)]

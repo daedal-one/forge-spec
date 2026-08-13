@@ -11,6 +11,7 @@ pub mod editable;
 pub mod graph;
 pub mod history;
 pub mod impact;
+pub mod intellect;
 pub mod lint;
 pub mod lsp;
 pub mod migration;

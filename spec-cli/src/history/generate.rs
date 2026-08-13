@@ -55,7 +55,7 @@ pub fn update_history(specs_dir: &Path) -> Result<Vec<String>> {
                 .collect(),
         };
 
-        let filename = spec_id.replace(':', "_").replace('/', "_");
+        let filename = spec_id.replace([':', '/'], "_");
         let path = history_dir.join(format!("{filename}.json"));
         let json = serde_json::to_string_pretty(&history)?;
 
@@ -78,7 +78,7 @@ pub fn update_history(specs_dir: &Path) -> Result<Vec<String>> {
 
 /// Read history for a single spec ID.
 pub fn read_history(specs_dir: &Path, spec_id: &str) -> Result<Option<HistoryFile>> {
-    let filename = spec_id.replace(':', "_").replace('/', "_");
+    let filename = spec_id.replace([':', '/'], "_");
     let path = specs_dir.join("_history").join(format!("{filename}.json"));
 
     if !path.exists() {

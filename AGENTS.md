@@ -1,12 +1,13 @@
 # Working with specs
 
-This repo uses the **Specs Format v0.4** to capture project intent, requirements, invariants, interfaces, ADRs, tasks, and glossary entries as version-controlled, cross-referenced documents connected to source code and selected project documentation.
+This repo uses the **Specs Format v0.5** to capture project intent, requirements, invariants, interfaces, ADRs, tasks, and glossary entries as version-controlled, cross-referenced documents connected to source code and selected project documentation.
 
 ## Quick rules
 
 - Specs live in `.specs/` as `.spec.md` files with YAML frontmatter + CommonMark body.
 - The singleton root uses `PROJECT:slug`; every other spec uses `TYPE:namespace/slug` (e.g. `REQ:auth/session-expiry`).
-- `.specs/_config.toml` declares `baseline = "forge-spec-v0.4.0"`, selects `project = "PROJECT:slug"`, and may define named documentation collections; per-file revisions are derived from Git.
+- `.specs/_config.toml` declares `baseline = "forge-spec-v0.5.0"`, selects `project = "PROJECT:slug"`, and defaults `intellect_provider = "forge-intellect"`; per-file revisions are derived from Git.
+- `implemented: <full-git-oid>` is an authored last-verified checkpoint. Use `spec implementation status` for derived adherence and `spec implementation verify <id>` to record it safely.
 - Before changing an older tree, run `spec migrate plan --target agent`; then run `spec migrate apply` and `spec lint`.
 - Types: `PROJECT` root description, `REQ` requirement, `INV` invariant, `IFC` interface, `ADR` decision record, `GLO` glossary, `TOPIC` grouping, `SCN` scenario, `TASK` implementation work.
 - Documents without an explicit refinement or categorization parent implicitly descend from PROJECT; containment never implies refinement.
@@ -26,6 +27,8 @@ Add a `Spec-Ref:` trailer: `Spec-Ref: REQ:auth/session-expiry (implements)`. Kin
 spec init                      # initialize a new .specs tree
 spec new REQ auth/foo          # scaffold
 spec lint                      # validate all rules (pre-commit)
+spec implementation status    # provider-derived adherence for the exact workspace
+spec implementation verify REQ:auth/foo
 spec render REQ:auth/foo --target=agent --include-docs  # XML with referenced docs
 spec inspect documentation        # enrolled Markdown and headings
 spec inspect backlinks 'spec:doc:README.md'
@@ -46,13 +49,13 @@ Full spec: `specification.md`. Key sections by line number:
 
 | Topic | Lines | Section |
 |-------|-------|---------|
-| File layout & ID format | 43-124 | 2.1-2.3 |
-| Frontmatter, collections & typed blocks | 125-219 | 3.1-3.3 |
-| Entity types & type-specific fields | 220-311 | 4-4.1 |
-| Reference syntax & resolution | 312-368 | 5 |
-| Project containment, refinement, categorization | 369-444 | 6 |
-| Git trailers & history | 445-499 | 7 |
-| Render targets (human & agent XML) | 500-590 | 8 |
-| Lint rules R001-R029 | 591-634 | 9 |
-| CLI, mutation, migration, impact, LSP & projection | 635-897 | 10-10.5 |
-| Worked file template | 898-950 | 11 |
+| File layout & ID format | 45-126 | 2.1-2.3 |
+| Frontmatter, collections & typed blocks | 127-227 | 3.1-3.3 |
+| Entity types & type-specific fields | 229-319 | 4-4.1 |
+| Reference syntax & resolution | 321-376 | 5 |
+| Project containment, refinement, categorization | 378-452 | 6 |
+| Git trailers, checkpoints & history | 454-521 | 7 |
+| Render targets (human & agent XML) | 523-612 | 8 |
+| Lint rules R001-R031 | 614-658 | 9 |
+| CLI, mutation, migration, impact, LSP, projection & adherence | 660-1010 | 10-10.6 |
+| Worked file template | 1012-1063 | 11 |

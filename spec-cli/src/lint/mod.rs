@@ -32,6 +32,7 @@ pub fn lint_all_with_options(
         doc_diags.extend(structural::check_id_pattern(doc));
         doc_diags.extend(structural::check_type_matches_prefix(doc));
         doc_diags.extend(structural::check_universal_fields(doc));
+        doc_diags.extend(structural::check_implemented_checkpoint(doc));
         doc_diags.extend(structural::check_type_specific_fields(doc));
         doc_diags.extend(structural::check_unique_anchors(doc));
 
@@ -56,6 +57,7 @@ pub fn lint_all_with_options(
 
     // Registry-wide checks
     diags.extend(structural::check_spec_config(registry));
+    diags.extend(structural::check_intellect_provider(registry));
     diags.extend(structural::check_project_root(registry));
     diags.extend(structural::check_unique_ids(registry));
     diags.extend(references::check_references(registry));

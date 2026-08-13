@@ -68,6 +68,10 @@ Leave new documents as `draft` until their content has been reviewed or is clear
    context and navigation, never as implied refinement, coverage, or normative
    authority.
 7. Record genuine cross-spec links. Do not invent dependencies, ownership, decisions, or guarantees that project evidence does not support.
+8. Treat `implemented` as an authored full-commit attestation, not a status
+   label. Pull derived state with `spec implementation status` and record a
+   checkpoint only through `spec implementation verify <id>`, after the
+   configured forge-intellect provider returns complete current evidence.
 
 ## Validate the result
 
@@ -75,6 +79,7 @@ Run at least:
 
 ```sh
 spec lint
+spec implementation status <relevant-id>
 spec render <relevant-id> --target=agent --include-source --include-docs
 ```
 

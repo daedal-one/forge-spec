@@ -14,7 +14,7 @@ fn agent_impact_report_cascades_from_clause_to_task_and_source() {
     let specs = temp.path().join(".specs");
     write(
         &specs.join("_config.toml"),
-        "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
+        "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
     );
     write(
         &specs.join("_project.spec.md"),

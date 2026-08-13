@@ -4,6 +4,7 @@ use std::path::Path;
 use anyhow::Result;
 use colored::Colorize;
 
+use crate::intellect::{self, AdherenceState};
 use crate::model::frontmatter::{Progress, Status, TypeSpecificFields};
 use crate::model::id::EntityType;
 use crate::model::registry::SpecRegistry;
@@ -19,6 +20,7 @@ pub fn run(
     }
 
     let registry = SpecRegistry::load(specs_dir)?;
+    let adherence = intellect::fetch_or_unknown(&registry)?;
 
     // Group: namespace -> type-prefix -> Vec<&SpecDocument>
     let mut grouped: BTreeMap<String, BTreeMap<&'static str, Vec<usize>>> = BTreeMap::new();
@@ -54,6 +56,9 @@ pub fn run(
 
     let tree_prefix = if let Some(project) = project {
         let status = status_label(project.universal.status);
+        let implementation = adherence
+            .get(&project.id_str())
+            .map(|state| adherence_label(&state.state));
         let summary = project
             .universal
             .summary
@@ -62,10 +67,13 @@ pub fn run(
             .unwrap_or_default();
         let summary = first_line(summary);
         println!(
-            "{} {} {} {}",
+            "{} {} {}{} {}",
             colorize_type("PROJECT"),
             project.universal.id.slug,
             status,
+            implementation
+                .map(|label| format!(" {label}"))
+                .unwrap_or_default(),
             summary.dimmed()
         );
         if grouped.is_empty() {
@@ -108,6 +116,12 @@ pub fn run(
             let doc = &registry.documents[*idx];
             let slug = &doc.universal.id.slug;
             let status_label = status_label(doc.universal.status);
+            let adherence_label = adherence
+                .get(&doc.id_str())
+                .map(|state| adherence_label(&state.state));
+            let adherence_part = adherence_label
+                .map(|label| format!(" {label}"))
+                .unwrap_or_default();
             let summary = doc
                 .universal
                 .summary
@@ -125,10 +139,10 @@ pub fn run(
                 None => String::new(),
             };
             let line = if summary_trimmed.is_empty() {
-                format!("{ty_colored:<5} {slug} {progress_part}{status_label}")
+                format!("{ty_colored:<5} {slug} {progress_part}{status_label}{adherence_part}")
             } else {
                 format!(
-                    "{ty_colored:<5} {slug} {progress_part}{status_label} {}",
+                    "{ty_colored:<5} {slug} {progress_part}{status_label}{adherence_part} {}",
                     summary_trimmed.dimmed()
                 )
             };
@@ -137,6 +151,19 @@ pub fn run(
     }
 
     Ok(())
+}
+
+fn adherence_label(state: &AdherenceState) -> colored::ColoredString {
+    let label = format!("[{}]", state.as_str());
+    match state {
+        AdherenceState::Current => label.green().bold(),
+        AdherenceState::Stale | AdherenceState::Partial => label.yellow(),
+        AdherenceState::Violated => label.red().bold(),
+        AdherenceState::Unverified
+        | AdherenceState::Unknown
+        | AdherenceState::Unresolved
+        | AdherenceState::NotApplicable => label.bright_black(),
+    }
 }
 
 fn first_line(s: &str) -> String {

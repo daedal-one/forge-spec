@@ -5,13 +5,14 @@ use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use walkdir::WalkDir;
 
-use crate::model::config::{SpecConfig, CURRENT_SPEC_BASELINE};
+use crate::model::config::{SpecConfig, CURRENT_SPEC_BASELINE, DEFAULT_INTELLECT_PROVIDER};
 use crate::parse::frontmatter::split_frontmatter;
 use crate::project::{ensure_project_document, existing_project, write_project_config};
 
 pub const LEGACY_SPEC_BASELINE: &str = "forge-spec-v0.1.0";
 pub const V0_2_SPEC_BASELINE: &str = "forge-spec-v0.2.0";
 pub const V0_3_SPEC_BASELINE: &str = "forge-spec-v0.3.0";
+pub const V0_4_SPEC_BASELINE: &str = "forge-spec-v0.4.0";
 
 type ApplyMigration = fn(&Path) -> Result<MigrationStepReport>;
 type VerifyMigration = fn(&Path) -> Result<()>;
@@ -37,6 +38,11 @@ const MIGRATIONS: &[MigrationDefinition] = &[
         guide: include_str!("../../migrations/forge-spec-v0.3.0-to-v0.4.0.yaml"),
         apply: apply_v0_3_to_v0_4,
         verify: verify_v0_3_to_v0_4,
+    },
+    MigrationDefinition {
+        guide: include_str!("../../migrations/forge-spec-v0.4.0-to-v0.5.0.yaml"),
+        apply: apply_v0_4_to_v0_5,
+        verify: verify_v0_4_to_v0_5,
     },
 ];
 
@@ -580,6 +586,47 @@ fn verify_v0_3_to_v0_4(specs_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+fn apply_v0_4_to_v0_5(specs_dir: &Path) -> Result<MigrationStepReport> {
+    let path = specs_dir.join("_config.toml");
+    if !path.exists() {
+        write_baseline(specs_dir, V0_4_SPEC_BASELINE)?;
+    }
+    let content =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    if content.lines().any(is_intellect_provider_assignment) {
+        return Ok(MigrationStepReport::default());
+    }
+
+    let assignment = format!("intellect_provider = \"{DEFAULT_INTELLECT_PROVIDER}\"\n");
+    let insert_at = content
+        .find("\n[[")
+        .map(|offset| offset + 1)
+        .unwrap_or(content.len());
+    let mut output = String::with_capacity(content.len() + assignment.len() + 1);
+    output.push_str(&content[..insert_at]);
+    if !output.is_empty() && !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push_str(&assignment);
+    if insert_at < content.len() {
+        output.push('\n');
+    }
+    output.push_str(&content[insert_at..]);
+    crate::mutation::atomic_write_files(&[(path, output.into_bytes())])?;
+    Ok(MigrationStepReport::default())
+}
+
+fn verify_v0_4_to_v0_5(specs_dir: &Path) -> Result<()> {
+    let config = SpecConfig::load(specs_dir)?;
+    if config.intellect_provider != DEFAULT_INTELLECT_PROVIDER {
+        bail!(
+            "unsupported intellect provider '{}'; forge-spec-v0.5.0 supports only '{DEFAULT_INTELLECT_PROVIDER}'",
+            config.intellect_provider
+        );
+    }
+    Ok(())
+}
+
 fn remove_derived_frontmatter(content: &str) -> Result<String> {
     let close = content
         .strip_prefix("---")
@@ -605,6 +652,14 @@ fn is_legacy_version_line(line: &str) -> bool {
 fn is_baseline_assignment(line: &str) -> bool {
     line.trim_start()
         .strip_prefix("baseline")
+        .map(str::trim_start)
+        .map(|rest| rest.starts_with('='))
+        .unwrap_or(false)
+}
+
+fn is_intellect_provider_assignment(line: &str) -> bool {
+    line.trim_start()
+        .strip_prefix("intellect_provider")
         .map(str::trim_start)
         .map(|rest| rest.starts_with('='))
         .unwrap_or(false)
@@ -771,5 +826,33 @@ mod tests {
             SpecConfig::load(temp.path()).unwrap().baseline,
             V0_2_SPEC_BASELINE
         );
+    }
+
+    #[test]
+    fn v0_5_migration_configures_provider_without_inventing_checkpoints() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("_config.toml"),
+            format!("baseline = \"{V0_4_SPEC_BASELINE}\"\nproject = \"PROJECT:demo\"\n"),
+        )
+        .unwrap();
+        let spec = temp.path().join("_project.spec.md");
+        std::fs::write(
+            &spec,
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [dev]\n---\n\n# Demo\n",
+        )
+        .unwrap();
+        let plan = MigrationPlan::build(V0_4_SPEC_BASELINE, CURRENT_SPEC_BASELINE).unwrap();
+        plan.apply(temp.path()).unwrap();
+        plan.apply(temp.path()).unwrap();
+
+        let config = std::fs::read_to_string(temp.path().join("_config.toml")).unwrap();
+        assert_eq!(config.matches("intellect_provider").count(), 1);
+        assert!(config.contains(&format!(
+            "intellect_provider = \"{DEFAULT_INTELLECT_PROVIDER}\""
+        )));
+        assert!(!std::fs::read_to_string(spec)
+            .unwrap()
+            .contains("implemented:"));
     }
 }

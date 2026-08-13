@@ -246,7 +246,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.4.0\"\nowner = \"team\"\n",
+            "baseline = \"forge-spec-v0.5.0\"\nowner = \"team\"\n",
         )
         .unwrap();
 

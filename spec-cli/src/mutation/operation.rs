@@ -41,6 +41,10 @@ pub enum Operation {
     PinSet { spec: String, value: String },
     #[serde(rename = "pin.clear")]
     PinClear { spec: String },
+    #[serde(rename = "implementation.checkpoint.set")]
+    ImplementationCheckpointSet { spec: String, commit: String },
+    #[serde(rename = "implementation.checkpoint.clear")]
+    ImplementationCheckpointClear { spec: String },
     #[serde(rename = "related.add")]
     RelatedAdd { spec: String, target: String },
     #[serde(rename = "related.remove")]
@@ -177,6 +181,8 @@ pub enum Operation {
         #[serde(default)]
         exclude: Vec<String>,
     },
+    #[serde(rename = "intellect.provider.set")]
+    IntellectProviderSet { provider: String },
 }
 
 impl Operation {
@@ -187,6 +193,8 @@ impl Operation {
             | Self::OwnerRemove { spec, .. }
             | Self::PinSet { spec, .. }
             | Self::PinClear { spec }
+            | Self::ImplementationCheckpointSet { spec, .. }
+            | Self::ImplementationCheckpointClear { spec }
             | Self::RelatedAdd { spec, .. }
             | Self::RelatedRemove { spec, .. }
             | Self::RequirementLevelSet { spec, .. }
@@ -231,7 +239,7 @@ impl Operation {
             | Self::TaskEtaSet { spec, .. }
             | Self::TaskEtaClear { spec }
             | Self::SpecRename { spec, .. } => Some(spec),
-            Self::DocumentationCollectionAdd { .. } => None,
+            Self::DocumentationCollectionAdd { .. } | Self::IntellectProviderSet { .. } => None,
         }
     }
 
@@ -242,6 +250,8 @@ impl Operation {
             Self::OwnerRemove { .. } => "owner.remove",
             Self::PinSet { .. } => "pin.set",
             Self::PinClear { .. } => "pin.clear",
+            Self::ImplementationCheckpointSet { .. } => "implementation.checkpoint.set",
+            Self::ImplementationCheckpointClear { .. } => "implementation.checkpoint.clear",
             Self::RelatedAdd { .. } => "related.add",
             Self::RelatedRemove { .. } => "related.remove",
             Self::RequirementLevelSet { .. } => "requirement.level.set",
@@ -287,6 +297,7 @@ impl Operation {
             Self::TaskEtaClear { .. } => "task.eta.clear",
             Self::SpecRename { .. } => "spec.rename",
             Self::DocumentationCollectionAdd { .. } => "documentation.collection.add",
+            Self::IntellectProviderSet { .. } => "intellect.provider.set",
         }
     }
 }

@@ -1,6 +1,6 @@
 # Specs Format — Hands-on Memo
 
-One-page reference for Specs Format v0.4. For the full spec, see `specification.md`.
+One-page reference for Specs Format v0.5. For the full spec, see `specification.md`.
 
 ## File layout
 
@@ -31,8 +31,9 @@ aspects: [duration]     # required if refines has multiple parents
 Declare the format once in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.4.0"
+baseline = "forge-spec-v0.5.0"
 project = "PROJECT:example"
+intellect_provider = "forge-intellect"
 ```
 
 Optionally enroll ordinary Markdown in named, non-overlapping collections:
@@ -139,6 +140,8 @@ spec migrate apply                         # migrate format + apply redirects
 spec inspect orphans                       # leaf specs with no children
 spec change batch --from changes.json --dry-run
 spec task start TASK:auth/foo              # begin implementation work
+spec implementation status                 # exact-workspace adherence snapshot
+spec implementation verify REQ:auth/foo    # verify + record full Git checkpoint
 ```
 
 ## Git trailer
@@ -167,6 +170,8 @@ referencing an `ADR:` in the same commit.
 | `R027`   | `spec:doc:` path is not enrolled                                     | enroll the file or fix the path            |
 | `R028`   | documentation heading is missing or ambiguous                        | use the exact hierarchical heading path    |
 | `R029`   | ordinary relative Markdown link does not resolve                     | fix or enroll the linked Markdown file     |
+| `R030`   | malformed `implemented` Git object ID                                | use `spec implementation verify <id>`      |
+| `R031`   | unsupported intellect provider                                       | select `forge-intellect`                    |
 | `R-redir`| reference traversed a redirect (info)                              | rewrite to the canonical target           |
 
 ## Status escape hatch

@@ -75,6 +75,7 @@ pub fn parse_frontmatter(
         summary: raw.summary,
         owners,
         pinned_at: raw.pinned_at,
+        implemented: raw.implemented,
         related,
         supersedes: raw.supersedes,
         superseded_by: raw.superseded_by,

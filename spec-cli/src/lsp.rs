@@ -1041,7 +1041,7 @@ mod tests {
         std::fs::create_dir_all(&specs_dir).unwrap();
         std::fs::write(
             specs_dir.join("_config.toml"),
-            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -1198,7 +1198,7 @@ mod tests {
         std::fs::create_dir_all(&docs_dir).unwrap();
         std::fs::write(
             specs_dir.join("_config.toml"),
-            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
         )
         .unwrap();
         std::fs::write(
@@ -1271,7 +1271,7 @@ mod tests {
         std::fs::create_dir_all(&docs_dir).unwrap();
         std::fs::write(
             specs_dir.join("_config.toml"),
-            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
         )
         .unwrap();
         std::fs::write(

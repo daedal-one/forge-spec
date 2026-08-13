@@ -72,6 +72,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Lifecycle(args) => lifecycle(find_specs_dir(explicit)?, args.command),
         Commands::Relation(args) => relation(find_specs_dir(explicit)?, args.command),
         Commands::Task(args) => task(find_specs_dir(explicit)?, args.command),
+        Commands::Implementation(args) => implementation(find_specs_dir(explicit)?, args.command),
         Commands::History(args) => history(find_specs_dir(explicit)?, args.command),
         Commands::Migrate(args) => migrate(find_specs_dir(explicit)?, args.command),
         Commands::Lsp { stdio: _ } => crate::lsp::run_stdio(&find_specs_dir(explicit)?),
@@ -275,11 +276,28 @@ fn change(specs_dir: PathBuf, command: ChangeCommands) -> Result<()> {
                 exclude,
             },
         },
+        ChangeCommands::Intellect(args) => match args.command {
+            IntellectCommands::Provider { provider } => {
+                Operation::IntellectProviderSet { provider }
+            }
+        },
         ChangeCommands::Batch { from, dry_run } => {
             return commands::change::run_batch(&specs_dir, &from, dry_run);
         }
     };
     commands::change::run_operations(&specs_dir, vec![operation])
+}
+
+fn implementation(specs_dir: PathBuf, command: ImplementationCommands) -> Result<()> {
+    match command {
+        ImplementationCommands::Status { id, json } => {
+            commands::implementation::status(&specs_dir, id.as_deref(), json)
+        }
+        ImplementationCommands::Verify { id, at } => {
+            commands::implementation::verify(&specs_dir, &id, at.as_deref())
+        }
+        ImplementationCommands::Clear { id } => commands::implementation::clear(&specs_dir, &id),
+    }
 }
 
 fn lifecycle(specs_dir: PathBuf, command: LifecycleCommands) -> Result<()> {

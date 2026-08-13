@@ -23,13 +23,7 @@ pub fn check_trailer_references(registry: &SpecRegistry) -> Vec<Diagnostic> {
     }
 
     // Walk recent commits (limit to last 500 to avoid unbounded walks)
-    let mut count = 0;
-    for oid in revwalk {
-        if count > 500 {
-            break;
-        }
-        count += 1;
-
+    for oid in revwalk.take(501) {
         let oid = match oid {
             Ok(o) => o,
             Err(_) => continue,

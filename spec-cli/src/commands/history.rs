@@ -41,7 +41,7 @@ pub fn run(specs_dir: &Path, update: bool, id: Option<&str>) -> Result<()> {
     if history_dir.exists() {
         let mut entries: Vec<_> = std::fs::read_dir(&history_dir)?
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
             .collect();
         entries.sort_by_key(|e| e.path());
 

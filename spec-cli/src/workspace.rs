@@ -21,7 +21,7 @@ use crate::model::frontmatter::TypeSpecificFields;
 use crate::model::reference::{SourceTarget, SpecReference};
 use crate::model::registry::SpecRegistry;
 
-const CACHE_SCHEMA_VERSION: &str = "4";
+const CACHE_SCHEMA_VERSION: &str = "5";
 
 #[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +49,7 @@ pub struct ExplorerDocument {
     pub title: String,
     pub entity_type: String,
     pub status: String,
+    pub implemented: Option<String>,
     pub progress: Option<String>,
     pub level: Option<String>,
     pub summary: Option<String>,
@@ -746,6 +747,7 @@ fn explorer_document(document: &SpecDocument, registry: &SpecRegistry) -> Explor
             .unwrap_or_else(|| document.universal.id.slug.clone()),
         entity_type: document.universal.entity_type.prefix().to_string(),
         status: document.universal.status.as_str().to_string(),
+        implemented: document.universal.implemented.clone(),
         progress,
         level,
         summary: document.universal.summary.clone(),
@@ -1006,7 +1008,7 @@ mod tests {
         std::fs::create_dir_all(&specs).unwrap();
         std::fs::write(
             specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -1038,7 +1040,7 @@ mod tests {
         std::fs::create_dir_all(&docs).unwrap();
         std::fs::write(
             specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.4.0\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+            "baseline = \"forge-spec-v0.5.0\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
         )
         .unwrap();
         let guide = docs.join("start.md");

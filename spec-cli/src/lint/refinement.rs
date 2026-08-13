@@ -235,31 +235,15 @@ fn check_aspects(registry: &SpecRegistry) -> Vec<Diagnostic> {
             _ => continue,
         };
         {
-            if refines.len() > 1 {
-                // Collect distinct parent doc IDs
-                let parent_ids: BTreeSet<&str> = refines
-                    .iter()
-                    .map(|r| {
-                        if let Some(pos) = r.find('#') {
-                            &r[..pos]
-                        } else {
-                            r.as_str()
-                        }
-                    })
-                    .collect();
-
-                if parent_ids.len() > 1 || refines.len() > 1 {
-                    if aspects.is_empty() {
-                        diags.push(Diagnostic::error(
-                            "R012",
-                            format!(
-                                "multi-parent refinement requires 'aspects' field (refines {} targets)",
-                                refines.len()
-                            ),
-                            doc.source_path.clone(),
-                        ));
-                    }
-                }
+            if refines.len() > 1 && aspects.is_empty() {
+                diags.push(Diagnostic::error(
+                    "R012",
+                    format!(
+                        "multi-parent refinement requires 'aspects' field (refines {} targets)",
+                        refines.len()
+                    ),
+                    doc.source_path.clone(),
+                ));
             }
         }
     }

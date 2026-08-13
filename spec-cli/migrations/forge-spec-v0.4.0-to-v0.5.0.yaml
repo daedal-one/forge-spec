@@ -1,0 +1,37 @@
+from: forge-spec-v0.4.0
+to: forge-spec-v0.5.0
+summary: >
+  Adds durable implementation checkpoints and an external intellect-provider
+  contract for deriving current specification adherence from exact repository
+  state.
+changes:
+  - id: add-implemented-checkpoint
+    kind: schema
+    area: frontmatter
+    description: Every specification may record implemented as the full Git object ID at which adherence was last verified.
+  - id: add-intellect-provider
+    kind: schema
+    area: configuration
+    description: .specs/_config.toml selects an intellect provider and defaults to forge-intellect, the only v0.5 implementation.
+  - id: derive-adherence-state
+    kind: behavior
+    area: tooling
+    description: Adherence-aware commands start the configured provider, perform a health handshake, and request state for the exact workspace revision.
+instructions:
+  - id: configure-default-provider
+    actor: cli
+    action: Add intellect_provider = "forge-intellect" without changing documentation collections or existing specification content.
+    verification: The configuration parses and selects forge-intellect.
+  - id: preserve-unverified-specifications
+    actor: cli
+    action: Leave implemented absent on existing specifications; migration does not manufacture implementation evidence.
+    verification: Existing specifications report unverified until explicitly verified.
+  - id: establish-checkpoints
+    actor: agent
+    when: A specification has been checked against code at an exact commit.
+    action: Run spec implementation verify for the specification instead of editing implemented manually.
+    verification: The provider reports current before the typed mutation records the full commit ID.
+validation:
+  - command: spec lint
+  - command: spec implementation status
+    when: forge-intellect is installed and the workspace is a Git repository.

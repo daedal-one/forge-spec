@@ -16,14 +16,16 @@ use crate::documentation::{
     DocumentationIssue, DocumentationLinkTarget,
 };
 use crate::lint::diagnostic::{Diagnostic, Severity};
-use crate::model::config::{DocumentationCollectionConfig, SpecConfig, CURRENT_SPEC_BASELINE};
+use crate::model::config::{
+    DocumentationCollectionConfig, SpecConfig, CURRENT_SPEC_BASELINE, DEFAULT_INTELLECT_PROVIDER,
+};
 use crate::model::document::SpecDocument;
 use crate::model::frontmatter::TypeSpecificFields;
 use crate::model::reference::{SourceTarget, SpecReference};
 use crate::model::registry::{Redirect, SpecRegistry};
 
-pub const SPEC_STATE_SCHEMA_VERSION: &str = "forge-spec-state-v2";
-pub const SPEC_DELTA_SCHEMA_VERSION: &str = "forge-spec-delta-v2";
+pub const SPEC_STATE_SCHEMA_VERSION: &str = "forge-spec-state-v3";
+pub const SPEC_DELTA_SCHEMA_VERSION: &str = "forge-spec-delta-v3";
 pub const SPEC_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Repository-relative changes layered over the saved `.specs/` tree.
@@ -39,6 +41,7 @@ pub enum OverlayEntry {
 pub struct ProjectedConfig {
     pub baseline: String,
     pub project: Option<String>,
+    pub intellect_provider: String,
     pub documentation: Vec<ProjectedDocumentationCollection>,
     pub declared: bool,
 }
@@ -117,6 +120,7 @@ pub struct ProjectedSpecification {
     pub summary: Option<String>,
     pub owners: Vec<String>,
     pub pinned_at: Option<String>,
+    pub implemented: Option<String>,
     pub related: Vec<String>,
     pub supersedes: Option<String>,
     pub superseded_by: Option<String>,
@@ -602,6 +606,7 @@ fn project_files(
         config: ProjectedConfig {
             baseline: config.baseline,
             project: config.project,
+            intellect_provider: config.intellect_provider,
             documentation: project_documentation_collections(&config.documentation),
             declared: config.declared,
         },
@@ -703,6 +708,7 @@ fn parse_config(bytes: Option<&Vec<u8>>, diagnostics: &mut Vec<Diagnostic>) -> S
         return SpecConfig {
             baseline: CURRENT_SPEC_BASELINE.into(),
             project: None,
+            intellect_provider: DEFAULT_INTELLECT_PROVIDER.into(),
             documentation: Vec::new(),
             declared: false,
         };
@@ -732,6 +738,7 @@ fn invalid_config() -> SpecConfig {
     SpecConfig {
         baseline: String::new(),
         project: None,
+        intellect_provider: DEFAULT_INTELLECT_PROVIDER.into(),
         documentation: Vec::new(),
         declared: true,
     }
@@ -959,6 +966,7 @@ fn project_specification(document: &SpecDocument) -> ProjectedSpecification {
         summary: document.universal.summary.clone(),
         owners: sorted(&document.universal.owners),
         pinned_at: document.universal.pinned_at.clone(),
+        implemented: document.universal.implemented.clone(),
         related: sorted(&document.universal.related),
         supersedes: document.universal.supersedes.clone(),
         superseded_by: document.universal.superseded_by.clone(),

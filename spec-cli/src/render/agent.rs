@@ -1,4 +1,5 @@
 use crate::graph;
+use crate::intellect::AdherenceSnapshot;
 use crate::model::document::SpecDocument;
 use crate::model::frontmatter::TypeSpecificFields;
 use crate::model::id::EntityType;
@@ -7,16 +8,31 @@ use crate::model::registry::SpecRegistry;
 use super::scope::{DetailLevel, ScopedEntry};
 
 /// Render a set of scoped entries as an agent-optimized XML envelope.
-pub fn render_agent(registry: &SpecRegistry, entries: &[ScopedEntry]) -> String {
+pub fn render_agent(
+    registry: &SpecRegistry,
+    entries: &[ScopedEntry],
+    adherence: Option<&AdherenceSnapshot>,
+) -> String {
     let mut out = String::new();
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    let adherence_attributes = adherence.map_or_else(String::new, |snapshot| {
+        format!(
+            " intellect-provider=\"{}\" provider-version=\"{}\" workspace-head=\"{}\" worktree=\"{}\" adherence-complete=\"{}\"",
+            escape_xml(&snapshot.provider),
+            escape_xml(&snapshot.provider_version),
+            escape_xml(&snapshot.workspace.head),
+            escape_xml(&snapshot.workspace.worktree),
+            snapshot.complete,
+        )
+    });
     if let Some(project_id) = registry.project_id() {
         out.push_str(&format!(
-            "<specs project=\"{}\">\n",
-            escape_xml(&project_id)
+            "<specs project=\"{}\"{}>\n",
+            escape_xml(&project_id),
+            adherence_attributes,
         ));
     } else {
-        out.push_str("<specs>\n");
+        out.push_str(&format!("<specs{}>\n", adherence_attributes));
     }
 
     for entry in entries {
@@ -29,10 +45,18 @@ pub fn render_agent(registry: &SpecRegistry, entries: &[ScopedEntry]) -> String 
         };
 
         match entry.detail {
-            DetailLevel::Full => render_spec_full(doc, registry, &mut out),
-            DetailLevel::Summary => render_spec_summary(doc, registry, &mut out),
+            DetailLevel::Full => render_spec_full(doc, registry, adherence, &mut out),
+            DetailLevel::Summary => render_spec_summary(doc, registry, adherence, &mut out),
             DetailLevel::IdOnly => {
-                out.push_str(&format!("  <spec id=\"{}\" />\n", escape_xml(&entry.id)));
+                let state = adherence
+                    .and_then(|snapshot| snapshot.get(&entry.id))
+                    .map(|state| format!(" adherence=\"{}\"", state.state.as_str()))
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "  <spec id=\"{}\"{} />\n",
+                    escape_xml(&entry.id),
+                    state
+                ));
             }
             DetailLevel::None => {}
         }
@@ -42,7 +66,12 @@ pub fn render_agent(registry: &SpecRegistry, entries: &[ScopedEntry]) -> String 
     out
 }
 
-fn render_spec_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut String) {
+fn render_spec_full(
+    doc: &SpecDocument,
+    registry: &SpecRegistry,
+    adherence: Option<&AdherenceSnapshot>,
+    out: &mut String,
+) {
     let id = doc.id_str();
     let u = &doc.universal;
 
@@ -61,6 +90,17 @@ fn render_spec_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut Strin
         escape_xml(&registry.config.baseline),
     ));
 
+    if let Some(implemented) = &u.implemented {
+        out.push_str(&format!(" implemented=\"{}\"", escape_xml(implemented)));
+    }
+    if let Some(state) = adherence.and_then(|snapshot| snapshot.get(&id)) {
+        out.push_str(&format!(
+            " adherence=\"{}\" adherence-complete=\"{}\"",
+            state.state.as_str(),
+            state.complete
+        ));
+    }
+
     if let TypeSpecificFields::Requirement { level, .. } = &doc.type_fields {
         out.push_str(&format!(" level=\"{}\"", level.as_str()));
     }
@@ -74,6 +114,8 @@ fn render_spec_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut Strin
             escape_xml(summary.trim())
         ));
     }
+
+    render_adherence(&id, adherence, out);
 
     // Body
     out.push_str("    <body>\n");
@@ -159,7 +201,12 @@ fn render_spec_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut Strin
     out.push_str(&format!("  </{tag}>\n"));
 }
 
-fn render_spec_summary(doc: &SpecDocument, registry: &SpecRegistry, out: &mut String) {
+fn render_spec_summary(
+    doc: &SpecDocument,
+    registry: &SpecRegistry,
+    adherence: Option<&AdherenceSnapshot>,
+    out: &mut String,
+) {
     let id = doc.id_str();
     let summary = doc.universal.summary.as_deref().unwrap_or("");
     let tag = if doc.universal.entity_type == EntityType::Project {
@@ -167,13 +214,31 @@ fn render_spec_summary(doc: &SpecDocument, registry: &SpecRegistry, out: &mut St
     } else {
         "spec"
     };
+    let adherence_attributes = adherence
+        .and_then(|snapshot| snapshot.get(&id))
+        .map(|state| {
+            format!(
+                " adherence=\"{}\" adherence-complete=\"{}\"",
+                state.state.as_str(),
+                state.complete
+            )
+        })
+        .unwrap_or_default();
+    let implemented_attribute = doc
+        .universal
+        .implemented
+        .as_deref()
+        .map(|commit| format!(" implemented=\"{}\"", escape_xml(commit)))
+        .unwrap_or_default();
     out.push_str(&format!(
-        "  <{tag} id=\"{}\" type=\"{}\" status=\"{}\" revision=\"{}\" baseline=\"{}\">\n",
+        "  <{tag} id=\"{}\" type=\"{}\" status=\"{}\" revision=\"{}\" baseline=\"{}\"{}{}>\n",
         escape_xml(&id),
         doc.universal.entity_type.type_name(),
         doc.universal.status.as_str(),
         revision_for(doc),
         escape_xml(&registry.config.baseline),
+        implemented_attribute,
+        adherence_attributes,
     ));
     if !summary.is_empty() {
         out.push_str(&format!(
@@ -181,7 +246,32 @@ fn render_spec_summary(doc: &SpecDocument, registry: &SpecRegistry, out: &mut St
             escape_xml(summary.trim())
         ));
     }
+    render_adherence(&id, adherence, out);
     out.push_str(&format!("  </{tag}>\n"));
+}
+
+fn render_adherence(id: &str, adherence: Option<&AdherenceSnapshot>, out: &mut String) {
+    let Some((snapshot, state)) =
+        adherence.and_then(|snapshot| snapshot.get(id).map(|state| (snapshot, state)))
+    else {
+        return;
+    };
+    out.push_str(&format!(
+        "    <adherence state=\"{}\" complete=\"{}\" provider=\"{}\">\n",
+        state.state.as_str(),
+        state.complete,
+        escape_xml(&snapshot.provider),
+    ));
+    for reason in &state.reasons {
+        out.push_str(&format!("      <reason>{}</reason>\n", escape_xml(reason)));
+    }
+    for evidence in &state.evidence {
+        out.push_str(&format!(
+            "      <evidence>{}</evidence>\n",
+            escape_xml(evidence)
+        ));
+    }
+    out.push_str("    </adherence>\n");
 }
 
 fn revision_for(doc: &SpecDocument) -> String {
@@ -207,7 +297,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -228,7 +318,7 @@ mod tests {
             DetailLevel::None,
             None,
         );
-        let output = render_agent(&registry, &scope);
+        let output = render_agent(&registry, &scope, None);
 
         assert!(output.contains("<specs project=\"PROJECT:demo\">"));
         let project = output.find("<project id=\"PROJECT:demo\"").unwrap();

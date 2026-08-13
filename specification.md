@@ -1,4 +1,4 @@
-# Specs Format v0.4 — Specification
+# Specs Format v0.5 — Specification
 
 A file format and toolchain for project specifications, designed to be:
 
@@ -24,7 +24,9 @@ In scope:
   explicitly enrolled project documentation.
 - Tracking refinement (a high-level requirement decomposed into
   sub-requirements) at clause-level granularity.
-- Linking specs to the commits that touch or implement them.
+- Recording the exact commit at which each spec was last verified as
+  implemented, and deriving its present code-adherence state through a local
+  intellect provider.
 - Producing two render targets from the same source: human (Markdown for
   Pandoc / Typst / static-site rendering) and agent (structured envelope
   optimized for LLM context).
@@ -36,7 +38,7 @@ Not in scope:
   etc.). Forge-spec indexes selected Markdown and links it to intent, but the
   Markdown remains independently authored documentation.
 - Symbolic / formal verification. The format is designed to be amenable to
-  it later; v0.4 produces no proofs.
+  it later; v0.5 produces evidence-qualified states, not proofs.
 
 ---
 
@@ -137,6 +139,7 @@ body that may contain typed fenced divs.
 | `summary`    | conditional        | required if any other spec references this one                     |
 | `owners`     | yes                | non-empty list of identifiers                                      |
 | `pinned_at`  | no                 | git SHA used to resolve `src:` references                          |
+| `implemented`| no                 | full Git object ID at which complete adherence was last verified   |
 | `related`    | no                 | list of related spec IDs (informational, no graph semantics)       |
 | `supersedes` | no                 | spec ID this one replaces                                          |
 | `superseded_by` | no              | reverse pointer; auto-managed by `spec lifecycle supersede`        |
@@ -151,9 +154,15 @@ The format baseline and singleton project root are declared once for the entire
 spec tree in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.4.0"
+baseline = "forge-spec-v0.5.0"
 project = "PROJECT:forge-spec"
+intellect_provider = "forge-intellect"
 ```
+
+`intellect_provider` defaults to `forge-intellect` when omitted. v0.5
+recognizes that provider name only. This is a provider identity, not an
+arbitrary shell command; operational environments may control how the named
+binary is resolved without placing executable command lines in project data.
 
 Generic Markdown is enrolled through named collections in the same config:
 
@@ -432,13 +441,13 @@ is independent of the refinement graph.
 
 ### 6.4 Composition (deferred)
 
-v0.4 does not have a first-class `COMP:` type. If a requirement describes a
+v0.5 does not have a first-class `COMP:` type. If a requirement describes a
 component, set `kind: component` on the requirement. Future v2 work may
 introduce `COMP:` and migrate `kind: component` requirements to it.
 
 `applies_to:` exists today as a free-form list of component identifiers
 (e.g., `[auth-service, gateway]`). It is not validated against any registry
-in v0.4.
+in v0.5.
 
 ---
 
@@ -494,6 +503,20 @@ references resolve against HEAD. Pin when:
 - A `draft` spec describes intended behavior on a feature branch;
 - A historical spec describes behavior at a specific commit (e.g., a
   superseded ADR).
+
+### 7.4 `implemented`
+
+`implemented` is an authored attestation containing one complete Git object
+ID. It means the specification's complete normative content was checked
+against code at that commit. It is not a cached `current` flag and it is never
+advanced by migration, history indexing, or inference. The current adherence
+state is derived by the configured intellect provider for the exact selected
+HEAD and working-tree identity (§10.6).
+
+Because recording the field itself changes a specification file, provider
+comparison ignores only the `implemented:` scalar when deciding whether the
+specification's normative content changed. All other frontmatter and body
+changes invalidate the earlier verification boundary.
 
 ---
 
@@ -625,6 +648,8 @@ config in `.specs/_lint.toml`.
 | `R027`      | error    | `spec:doc:` path targets are enrolled                               |
 | `R028`      | error    | `spec:doc:` heading paths resolve uniquely                          |
 | `R029`      | error    | Ordinary relative Markdown links resolve within enrolled documentation |
+| `R030`      | error    | `implemented` is a full 40- or 64-character Git object ID            |
+| `R031`      | error    | Configured intellect provider is supported by the active baseline     |
 | `R-redir`   | info     | Reference traverses a redirect                                       |
 
 `status: draft` downgrades `R002`–`R012` from error to warning. This is the
@@ -634,8 +659,9 @@ escape hatch for scratch specs; it is not meant to be permanent.
 
 ## 10. Tooling
 
-A single CLI: `spec`. Single static binary, no runtime dependency on the
-host project.
+The core CLI is a single `spec` binary with no runtime dependency on the host
+project. Adherence-aware commands additionally require the named local
+intellect provider described in §10.6.
 
 Subcommands:
 
@@ -663,6 +689,9 @@ Subcommands:
 | `spec lifecycle ...`                | draft, accept, deprecate, or atomically supersede             |
 | `spec relation ...`                 | refine, categorize, or relate specifications                  |
 | `spec task ...`                     | list and update typed TASK state, ownership, and schedule     |
+| `spec implementation status [id]`  | pull current adherence state from the intellect provider       |
+| `spec implementation verify <id>`  | verify adherence and record the exact successful checkpoint    |
+| `spec implementation clear <id>`   | remove the authored implementation checkpoint                  |
 | `spec history show\|rebuild`        | query or atomically regenerate derived Git history            |
 | `spec migrate plan\|apply`          | safely inspect or apply composed format migrations            |
 | `spec lsp`                          | run the forge-spec language server over stdio                 |
@@ -691,8 +720,8 @@ describes exactly one adjacent baseline transition and contains:
 - an idempotent mechanical transformation implemented by the CLI.
 
 Migration artifacts compose in format release order. Given a tree at
-`forge-spec-v0.1.0`, CLI v0.5 plans and applies
-`v0.1 -> v0.2 -> v0.3 -> v0.4` in one
+`forge-spec-v0.1.0`, CLI v0.6 plans and applies
+`v0.1 -> v0.2 -> v0.3 -> v0.4 -> v0.5` in one
 invocation rather than requiring a direct migration for every version pair.
 The CLI release does not create a format migration when stored document syntax
 is unchanged. Historical artifacts remain shipped with future CLIs.
@@ -711,7 +740,7 @@ cycles, ambiguous routes, and a `--from` value that conflicts with a declared
 project baseline.
 
 Missing `_config.toml` is inferred as v0.1 when legacy per-file version fields
-are present, as the current v0.4 shape when a valid PROJECT document exists,
+are present, as the current v0.5 shape when a valid PROJECT document exists,
 and as v0.2
 otherwise. The v0.2→v0.3 migration creates a deterministic draft project
 document, reuses existing owners, and records the source baseline before the
@@ -724,6 +753,12 @@ The v0.3→v0.4 migration adds documentation collections and references as an
 optional capability. Its mechanical step updates the baseline only. It never
 scans the repository to invent collections; maintainers add reviewed roots and
 patterns explicitly with `spec change documentation collection-add`.
+
+The v0.4→v0.5 migration adds
+`intellect_provider = "forge-intellect"`, advances the baseline, and leaves
+`implemented` absent on every existing specification. It never invents code
+adherence. Maintainers establish checkpoints individually with
+`spec implementation verify` after provider-backed review.
 
 ### 10.2 Change-impact analysis
 
@@ -819,7 +854,7 @@ and the desire to ship a single static binary.
 
 ### 10.4 Typed workspace mutation
 
-CLI v0.5 implements the v0.4 document format. Every supported document writer
+CLI v0.6 implements the v0.5 document format. Every supported document writer
 and documentation-collection mutation uses one Rust transaction engine. The
 public batch envelope is:
 
@@ -875,7 +910,7 @@ inputs are `.spec.md`, `_config.toml`, `_redirects.toml`, and generic Markdown
 matched by the overlaid configuration's documentation collections; absolute
 paths and parent-directory traversal are rejected before projection.
 
-`forge-spec-state-v2` deterministically orders and serializes semantic
+`forge-spec-state-v3` deterministically orders and serializes semantic
 configuration, specifications, typed blocks and clause anchors, redirects,
 explicit relationships, synthesized PROJECT containment, documentation
 collections, document bodies and headings, cross-surface documentation links,
@@ -886,12 +921,91 @@ with `valid: false` and sorted diagnostics rather than disappearing from the
 projection. Source selectors remain explicit and unverified: canonical output
 never depends on language-server availability.
 
-`forge-spec-delta-v2` compares two canonical states and reports added, removed,
+`forge-spec-delta-v3` compares two canonical states and reports added, removed,
 and changed specifications and documentation plus documentation-link,
 redirect, relationship, source-reference, diagnostic, validity, and
 configuration changes. Projecting or diffing performs no workspace writes.
 Identical saved and overlaid bytes must produce identical canonical state
 bytes.
+
+### 10.6 Intellect providers and code adherence
+
+Forge-spec owns authored intent and the durable `implemented` checkpoint.
+Current adherence is derived observation: forge-spec asks an intellect
+provider to assess those authored inputs against one exact repository state,
+then presents the result without writing it back into lifecycle or TASK
+fields. Forge-intellect is the only provider identity defined by v0.5.
+
+Adherence-aware commands start `forge-intellect provider --stdio` in the Git
+worktree root, perform a health handshake, issue one newline-delimited JSON
+request, receive one coherent snapshot, request shutdown, and wait for clean
+termination. The protocol schema is `forge-spec-intellect/v1`. Each request
+contains:
+
+- the canonical workspace root, full HEAD object ID, and a deterministic
+  identity for all tracked and untracked working-tree bytes;
+- every selected specification's ID, type, lifecycle state, relative path,
+  authored `implemented` checkpoint, and unique referenced source paths; and
+- an optional candidate checkpoint used only by
+  `spec implementation verify`.
+
+The provider independently recomputes the workspace identity and rejects a
+request if HEAD, working-tree bytes, root, protocol, or specification set is
+incoherent. The response repeats that exact workspace state and identifies the
+provider name and version. Every per-spec result retains the authored or
+candidate checkpoint, one state, an evidence-completeness flag, ordered
+reasons, and explicit evidence boundaries. Responses with missing, duplicate,
+or unexpected spec IDs are invalid.
+
+The derived state vocabulary is:
+
+| state | meaning |
+|-------|---------|
+| `unverified` | no implementation checkpoint has been authored |
+| `current` | complete provider evidence supports adherence at the exact requested state |
+| `stale` | normative spec content or bounded source evidence changed after verification |
+| `partial` | some, but not all, required evidence resolved |
+| `violated` | explicit evidence records a known deviation, including a later `(violates)` trailer |
+| `unknown` | the provider cannot establish a safe evidence boundary |
+| `unresolved` | the checkpoint, spec, source, or selected history cannot be resolved |
+| `not-applicable` | the entity has no code-adherence predicate, such as a pure topic or glossary entry |
+
+Lifecycle, TASK progress, authored checkpoint, and derived adherence remain
+separate values. Human tree output may therefore show, for example,
+`[accepted] [current]`, while a completed TASK can independently be
+`✓ done [accepted] [stale]`. Render bundles expose the same snapshot and agent
+XML retains provider, workspace, completeness, reasons, and evidence.
+
+`spec inspect tree`, `spec render`, `spec explore`, and
+`spec implementation status` pull one provider snapshot per invocation.
+Provider absence, timeout, malformed output, incomplete evidence, or abnormal
+termination is rendered explicitly as `unknown` with a warning; it is never
+converted to `current`. `spec implementation verify` is stricter: it records
+the resolved full commit through the shared typed mutation engine only when
+the provider returns `current` with complete evidence for that candidate.
+Verification failure writes nothing. `spec implementation clear`, lint,
+migration, structural inspection, and unrelated mutations remain usable
+without starting the provider.
+
+Forge-spec therefore has no build, installation, or mandatory runtime
+dependency on forge-intellect. Read-only adherence surfaces are optional
+enrichment and remain successful with explicit incomplete `unknown` state when
+the provider is unavailable. Only the authoring operation that records a new
+verification checkpoint requires a successful provider assessment and fails
+closed without one.
+
+The v0.5 forge-intellect implementation does not treat a fresh candidate as
+self-verifying merely because no time has elapsed since it. Unless the same
+checkpoint is already authored, the candidate commit must carry an exact
+`Spec-Ref: <id> (implements)` trailer before freshness and bounded source
+evidence can produce `current`. Richer semantic evidence may extend this
+provider contract later without weakening the conservative fallback.
+
+The public mutation vocabulary includes
+`implementation.checkpoint.set`, `implementation.checkpoint.clear`, and
+`intellect.provider.set`. The v0.5 provider name is fixed to
+`forge-intellect`; an unsupported value fails lint and cannot be introduced by
+the typed command surface.
 
 ---
 
@@ -948,7 +1062,7 @@ Symbolic enforcement point:
 
 ---
 
-## 12. Open issues for v0.4 → v1
+## 12. Open issues for v0.5 → v1
 
 - **Component first-class type (`COMP:`).** Deferred. Trigger condition for
   introducing it: more than ~5 requirements with `kind: component` and a
@@ -960,11 +1074,11 @@ Symbolic enforcement point:
 
 - **Cross-repo references.** Useful for monorepo / multi-repo organizations.
   The `spec:` URL scheme is extensible (`spec:other-repo/REQ:foo`); resolution
-  needs a registry. Out of scope for v0.4.
+  needs a registry. Out of scope for v0.5.
 
 - **Symbolic clause-coverage proof.** The current coverage check is
   syntactic: every clause has at least one refining child. A semantic check
-  — children jointly imply parent — is not feasible in v0.4.
+  — children jointly imply parent — is not feasible in v0.5.
 
 - **Concurrent edits and merge.** No special handling. Standard git merge
   with line-level conflict resolution. Frontmatter is small and conflict-

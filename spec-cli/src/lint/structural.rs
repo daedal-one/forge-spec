@@ -2,7 +2,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::BTreeMap;
 
-use crate::model::config::CURRENT_SPEC_BASELINE;
+use crate::model::config::{CURRENT_SPEC_BASELINE, DEFAULT_INTELLECT_PROVIDER};
 use crate::model::document::SpecDocument;
 use crate::model::frontmatter::TypeSpecificFields;
 use crate::model::id::EntityType;
@@ -65,6 +65,27 @@ pub fn check_universal_fields(doc: &SpecDocument) -> Vec<Diagnostic> {
     diags
 }
 
+/// R030: implementation checkpoints are complete Git object IDs.
+pub fn check_implemented_checkpoint(doc: &SpecDocument) -> Vec<Diagnostic> {
+    let Some(checkpoint) = doc.universal.implemented.as_deref() else {
+        return Vec::new();
+    };
+    let valid_length = checkpoint.len() == 40 || checkpoint.len() == 64;
+    if valid_length
+        && checkpoint
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        Vec::new()
+    } else {
+        vec![Diagnostic::error(
+            "R030",
+            "implemented must be a full 40- or 64-character Git object ID",
+            doc.source_path.clone(),
+        )]
+    }
+}
+
 /// R024: the spec tree declares a supported forge-spec baseline once.
 pub fn check_spec_config(registry: &SpecRegistry) -> Vec<Diagnostic> {
     let path = registry.specs_dir.join("_config.toml");
@@ -88,6 +109,24 @@ pub fn check_spec_config(registry: &SpecRegistry) -> Vec<Diagnostic> {
         )];
     }
     Vec::new()
+}
+
+/// R031: v0.5 supports one named intellect-provider implementation.
+pub fn check_intellect_provider(registry: &SpecRegistry) -> Vec<Diagnostic> {
+    if registry.config.baseline != CURRENT_SPEC_BASELINE {
+        return Vec::new();
+    }
+    if registry.config.intellect_provider == DEFAULT_INTELLECT_PROVIDER {
+        return Vec::new();
+    }
+    vec![Diagnostic::error(
+        "R031",
+        format!(
+            "unsupported intellect provider '{}'; this baseline supports only '{DEFAULT_INTELLECT_PROVIDER}'",
+            registry.config.intellect_provider
+        ),
+        registry.specs_dir.join("_config.toml"),
+    )]
 }
 
 /// R025: the tree has exactly one configured PROJECT document.
@@ -343,7 +382,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -360,7 +399,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         let registry = SpecRegistry::load(temp.path()).unwrap();
@@ -375,7 +414,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -392,5 +431,39 @@ mod tests {
         let diagnostics = check_project_root(&registry);
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("refines PROJECT"));
+    }
+
+    #[test]
+    fn validates_full_implementation_checkpoints() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("requirement.spec.md");
+        std::fs::write(
+            &path,
+            "---\nid: REQ:demo/checkpoint\ntype: requirement\nstatus: accepted\nsummary: Checkpoint.\nowners: [dev]\nimplemented: short\nlevel: MUST\nrefines: []\n---\n\n# Checkpoint\n",
+        )
+        .unwrap();
+        let document = crate::parse::parse_document(&path).unwrap();
+        let diagnostics = check_implemented_checkpoint(&document);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "R030");
+    }
+
+    #[test]
+    fn rejects_unsupported_intellect_provider() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("_config.toml"),
+            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\nintellect_provider = \"unknown\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [dev]\n---\n\n# Demo\n",
+        )
+        .unwrap();
+        let registry = SpecRegistry::load(temp.path()).unwrap();
+        let diagnostics = check_intellect_provider(&registry);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "R031");
     }
 }

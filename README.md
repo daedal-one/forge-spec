@@ -18,7 +18,7 @@ mechanically validated.
 
 ## What's here
 
-- `specification.md` — the full Specs Format v0.4 specification
+- `specification.md` — the full Specs Format v0.5 specification
 - `format-memo.md` — one-page cheat sheet
 - `AGENTS.md` — compact reference for AI coding agents
 - `example/` — a working `.specs/` tree demonstrating the format
@@ -85,6 +85,8 @@ spec impact --base origin/main --head working-tree --target agent
 spec inspect graph hierarchy        # project-rooted hierarchy as DOT
 spec inspect graph refinement       # refinement DAG only
 spec inspect tree                   # printed tree of all specs
+spec implementation status         # provider-derived code adherence
+spec implementation verify REQ:auth/session-expiry
 spec change summary replace REQ:auth/session-expiry 'Sessions expire.'
 spec task start TASK:auth/update-session
 spec explore                        # interactive TUI browser
@@ -198,8 +200,9 @@ line with `spec:src:path/file.ts:42-78` or by language-server symbol with
 The spec tree declares its format once in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.4.0"
+baseline = "forge-spec-v0.5.0"
 project = "PROJECT:example"
+intellect_provider = "forge-intellect"
 ```
 
 The project document is ambient context: documents without an explicit
@@ -210,6 +213,42 @@ specification.
 
 Per-file revisions are derived from Git (`rN`, or `rN+dirty` for working-tree
 changes), so spec files do not carry version bookkeeping.
+
+## Track implementation adherence
+
+Every spec may carry an authored implementation checkpoint:
+
+```yaml
+implemented: 0123456789abcdef0123456789abcdef01234567
+```
+
+This means complete adherence was last verified at that exact commit; it is
+not a manually maintained current/stale flag. Adherence-aware commands start
+the configured local provider, validate the exact HEAD and working-tree state,
+and pull one evidence-qualified snapshot:
+
+```sh
+spec implementation status
+spec implementation status REQ:auth/session-expiry --json
+spec implementation verify REQ:auth/session-expiry
+spec inspect tree
+spec render REQ:auth/session-expiry --target agent
+```
+
+Lifecycle, TASK progress, and adherence stay separate, so tree output can show
+`[accepted] [current]` or `✓ done [accepted] [stale]`. v0.5 defaults to and
+supports only the `forge-intellect` provider, but forge-spec has no build,
+installation, or mandatory runtime dependency on it. Lint, migration,
+mutation, impact, inspection, LSP, and other non-adherence workflows run
+without the provider. Read-only adherence surfaces such as tree, render,
+explore, and status also remain usable when it is absent: they warn and show
+`unknown`, never `current`. Only verification fails closed, writing nothing
+unless the provider reports complete current adherence.
+
+For a fresh checkpoint, the v0.5 forge-intellect provider also requires the
+candidate commit to carry `Spec-Ref: <id> (implements)`. This prevents
+`verify` from circularly declaring an arbitrary current commit implemented
+only because nothing has changed since it.
 
 ## Connect project documentation
 
@@ -260,10 +299,10 @@ Use `--from` when an unconfigured legacy tree cannot be inferred and `--to` to
 target a specific supported baseline. The baseline is updated only after every
 format transformation and reference redirect succeeds.
 
-## Typed changes in CLI v0.5
+## Typed changes in CLI v0.6
 
-The executable is `spec 0.5.0`; the stored document format is
-`forge-spec-v0.4.0`. Supported writers compile human commands and editor
+The executable is `spec 0.6.0`; the stored document format is
+`forge-spec-v0.5.0`. Supported writers compile human commands and editor
 actions into the same closed Rust operation enum. A versioned batch can group
 changes across the workspace:
 
@@ -302,11 +341,11 @@ availability must be enforced rather than reported as a warning.
 Rust consumers can project a saved `.specs/` tree plus a multi-file in-memory
 overlay through `spec_cli::projection`. Overlay entries create, replace, or
 delete spec, configuration, redirect, and configured Markdown inputs without
-writing them to disk. The result is a deterministic `forge-spec-state-v2`
+writing them to disk. The result is a deterministic `forge-spec-state-v3`
 schema containing normalized specifications, clauses, relationships,
 documentation, cross-surface links, source selectors, and diagnostics; invalid
 intermediate input remains visible as an invalid state. `SpecState::diff`
-produces a deterministic `forge-spec-delta-v2` semantic delta.
+produces a deterministic `forge-spec-delta-v3` semantic delta.
 
 The projection surface deliberately performs no language-server lookup and
 contains no ledger, session, or temporal-graph policy. Downstream systems may

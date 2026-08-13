@@ -1,5 +1,7 @@
 use std::process::Command;
 
+const MISSING_PROVIDER: &str = "/forge-spec-test/missing-forge-intellect";
+
 fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_spec")
 }
@@ -8,7 +10,7 @@ fn workspace() -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
         temp.path().join("_config.toml"),
-        "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
+        "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
     )
     .unwrap();
     std::fs::write(
@@ -29,6 +31,48 @@ fn workspace() -> tempfile::TempDir {
     temp
 }
 
+fn git_workspace() -> (tempfile::TempDir, std::path::PathBuf) {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let specs = root.join(".specs");
+    std::fs::create_dir(&specs).unwrap();
+    std::fs::write(
+        specs.join("_config.toml"),
+        "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        specs.join("_project.spec.md"),
+        "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [carlo]\n---\n\n# Demo\n",
+    )
+    .unwrap();
+    std::fs::write(
+        specs.join("example.spec.md"),
+        "---\nid: REQ:demo/example\ntype: requirement\nstatus: accepted\nsummary: Example.\nowners: [carlo]\nlevel: MUST\nrefines: []\n---\n\n# Example\n\n:::{requirement id=\"example\" level=\"MUST\"}\n- {#c-rule} A rule.\n:::\n",
+    )
+    .unwrap();
+
+    for args in [
+        vec!["init", "-q"],
+        vec!["config", "user.name", "Forge Spec Test"],
+        vec!["config", "user.email", "forge-spec@example.invalid"],
+        vec!["add", ".specs"],
+        vec!["commit", "-q", "-m", "Initial specs"],
+    ] {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    (temp, specs)
+}
+
 #[test]
 fn exposes_only_the_v04_top_level_hierarchy() {
     let output = Command::new(binary()).arg("--help").output().unwrap();
@@ -47,6 +91,7 @@ fn exposes_only_the_v04_top_level_hierarchy() {
         "lifecycle",
         "relation",
         "task",
+        "implementation",
         "history",
         "migrate",
         "lsp",
@@ -103,6 +148,7 @@ fn every_bare_namespace_prints_contextual_help() {
         vec!["lifecycle"],
         vec!["relation"],
         vec!["task"],
+        vec!["implementation"],
         vec!["history"],
         vec!["migrate"],
     ] {
@@ -116,6 +162,59 @@ fn every_bare_namespace_prints_contextual_help() {
             "bare namespace {path:?} did not print help"
         );
     }
+}
+
+#[test]
+fn forge_spec_remains_usable_without_an_intellect_provider() {
+    let (_temp, specs) = git_workspace();
+    let run = |args: &[&str]| {
+        Command::new(binary())
+            .args(["--specs-dir", specs.to_str().unwrap()])
+            .args(args)
+            .env("FORGE_SPEC_INTELLECT_PROVIDER_BIN", MISSING_PROVIDER)
+            .output()
+            .unwrap()
+    };
+
+    for args in [
+        vec!["lint"],
+        vec!["inspect", "relations", "REQ:demo/example"],
+        vec!["impact", "REQ:demo/example"],
+    ] {
+        let output = run(&args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("intellect provider unavailable"));
+    }
+
+    for args in [
+        vec!["inspect", "tree", "--no-color"],
+        vec!["render", "REQ:demo/example", "--target", "agent"],
+        vec!["implementation", "status", "REQ:demo/example", "--json"],
+    ] {
+        let output = run(&args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains("intellect provider unavailable"));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("unknown"));
+    }
+
+    let document = specs.join("example.spec.md");
+    let before = std::fs::read(&document).unwrap();
+    let verify = run(&["implementation", "verify", "REQ:demo/example"]);
+    assert!(!verify.status.success());
+    assert!(
+        String::from_utf8_lossy(&verify.stderr).contains("starting intellect provider"),
+        "{}",
+        String::from_utf8_lossy(&verify.stderr)
+    );
+    assert_eq!(std::fs::read(document).unwrap(), before);
 }
 
 #[test]
@@ -231,7 +330,7 @@ fn documentation_commands_and_render_share_heading_resolution() {
     std::fs::create_dir_all(&docs).unwrap();
     std::fs::write(
         specs.join("_config.toml"),
-        "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+        "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
     )
     .unwrap();
     std::fs::write(

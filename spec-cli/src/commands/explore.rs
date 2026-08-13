@@ -20,12 +20,14 @@ use ratatui::Terminal;
 
 use crate::commands::tree::progress_glyph;
 use crate::graph;
+use crate::intellect::{self, AdherenceSnapshot, AdherenceState};
 use crate::model::frontmatter::{Progress, Status, TypeSpecificFields};
 use crate::model::registry::SpecRegistry;
 
 pub fn run(specs_dir: &Path) -> Result<()> {
     let registry = SpecRegistry::load(specs_dir)?;
-    let mut app = App::new(registry);
+    let adherence = intellect::fetch_or_unknown(&registry)?;
+    let mut app = App::new(registry, adherence);
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -205,6 +207,7 @@ struct Modal {
 
 struct App {
     registry: SpecRegistry,
+    adherence: AdherenceSnapshot,
     /// All nodes in tree order (DFS).
     all_nodes: Vec<Node>,
     /// Currently-collapsed group keys.
@@ -228,7 +231,7 @@ struct App {
 }
 
 impl App {
-    fn new(registry: SpecRegistry) -> Self {
+    fn new(registry: SpecRegistry, adherence: AdherenceSnapshot) -> Self {
         let project_index = registry
             .project()
             .and_then(|project| registry.id_index.get(&project.id_str()).copied());
@@ -307,6 +310,7 @@ impl App {
 
         let mut app = Self {
             registry,
+            adherence,
             all_nodes,
             collapsed: Default::default(),
             visible: Vec::new(),
@@ -789,7 +793,7 @@ fn draw_tree(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
             match node.kind {
                 NodeKind::Project => {
                     let doc = &app.registry.documents[node.doc_idx.unwrap()];
-                    ListItem::new(Line::from(vec![
+                    let mut spans = vec![
                         Span::raw(indent),
                         Span::styled(node.label.clone(), type_style("PROJECT")),
                         Span::raw(" "),
@@ -797,7 +801,9 @@ fn draw_tree(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
                             format!("[{}]", doc.universal.status.as_str()),
                             Style::default().fg(status_color(doc.universal.status)),
                         ),
-                    ]))
+                    ];
+                    append_adherence_span(&mut spans, &app.adherence, &doc.id_str());
+                    ListItem::new(Line::from(spans))
                 }
                 NodeKind::Namespace => {
                     let marker = if app.collapsed.contains(&node.namespace) {
@@ -848,6 +854,7 @@ fn draw_tree(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
                         format!("[{}]", doc.universal.status.as_str()),
                         Style::default().fg(status_color),
                     ));
+                    append_adherence_span(&mut spans, &app.adherence, &doc.id_str());
                     ListItem::new(Line::from(spans))
                 }
             }
@@ -894,6 +901,32 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                         .add_modifier(Modifier::BOLD),
                 ),
             ]));
+            if let Some(implemented) = &doc.universal.implemented {
+                lines.push(Line::from(vec![
+                    Span::styled("implemented", Style::default().fg(Color::DarkGray)),
+                    Span::raw(format!(" {implemented}")),
+                ]));
+            }
+            if let Some(state) = app.adherence.get(&doc.id_str()) {
+                lines.push(Line::from(vec![
+                    Span::styled("adherence", Style::default().fg(Color::DarkGray)),
+                    Span::raw(" "),
+                    Span::styled(
+                        state.state.as_str().to_string(),
+                        adherence_style(&state.state),
+                    ),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled("provider ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(format!(
+                        "{} {}",
+                        app.adherence.provider, app.adherence.provider_version
+                    )),
+                ]));
+                for reason in &state.reasons {
+                    lines.push(Line::from(format!("  ↳ {reason}")));
+                }
+            }
             lines.push(Line::from(vec![
                 Span::styled("type    ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
@@ -1336,7 +1369,8 @@ fn launch_editor(terminal: &mut Term, path: &Path, app: &mut App) -> Result<()> 
                         .current_node()
                         .and_then(|n| n.doc_idx)
                         .map(|i| app.registry.documents[i].id_str());
-                    *app = App::new(new_reg);
+                    let adherence = intellect::fetch_or_unknown(&new_reg)?;
+                    *app = App::new(new_reg, adherence);
                     if let Some(id) = prev_id {
                         app.jump_to(&id);
                     }
@@ -1530,6 +1564,30 @@ fn status_color(status: Status) -> Color {
         Status::Draft => Color::Yellow,
         Status::Deprecated => Color::DarkGray,
         Status::Superseded => Color::DarkGray,
+    }
+}
+
+fn append_adherence_span(spans: &mut Vec<Span<'static>>, snapshot: &AdherenceSnapshot, id: &str) {
+    if let Some(state) = snapshot.get(id) {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!("[{}]", state.state.as_str()),
+            adherence_style(&state.state),
+        ));
+    }
+}
+
+fn adherence_style(state: &AdherenceState) -> Style {
+    match state {
+        AdherenceState::Current => Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD),
+        AdherenceState::Stale | AdherenceState::Partial => Style::default().fg(Color::Yellow),
+        AdherenceState::Violated => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        AdherenceState::Unverified
+        | AdherenceState::Unknown
+        | AdherenceState::Unresolved
+        | AdherenceState::NotApplicable => Style::default().fg(Color::DarkGray),
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::intellect::AdherenceSnapshot;
 use crate::model::document::SpecDocument;
 use crate::model::frontmatter::TypeSpecificFields;
 use crate::model::registry::SpecRegistry;
@@ -5,7 +6,11 @@ use crate::model::registry::SpecRegistry;
 use super::scope::{DetailLevel, ScopedEntry};
 
 /// Render a set of scoped entries as human-readable Markdown.
-pub fn render_human(registry: &SpecRegistry, entries: &[ScopedEntry]) -> String {
+pub fn render_human(
+    registry: &SpecRegistry,
+    entries: &[ScopedEntry],
+    adherence: Option<&AdherenceSnapshot>,
+) -> String {
     let mut out = String::new();
 
     for (i, entry) in entries.iter().enumerate() {
@@ -19,8 +24,8 @@ pub fn render_human(registry: &SpecRegistry, entries: &[ScopedEntry]) -> String 
         };
 
         match entry.detail {
-            DetailLevel::Full => render_full(doc, registry, &mut out),
-            DetailLevel::Summary => render_summary(doc, &mut out),
+            DetailLevel::Full => render_full(doc, registry, adherence, &mut out),
+            DetailLevel::Summary => render_summary(doc, adherence, &mut out),
             DetailLevel::IdOnly => {
                 out.push_str(&format!("- {}\n", entry.id));
             }
@@ -31,9 +36,14 @@ pub fn render_human(registry: &SpecRegistry, entries: &[ScopedEntry]) -> String 
     out
 }
 
-fn render_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut String) {
+fn render_full(
+    doc: &SpecDocument,
+    registry: &SpecRegistry,
+    adherence: Option<&AdherenceSnapshot>,
+    out: &mut String,
+) {
     // Header table
-    render_frontmatter_table(doc, registry, out);
+    render_frontmatter_table(doc, registry, adherence, out);
     out.push('\n');
     // Body
     out.push_str(&doc.body_raw);
@@ -42,13 +52,22 @@ fn render_full(doc: &SpecDocument, registry: &SpecRegistry, out: &mut String) {
     }
 }
 
-fn render_summary(doc: &SpecDocument, out: &mut String) {
+fn render_summary(doc: &SpecDocument, adherence: Option<&AdherenceSnapshot>, out: &mut String) {
     let id = doc.id_str();
     let summary = doc.universal.summary.as_deref().unwrap_or("(no summary)");
-    out.push_str(&format!("### {id}\n\n{summary}\n"));
+    let state = adherence
+        .and_then(|snapshot| snapshot.get(&id))
+        .map(|state| state.state.as_str())
+        .unwrap_or("unavailable");
+    out.push_str(&format!("### {id} [{state}]\n\n{summary}\n"));
 }
 
-fn render_frontmatter_table(doc: &SpecDocument, registry: &SpecRegistry, out: &mut String) {
+fn render_frontmatter_table(
+    doc: &SpecDocument,
+    registry: &SpecRegistry,
+    adherence: Option<&AdherenceSnapshot>,
+    out: &mut String,
+) {
     let u = &doc.universal;
     out.push_str(&format!("## {}\n\n", doc.id_str()));
     out.push_str("| Field | Value |\n");
@@ -70,6 +89,24 @@ fn render_frontmatter_table(doc: &SpecDocument, registry: &SpecRegistry, out: &m
     out.push_str(&format!("| **Owners** | {} |\n", u.owners.join(", ")));
     if let Some(ref sha) = u.pinned_at {
         out.push_str(&format!("| **Pinned at** | `{sha}` |\n"));
+    }
+    if let Some(ref sha) = u.implemented {
+        out.push_str(&format!("| **Implemented** | `{sha}` |\n"));
+    }
+    if let Some(snapshot) = adherence {
+        if let Some(state) = snapshot.get(&doc.id_str()) {
+            out.push_str(&format!("| **Adherence** | {} |\n", state.state.as_str()));
+            out.push_str(&format!(
+                "| **Intellect provider** | {} {} |\n",
+                snapshot.provider, snapshot.provider_version
+            ));
+            if !state.reasons.is_empty() {
+                out.push_str(&format!(
+                    "| **Adherence reason** | {} |\n",
+                    state.reasons.join("; ")
+                ));
+            }
+        }
     }
 
     // Type-specific fields

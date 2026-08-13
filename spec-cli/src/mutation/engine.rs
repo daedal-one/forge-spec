@@ -14,7 +14,7 @@ use crate::editable::EditableDocument;
 use crate::lint;
 use crate::lint::diagnostic::{Diagnostic, Severity};
 use crate::model::block::BlockKind;
-use crate::model::config::SpecConfig;
+use crate::model::config::{SpecConfig, DEFAULT_INTELLECT_PROVIDER};
 use crate::model::frontmatter::{Level, Progress, Stability, Status, TypeSpecificFields};
 use crate::model::id::{EntityType, QualifiedAnchor, SpecId};
 use crate::model::registry::SpecRegistry;
@@ -260,6 +260,14 @@ impl CandidateWorkspace {
                 .doc_mut(spec)?
                 .replace_frontmatter_scalar("pinned_at", value),
             PinClear { spec } => self.doc_mut(spec)?.remove_frontmatter_key("pinned_at"),
+            ImplementationCheckpointSet { spec, commit } => {
+                validate_git_oid(commit)?;
+                self.doc_mut(spec)?
+                    .replace_frontmatter_scalar("implemented", commit)
+            }
+            ImplementationCheckpointClear { spec } => {
+                self.doc_mut(spec)?.remove_frontmatter_key("implemented")
+            }
             RelatedAdd { spec, target } => {
                 self.ensure_exists(target)?;
                 self.add_list(spec, "related", target)
@@ -462,6 +470,7 @@ impl CandidateWorkspace {
                 include,
                 exclude,
             } => self.add_documentation_collection(id, title, root, include, exclude),
+            IntellectProviderSet { provider } => self.set_intellect_provider(provider),
         }
     }
 
@@ -788,6 +797,26 @@ impl CandidateWorkspace {
         }
         SpecConfig::from_toml(&content)?;
         self.extra_writes.insert(path, content.into_bytes());
+        Ok(())
+    }
+
+    fn set_intellect_provider(&mut self, provider: &str) -> Result<()> {
+        if provider != DEFAULT_INTELLECT_PROVIDER {
+            bail!(
+                "unsupported intellect provider '{provider}'; this release supports only '{DEFAULT_INTELLECT_PROVIDER}'"
+            );
+        }
+        let path = self.specs_dir.join("_config.toml");
+        let bytes = self
+            .extra_writes
+            .get(&path)
+            .cloned()
+            .unwrap_or(fs::read(&path)?);
+        let content = String::from_utf8(bytes)?;
+        let replacement = format!("intellect_provider = {}", serde_json::to_string(provider)?);
+        let updated = replace_root_toml_assignment(&content, "intellect_provider", &replacement);
+        SpecConfig::from_toml(&updated)?;
+        self.extra_writes.insert(path, updated.into_bytes());
         Ok(())
     }
 
@@ -1162,6 +1191,33 @@ fn replace_toml_assignment(content: &str, key: &str, replacement: &str) -> Strin
     output
 }
 
+fn replace_root_toml_assignment(content: &str, key: &str, replacement: &str) -> String {
+    if content.lines().any(|line| {
+        line.trim_start()
+            .strip_prefix(key)
+            .map(str::trim_start)
+            .is_some_and(|rest| rest.starts_with('='))
+    }) {
+        return replace_toml_assignment(content, key, replacement);
+    }
+    let insert_at = content
+        .find("\n[[")
+        .map(|offset| offset + 1)
+        .unwrap_or(content.len());
+    let mut output = String::with_capacity(content.len() + replacement.len() + 2);
+    output.push_str(&content[..insert_at]);
+    if !output.is_empty() && !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push_str(replacement);
+    output.push('\n');
+    if insert_at < content.len() {
+        output.push('\n');
+    }
+    output.push_str(&content[insert_at..]);
+    output
+}
+
 fn validate_date(value: &str) -> Result<()> {
     let valid = value.len() == 10
         && value.as_bytes()[4] == b'-'
@@ -1176,6 +1232,14 @@ fn validate_date(value: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_git_oid(value: &str) -> Result<()> {
+    let valid_length = value.len() == 40 || value.len() == 64;
+    if !valid_length || !value.chars().all(|character| character.is_ascii_hexdigit()) {
+        bail!("implementation checkpoint must be a full 40- or 64-character Git object ID");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1185,7 +1249,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         fs::write(
@@ -1408,7 +1472,7 @@ mod tests {
         fs::create_dir_all(temp.path().join("docs/generated")).unwrap();
         fs::write(
             specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.4.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         fs::write(
@@ -1452,5 +1516,86 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["docs/guide.md"]
         );
+    }
+
+    #[test]
+    fn implementation_checkpoint_set_and_clear_are_typed_and_validated() {
+        let temp = workspace();
+        let checkpoint = "0123456789abcdef0123456789abcdef01234567";
+        let set = ChangeRequest::new(vec![Operation::ImplementationCheckpointSet {
+            spec: "REQ:auth/session".into(),
+            commit: checkpoint.into(),
+        }]);
+        MutationEngine::new(temp.path())
+            .execute(&set, false)
+            .unwrap();
+        let registry = SpecRegistry::load(temp.path()).unwrap();
+        assert_eq!(
+            registry
+                .get_by_id("REQ:auth/session")
+                .unwrap()
+                .universal
+                .implemented
+                .as_deref(),
+            Some(checkpoint)
+        );
+
+        let clear = ChangeRequest::new(vec![Operation::ImplementationCheckpointClear {
+            spec: "REQ:auth/session".into(),
+        }]);
+        MutationEngine::new(temp.path())
+            .execute(&clear, false)
+            .unwrap();
+        assert!(SpecRegistry::load(temp.path())
+            .unwrap()
+            .get_by_id("REQ:auth/session")
+            .unwrap()
+            .universal
+            .implemented
+            .is_none());
+
+        let invalid = ChangeRequest::new(vec![Operation::ImplementationCheckpointSet {
+            spec: "REQ:auth/session".into(),
+            commit: "short".into(),
+        }]);
+        assert!(MutationEngine::new(temp.path())
+            .execute(&invalid, false)
+            .is_err());
+    }
+
+    #[test]
+    fn intellect_provider_mutation_stays_at_the_toml_root() {
+        let temp = workspace();
+        fs::write(temp.path().join("guide.md"), "# Guide\n").unwrap();
+        let documentation_root = temp.path().file_name().unwrap().to_string_lossy();
+        fs::write(
+            temp.path().join("_config.toml"),
+            format!(
+                "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = {documentation_root:?}\ninclude = [\"guide.md\"]\n"
+            ),
+        )
+        .unwrap();
+        let request = ChangeRequest::new(vec![Operation::IntellectProviderSet {
+            provider: "forge-intellect".into(),
+        }]);
+        MutationEngine::new(temp.path())
+            .execute(&request, false)
+            .unwrap();
+        let content = fs::read_to_string(temp.path().join("_config.toml")).unwrap();
+        assert!(
+            content.find("intellect_provider").unwrap()
+                < content.find("[[documentation]]").unwrap()
+        );
+        assert_eq!(
+            SpecConfig::load(temp.path()).unwrap().intellect_provider,
+            DEFAULT_INTELLECT_PROVIDER
+        );
+
+        let unsupported = ChangeRequest::new(vec![Operation::IntellectProviderSet {
+            provider: "arbitrary-command".into(),
+        }]);
+        assert!(MutationEngine::new(temp.path())
+            .execute(&unsupported, false)
+            .is_err());
     }
 }
