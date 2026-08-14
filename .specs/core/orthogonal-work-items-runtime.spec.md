@@ -4,7 +4,7 @@ type: task
 status: accepted
 summary: Implement and dogfood the v0.6 separation between durable specifications and transient implementation work.
 owners: [carlo]
-progress: in-progress
+progress: done
 addresses:
   - REQ:core/orthogonal-work-items#c-orthogonal
   - REQ:core/orthogonal-work-items#c-addresses
