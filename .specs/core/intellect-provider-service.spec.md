@@ -5,11 +5,11 @@ status: accepted
 summary: Add deterministic provider installation and worktree-scoped background lifecycle management.
 owners: [carlo]
 progress: done
-refines:
+addresses:
   - REQ:core/intellect-provider#c-lifecycle
   - REQ:core/intellect-provider#c-standalone
   - REQ:core/intellect-provider#c-service
-aspects: [provider-selection, standalone-operation, background-lifecycle]
+labels: [provider-selection, standalone-operation, background-lifecycle]
 assignee: carlo
 eta:
 blocked_by: []

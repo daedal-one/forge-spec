@@ -10,6 +10,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::model::config::DEFAULT_INTELLECT_PROVIDER;
+use crate::model::id::EntityType;
 use crate::model::reference::SpecReference;
 use crate::model::registry::SpecRegistry;
 
@@ -105,6 +106,7 @@ impl AdherenceSnapshot {
         let mut specifications = registry
             .documents
             .iter()
+            .filter(|document| document.universal.entity_type != EntityType::Task)
             .map(|document| SpecAdherence {
                 id: document.id_str(),
                 checkpoint: document.universal.implemented.clone(),
@@ -219,6 +221,7 @@ pub fn fetch(
     let mut specifications = registry
         .documents
         .iter()
+        .filter(|document| document.universal.entity_type != EntityType::Task)
         .map(|document| {
             let source_path = if document.source_path.is_absolute() {
                 document.source_path.clone()
@@ -291,6 +294,7 @@ pub fn fetch(
     let expected = registry
         .documents
         .iter()
+        .filter(|document| document.universal.entity_type != EntityType::Task)
         .map(|document| document.id_str())
         .collect::<BTreeSet<_>>();
     let actual = response

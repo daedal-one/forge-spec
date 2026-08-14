@@ -5,7 +5,7 @@ status: accepted
 summary: Expose indexed project documentation through Markdown-aware LSP navigation and a dedicated native explorer surface.
 owners: [carlo]
 progress: done
-refines: [REQ:core/documentation-integration#c-tooling]
+addresses: [REQ:core/documentation-integration#c-tooling]
 assignee:
 eta:
 blocked_by: []

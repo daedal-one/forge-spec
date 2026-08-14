@@ -5,6 +5,7 @@ use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
 use crate::intellect::{self, AdherenceSnapshot, AdherenceState, SpecAdherence};
+use crate::model::id::EntityType;
 use crate::model::registry::SpecRegistry;
 use crate::mutation::Operation;
 
@@ -75,9 +76,12 @@ pub fn provider_stop(specs_dir: &Path) -> Result<()> {
 pub fn status(specs_dir: &Path, id: Option<&str>, json: bool) -> Result<()> {
     let registry = SpecRegistry::load(specs_dir)?;
     if let Some(id) = id {
-        registry
+        let document = registry
             .get_by_id(id)
             .with_context(|| format!("unknown specification '{id}'"))?;
+        if document.universal.entity_type == EntityType::Task {
+            bail!("TASK work items are outside implementation adherence; inspect task progress or its completion checkpoint instead");
+        }
     }
     let snapshot = intellect::fetch_or_unknown(&registry)?;
     let states = selected_states(&snapshot, id);
@@ -120,9 +124,12 @@ pub fn status(specs_dir: &Path, id: Option<&str>, json: bool) -> Result<()> {
 
 pub fn verify(specs_dir: &Path, id: &str, at: Option<&str>) -> Result<()> {
     let registry = SpecRegistry::load(specs_dir)?;
-    registry
+    let document = registry
         .get_by_id(id)
         .with_context(|| format!("unknown specification '{id}'"))?;
+    if document.universal.entity_type == EntityType::Task {
+        bail!("TASK work items cannot be implementation-verified; verify the durable specification they address");
+    }
     let commit = resolve_commit(specs_dir, at.unwrap_or("HEAD"))?;
     let mut candidates = BTreeMap::new();
     candidates.insert(id.to_string(), commit.clone());

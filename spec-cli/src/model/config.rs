@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-pub const CURRENT_SPEC_BASELINE: &str = "forge-spec-v0.5.0";
+pub const CURRENT_SPEC_BASELINE: &str = "forge-spec-v0.6.0";
 pub const DEFAULT_INTELLECT_PROVIDER: &str = "forge-intellect";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,7 +87,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:forge-spec\"\n",
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:forge-spec\"\n",
         )
         .unwrap();
         let config = SpecConfig::load(temp.path()).unwrap();

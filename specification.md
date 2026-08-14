@@ -1,4 +1,4 @@
-# Specs Format v0.5 — Specification
+# Specs Format v0.6 — Specification
 
 A file format and toolchain for project specifications, designed to be:
 
@@ -19,7 +19,8 @@ forced into a closed grammar.
 In scope:
 
 - Capturing project intent, requirements, invariants, interface contracts,
-  architecture decisions, tasks, and glossary entries as first-class entities.
+  architecture decisions, scenarios, and glossary entries as durable
+  specification entities, with implementation work retained separately.
 - Cross-referencing entities within the spec graph, to source code, and to
   explicitly enrolled project documentation.
 - Tracking refinement (a high-level requirement decomposed into
@@ -38,7 +39,7 @@ Not in scope:
   etc.). Forge-spec indexes selected Markdown and links it to intent, but the
   Markdown remains independently authored documentation.
 - Symbolic / formal verification. The format is designed to be amenable to
-  it later; v0.5 produces evidence-qualified states, not proofs.
+  it later; v0.6 produces evidence-qualified states, not proofs.
 
 ---
 
@@ -139,7 +140,7 @@ body that may contain typed fenced divs.
 | `summary`    | conditional        | required if any other spec references this one                     |
 | `owners`     | yes                | non-empty list of identifiers                                      |
 | `pinned_at`  | no                 | git SHA used to resolve `src:` references                          |
-| `implemented`| no                 | full Git object ID at which complete adherence was last verified   |
+| `implemented`| no; never on TASK  | full Git object ID at which complete adherence was last verified   |
 | `related`    | no                 | list of related spec IDs (informational, no graph semantics)       |
 | `supersedes` | no                 | spec ID this one replaces                                          |
 | `superseded_by` | no              | reverse pointer; auto-managed by `spec lifecycle supersede`        |
@@ -154,12 +155,12 @@ The format baseline and singleton project root are declared once for the entire
 spec tree in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.5.0"
+baseline = "forge-spec-v0.6.0"
 project = "PROJECT:forge-spec"
 intellect_provider = "forge-intellect"
 ```
 
-`intellect_provider` defaults to `forge-intellect` when omitted. v0.5
+`intellect_provider` defaults to `forge-intellect` when omitted. v0.6
 recognizes that provider name only. This is a provider identity, not an
 arbitrary shell command; operational environments may control how the named
 binary is resolved without placing executable command lines in project data.
@@ -240,7 +241,7 @@ Registered prefixes for full document IDs:
 | `GLO`   | glossary                        | term definitions                                       |
 | `TOPIC` | topic                           | informal grouping for navigation                       |
 | `SCN`   | scenario                        | example walkthrough                                    |
-| `TASK`  | task                            | traceable implementation work                          |
+| `TASK`  | task                            | transient, traceable implementation work               |
 
 Plus two virtual prefixes used only inside reference URLs:
 
@@ -309,12 +310,20 @@ No fields beyond universal. Body contains prose describing the topic.
 | field               | description                                                   |
 |---------------------|---------------------------------------------------------------|
 | `progress`          | `pending`, `in-progress`, `done`, `blocked`, `deferred`, or `wontdo` |
-| `refines`           | list of `REQ:.../#clause` references                          |
-| `aspects`           | strings; required when `refines` has more than one parent     |
+| `addresses`         | durable specification IDs or exact clause anchors this work concerns |
+| `labels`            | free work-classification strings                              |
 | `assignee`          | optional responsible identifier                               |
 | `eta`               | optional planned completion date                              |
 | `blocked_by`        | list of upstream `TASK:` IDs                                  |
-| `categorized_under` | list of `TOPIC:` IDs                                           |
+| `groups`            | optional `TOPIC:` IDs used only to group work                 |
+| `completion_checkpoint` | optional full Git object ID recording workflow completion evidence |
+
+TASK is a version-controlled work item, not a durable behavior specification.
+It never refines, categorizes, contains, covers, implements, or establishes
+adherence for the specifications it addresses. Creating, progressing,
+completing, or archiving a TASK therefore cannot change the specification
+graph. No supported mutation deletes the document; “transient” describes its
+semantics and default presentation, not physical erasure of history.
 
 ---
 
@@ -377,7 +386,7 @@ The linter:
 
 ## 6. Hierarchy and refinement
 
-Three semantic relations remain independent. Project containment is
+Three durable specification relations remain independent. Project containment is
 synthesized by the toolchain; the others are declared in frontmatter on the
 child:
 
@@ -387,6 +396,14 @@ child:
 | `refines`            | DAG    | child's content jointly contributes to parent's satisfaction           |
 | `categorized_under`  | tree   | navigational grouping only; no claim about content                     |
 | `applies_to`         | n-to-n | child concerns these components / interfaces                           |
+
+Work items add two orthogonal relations that are never folded into those
+graphs:
+
+| relation          | shape  | semantics                                                        |
+|-------------------|--------|------------------------------------------------------------------|
+| `addresses`       | n-to-n | TASK concerns durable intent; no refinement, coverage, or satisfaction claim |
+| `blocked_by`      | DAG    | TASK is waiting on upstream TASK work                            |
 
 Documentation links are intentionally not a fourth specification relation.
 An enrolled Markdown file can document a spec, and a spec can cite a document,
@@ -398,7 +415,7 @@ and as associated context on a spec.
 ### 6.1 Project containment
 
 The configured `PROJECT:` document is the sole root of the navigational
-hierarchy. A non-project document with no resolvable `refines` or
+hierarchy. A non-project, non-TASK document with no resolvable `refines` or
 `categorized_under` parent receives an implicit containment edge to PROJECT.
 Documents with explicit parents reach PROJECT transitively through those
 parents. No containment field is repeated in document frontmatter.
@@ -409,6 +426,9 @@ description. The refinement and categorization graphs therefore remain
 available independently. `spec inspect graph hierarchy` renders the synthesized project
 hierarchy; the `refinement` and `categorization` views render only their
 respective semantic relations.
+
+TASK documents are absent from all three views. `spec inspect graph work`
+renders their `addresses` and `blocked_by` relations separately.
 
 ### 6.2 Refinement
 
@@ -435,19 +455,20 @@ Rules enforced by the linter:
 
 ### 6.3 Categorization
 
-Soft. A document can declare `categorized_under: [TOPIC:auth, TOPIC:security]`.
+Soft. A requirement can declare
+`categorized_under: [TOPIC:auth, TOPIC:security]`.
 Topics themselves are documents (`TOPIC:` prefix). The categorization graph
 is independent of the refinement graph.
 
 ### 6.4 Composition (deferred)
 
-v0.5 does not have a first-class `COMP:` type. If a requirement describes a
+v0.6 does not have a first-class `COMP:` type. If a requirement describes a
 component, set `kind: component` on the requirement. Future v2 work may
 introduce `COMP:` and migrate `kind: component` requirements to it.
 
 `applies_to:` exists today as a free-form list of component identifiers
 (e.g., `[auth-service, gateway]`). It is not validated against any registry
-in v0.5.
+in v0.6.
 
 ---
 
@@ -512,6 +533,13 @@ against code at that commit. It is not a cached `current` flag and it is never
 advanced by migration, history indexing, or inference. The current adherence
 state is derived by the configured intellect provider for the exact selected
 HEAD and working-tree identity (§10.6).
+
+TASK never carries `implemented`. A migrated TASK checkpoint becomes
+`completion_checkpoint`, which records workflow evidence only. Historical
+`Spec-Ref: TASK:... (implements)` trailers remain auditable legacy events but
+are not implementation-adherence evidence for either the task or the durable
+specifications it addresses. New implementation trailers target durable
+specification IDs or anchors directly.
 
 Because recording the field itself changes a specification file, provider
 comparison ignores only the `implemented:` scalar when deciding whether the
@@ -636,7 +664,7 @@ config in `.specs/_lint.toml`.
 | `R015`      | error    | No two anchors share a (doc, anchor) pair                            |
 | `R016`      | warning  | Multi-entity file warning past threshold (configurable, default 10)  |
 | `R017`      | warning  | RFC 2119 keyword discipline (a `requirement` block with no MUST/SHOULD/MAY) |
-| `R018`      | warning  | TASK has neither a refinement parent nor an upstream blocker        |
+| `R018`      | warning  | TASK has neither an addressed durable entity nor an upstream blocker |
 | `R019`      | warning  | Deferred/wontdo TASK lacks a summary explaining why                 |
 | `R020`      | error    | Source path exists and remains inside the repository                 |
 | `R021`      | error    | Referenced source symbol exists                                      |
@@ -648,8 +676,9 @@ config in `.specs/_lint.toml`.
 | `R027`      | error    | `spec:doc:` path targets are enrolled                               |
 | `R028`      | error    | `spec:doc:` heading paths resolve uniquely                          |
 | `R029`      | error    | Ordinary relative Markdown links resolve within enrolled documentation |
-| `R030`      | error    | `implemented` is a full 40- or 64-character Git object ID            |
+| `R030`      | error    | `implemented` or TASK `completion_checkpoint` is a full Git object ID |
 | `R031`      | error    | Configured intellect provider is supported by the active baseline     |
+| `R032`      | error    | TASK addresses durable entities, groups under TOPIC, and blocks on TASK |
 | `R-redir`   | info     | Reference traverses a redirect                                       |
 
 `status: draft` downgrades `R002`–`R012` from error to warning. This is the
@@ -671,8 +700,8 @@ Subcommands:
 | `spec new <type> <slug>`            | scaffold a new spec from a per-type template                  |
 | `spec lint [--require-symbols]`     | validate specs, documentation, and source references           |
 | `spec render <id-or-query> [flags]` | produce render bundles                                        |
-| `spec inspect tree`                 | print the project-rooted specification tree                   |
-| `spec inspect graph [view]`         | emit hierarchy, refinement, or categorization DOT             |
+| `spec inspect tree [--include-tasks]` | print durable specs; optionally append work separately       |
+| `spec inspect graph [view]`         | emit hierarchy, refinement, categorization, or work DOT       |
 | `spec inspect relations <id>`       | report incoming and outgoing relationships                    |
 | `spec inspect coverage <id>`        | clause-by-clause refinement-coverage report                   |
 | `spec inspect orphans`              | list specs without refinement relationships                   |
@@ -688,7 +717,7 @@ Subcommands:
 | `spec rename <id> <new-id>`         | rename a spec, incoming references, config, and redirect      |
 | `spec lifecycle ...`                | draft, accept, deprecate, or atomically supersede             |
 | `spec relation ...`                 | refine, categorize, or relate specifications                  |
-| `spec task ...`                     | list and update typed TASK state, ownership, and schedule     |
+| `spec task ...`                     | list/update work progress, addressing, labels, groups, blockers, ownership, schedule, and completion checkpoint |
 | `spec implementation provider start\|status\|stop` | manage the shared worktree provider              |
 | `spec implementation status [id]`  | pull current adherence state from the intellect provider       |
 | `spec implementation verify <id>`  | verify adherence and record the exact successful checkpoint    |
@@ -722,7 +751,7 @@ describes exactly one adjacent baseline transition and contains:
 
 Migration artifacts compose in format release order. Given a tree at
 `forge-spec-v0.1.0`, CLI v0.7 plans and applies
-`v0.1 -> v0.2 -> v0.3 -> v0.4 -> v0.5` in one
+`v0.1 -> v0.2 -> v0.3 -> v0.4 -> v0.5 -> v0.6` in one
 invocation rather than requiring a direct migration for every version pair.
 The CLI release does not create a format migration when stored document syntax
 is unchanged. Historical artifacts remain shipped with future CLIs.
@@ -741,7 +770,7 @@ cycles, ambiguous routes, and a `--from` value that conflicts with a declared
 project baseline.
 
 Missing `_config.toml` is inferred as v0.1 when legacy per-file version fields
-are present, as the current v0.5 shape when a valid PROJECT document exists,
+are present, as the current v0.6 shape when a valid PROJECT document exists,
 and as v0.2
 otherwise. The v0.2→v0.3 migration creates a deterministic draft project
 document, reuses existing owners, and records the source baseline before the
@@ -760,6 +789,13 @@ The v0.4→v0.5 migration adds
 `implemented` absent on every existing specification. It never invents code
 adherence. Maintainers establish checkpoints individually with
 `spec implementation verify` after provider-backed review.
+
+The v0.5→v0.6 migration separates implementation work from durable intent. On
+TASK documents it renames `refines` to `addresses`, `aspects` to `labels`,
+`categorized_under` to `groups`, and `implemented` to
+`completion_checkpoint`, preserving values, ordering, body, references, and
+lifecycle state. The transformation is idempotent and never manufactures,
+deletes, or upgrades evidence.
 
 ### 10.2 Change-impact analysis
 
@@ -780,11 +816,11 @@ omitted or is `working-tree`. Added and removed documents are semantic changes;
 edits whose parsed frontmatter, prose, blocks, and clauses are unchanged are
 reported as formatting-only and do not trigger a cascade.
 
-For each semantic input, the command traverses refining REQ and TASK documents
+For each semantic input, the command traverses refining REQ documents
 transitively. An anchored input follows only refinements of that semantic unit;
 a typed-block input also includes its nested clause anchors. Document-level
 inputs follow every refinement of that document. A PROJECT input affects every
-document because project intent is ambient context. Git mode traverses both the
+durable specification because project intent is ambient context. Git mode traverses both the
 base and head graphs and unions the results, preserving removed specifications
 and relationships for review. Every affected document includes its minimum
 depth and one deterministic, clause-qualified explanation path.
@@ -802,15 +838,16 @@ Implementation evidence has two explicit confidence classes:
 - source and test paths changed by historical commits carrying a matching
   typed `Spec-Ref:` trailer.
 
-The report also includes affected TASK progress and gaps where a leaf has no
-source or historical implementation evidence, the closure has no attached
-TASK, or no explicit or historical test evidence exists. These are review
-signals, not proof of the complete runtime dependency graph.
+The report separately includes TASK work items whose `addresses` targets the
+closure. Their progress and links are related-work context only: TASK source
+references and legacy implementation trailers are not promoted into the
+durable implementation-evidence closure. Gaps cover durable leaf evidence and
+test evidence, never the presence or completion of a task.
 
 The default human target is Markdown. `--target agent` emits the same facts in
 a deterministic XML document rooted at
-`<forge-spec-impact schema-version="1">`, including inputs, affected specs,
-paths, documentation, sources, history, tasks, gaps, notes, and handoff instructions. The
+`<forge-spec-impact schema-version="2">`, including inputs, affected specs,
+paths, documentation, sources, history, related work, gaps, notes, and handoff instructions. The
 command never creates TASK documents, changes task state, or edits code.
 
 ### 10.3 Language-server integration
@@ -855,7 +892,7 @@ and the desire to ship a single static binary.
 
 ### 10.4 Typed workspace mutation
 
-CLI v0.7 implements the v0.5 document format. Every supported document writer
+CLI v0.7 implements the v0.6 document format. Every supported document writer
 and documentation-collection mutation uses one Rust transaction engine. The
 public batch envelope is:
 
@@ -879,6 +916,12 @@ The operation name selects a closed Serde-tagged Rust enum. Unknown names,
 extra fields, arbitrary property paths, type-incompatible targets, stale
 fingerprints, and document deletion are rejected. Human commands compile to
 the same enum.
+
+Requirement refinement and categorization operations reject TASK sources.
+Work-item authoring instead uses typed `task.address.*`, `task.label.*`,
+`task.group.*`, `task.blocker.*`, and `task.completion-checkpoint.*`
+operations. Address targets must resolve to durable specification entities;
+blockers must resolve to TASK and groups to TOPIC.
 
 The editable-document index records original bytes, BOM, line endings,
 frontmatter key spans, CommonMark heading paths, typed blocks, clause anchors,
@@ -911,8 +954,9 @@ inputs are `.spec.md`, `_config.toml`, `_redirects.toml`, and generic Markdown
 matched by the overlaid configuration's documentation collections; absolute
 paths and parent-directory traversal are rejected before projection.
 
-`forge-spec-state-v3` deterministically orders and serializes semantic
-configuration, specifications, typed blocks and clause anchors, redirects,
+`forge-spec-state-v4` deterministically orders and serializes semantic
+configuration, durable `specifications`, orthogonal `work_items`, typed blocks
+and clause anchors, redirects,
 explicit relationships, synthesized PROJECT containment, documentation
 collections, document bodies and headings, cross-surface documentation links,
 source selectors, and diagnostics. Paths in the schema are relative and use
@@ -922,8 +966,14 @@ with `valid: false` and sorted diagnostics rather than disappearing from the
 projection. Source selectors remain explicit and unverified: canonical output
 never depends on language-server availability.
 
-`forge-spec-delta-v3` compares two canonical states and reports added, removed,
-and changed specifications and documentation plus documentation-link,
+Work items retain progress, addressing, labels, groups, blockers, ownership,
+schedule, completion metadata, and body, but appear outside
+`specifications`. Their only normalized graph relationships are
+`TaskAddresses` and `TaskBlockedBy`; TASK source references are not projected
+as specification implementation evidence.
+
+`forge-spec-delta-v4` compares two canonical states and reports added, removed,
+and changed specifications, work items, and documentation plus documentation-link,
 redirect, relationship, source-reference, diagnostic, validity, and
 configuration changes. Projecting or diffing performs no workspace writes.
 Identical saved and overlaid bytes must produce identical canonical state
@@ -934,8 +984,8 @@ bytes.
 Forge-spec owns authored intent and the durable `implemented` checkpoint.
 Current adherence is derived observation: forge-spec asks an intellect
 provider to assess those authored inputs against one exact repository state,
-then presents the result without writing it back into lifecycle or TASK
-fields. Forge-intellect is the only provider identity defined by v0.5.
+then presents the result without writing it back into lifecycle or work-item
+fields. Forge-intellect is the only provider identity defined by v0.6.
 
 Adherence-aware commands discover or atomically start one lightweight
 `forge-intellect provider serve` process scoped to the Git worktree. Concurrent
@@ -960,7 +1010,7 @@ The protocol schema is `forge-spec-intellect/v1`. Each request contains:
 
 - the canonical workspace root, full HEAD object ID, and a deterministic
   identity for all tracked and untracked working-tree bytes;
-- every selected specification's ID, type, lifecycle state, relative path,
+- every selected durable specification's ID, type, lifecycle state, relative path,
   authored `implemented` checkpoint, and unique referenced source paths; and
 - an optional candidate checkpoint used only by
   `spec implementation verify`.
@@ -986,10 +1036,12 @@ The derived state vocabulary is:
 | `unresolved` | the checkpoint, spec, source, or selected history cannot be resolved |
 | `not-applicable` | the entity has no code-adherence predicate, such as a pure topic or glossary entry |
 
-Lifecycle, TASK progress, authored checkpoint, and derived adherence remain
-separate values. Render bundles and agent XML retain the full snapshot,
-including provider, workspace, completeness, reasons, and evidence. Human tree
-output derives exactly one compact effective state per row instead of printing
+Lifecycle, authored checkpoint, and derived adherence remain separate values
+for durable specifications. TASK progress and completion checkpoints are work
+metadata and never enter the adherence protocol. Render bundles and agent XML
+retain the full durable-specification snapshot, including provider, workspace,
+completeness, reasons, and evidence. Human tree output derives exactly one
+compact effective state per durable-specification row instead of printing
 those independent values as adjacent badges.
 
 The display FSA uses this precedence:
@@ -997,23 +1049,22 @@ The display FSA uses this precedence:
 | priority | condition | effective display state |
 |----------|-----------|-------------------------|
 | 1 | lifecycle is `draft`, `deprecated`, or `superseded` | that lifecycle state |
-| 2 | accepted TASK progress is not `done` | `pending`, `in-progress`, `blocked`, `deferred`, or `wontdo` |
-| 3 | accepted entity has applicable adherence | `unverified`, `current`, `stale`, `partial`, `violated`, `unknown`, or `unresolved` |
-| 4 | adherence is `not-applicable` | `accepted`, or `done` for a completed TASK |
-| 5 | a required provider result is absent | `unknown` |
+| 2 | accepted entity has applicable adherence | `unverified`, `current`, `stale`, `partial`, `violated`, `unknown`, or `unresolved` |
+| 3 | adherence is `not-applicable` | `accepted` |
+| 4 | a required provider result is absent | `unknown` |
 
 Thus an accepted requirement moves from `? unverified` to `✓ current` after
-verification and to `↻ stale` after relevant drift. An accepted TASK stays
-`○ pending`, `◐ in-progress`, or another authored workflow state until it is
-marked done; `done` enters the adherence gate rather than implying verified
-implementation. A completed unverified TASK is therefore `? unverified`, and
-only complete evidence makes it `✓ current`. Reopening it returns the display
-to the authored workflow state. Every state uses one bracket-free glyph plus a
-short color-coded name.
+verification and to `↻ stale` after relevant drift. Work-item views render a
+TASK's authored `progress` directly; `done` records workflow completion and
+does not imply implementation adherence for any addressed specification. Every
+state uses one bracket-free glyph plus a short color-coded name.
 
 `spec inspect tree`, `spec render`, `spec explore`, and
 `spec implementation status` pull one provider snapshot per invocation from
-the shared worktree server, starting it if necessary.
+the shared worktree server, starting it if necessary. The default tree and
+explorer hierarchy include durable specifications only; explicit task
+inclusion appends a separate work-item collection and does not add TASK nodes
+to the hierarchy.
 Provider absence, timeout, malformed output, incomplete evidence, or abnormal
 termination is rendered explicitly as `unknown` with a warning; it is never
 converted to `current`. `spec implementation verify` is stricter: it records
@@ -1032,16 +1083,17 @@ closed without one. Forge-intellect is installed independently as the global
 `forge-intellect` CLI from its locked `apps/cli` package; installing the
 provider does not require its optional CodeGraph sidecar or retained daemon.
 
-The v0.5 forge-intellect implementation does not treat a fresh candidate as
+The v0.6 forge-intellect implementation does not treat a fresh candidate as
 self-verifying merely because no time has elapsed since it. Unless the same
 checkpoint is already authored, the candidate commit must carry an exact
 `Spec-Ref: <id> (implements)` trailer before freshness and bounded source
 evidence can produce `current`. Richer semantic evidence may extend this
 provider contract later without weakening the conservative fallback.
 
+Implementation status, verification, and checkpoint commands reject TASK IDs.
 The public mutation vocabulary includes
 `implementation.checkpoint.set`, `implementation.checkpoint.clear`, and
-`intellect.provider.set`. The v0.5 provider name is fixed to
+`intellect.provider.set`. The v0.6 provider name is fixed to
 `forge-intellect`; an unsupported value fails lint and cannot be introduced by
 the typed command surface.
 
@@ -1100,7 +1152,7 @@ Symbolic enforcement point:
 
 ---
 
-## 12. Open issues for v0.5 → v1
+## 12. Open issues for v0.6 → v1
 
 - **Component first-class type (`COMP:`).** Deferred. Trigger condition for
   introducing it: more than ~5 requirements with `kind: component` and a
@@ -1112,11 +1164,11 @@ Symbolic enforcement point:
 
 - **Cross-repo references.** Useful for monorepo / multi-repo organizations.
   The `spec:` URL scheme is extensible (`spec:other-repo/REQ:foo`); resolution
-  needs a registry. Out of scope for v0.5.
+  needs a registry. Out of scope for v0.6.
 
 - **Symbolic clause-coverage proof.** The current coverage check is
   syntactic: every clause has at least one refining child. A semantic check
-  — children jointly imply parent — is not feasible in v0.5.
+  — children jointly imply parent — is not feasible in v0.6.
 
 - **Concurrent edits and merge.** No special handling. Standard git merge
   with line-level conflict resolution. Frontmatter is small and conflict-

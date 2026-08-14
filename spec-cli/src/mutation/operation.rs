@@ -156,6 +156,22 @@ pub enum Operation {
 
     #[serde(rename = "task.progress.set")]
     TaskProgressSet { spec: String, progress: String },
+    #[serde(rename = "task.address.add")]
+    TaskAddressAdd { spec: String, target: String },
+    #[serde(rename = "task.address.remove")]
+    TaskAddressRemove { spec: String, target: String },
+    #[serde(rename = "task.label.add")]
+    TaskLabelAdd { spec: String, label: String },
+    #[serde(rename = "task.label.remove")]
+    TaskLabelRemove { spec: String, label: String },
+    #[serde(rename = "task.group.add")]
+    TaskGroupAdd { spec: String, topic: String },
+    #[serde(rename = "task.group.remove")]
+    TaskGroupRemove { spec: String, topic: String },
+    #[serde(rename = "task.completion-checkpoint.set")]
+    TaskCompletionCheckpointSet { spec: String, commit: String },
+    #[serde(rename = "task.completion-checkpoint.clear")]
+    TaskCompletionCheckpointClear { spec: String },
     #[serde(rename = "task.blocker.add")]
     TaskBlockerAdd { spec: String, blocker: String },
     #[serde(rename = "task.blocker.remove")]
@@ -232,6 +248,14 @@ impl Operation {
             | Self::LifecycleDeprecate { spec }
             | Self::LifecycleSupersede { spec, .. }
             | Self::TaskProgressSet { spec, .. }
+            | Self::TaskAddressAdd { spec, .. }
+            | Self::TaskAddressRemove { spec, .. }
+            | Self::TaskLabelAdd { spec, .. }
+            | Self::TaskLabelRemove { spec, .. }
+            | Self::TaskGroupAdd { spec, .. }
+            | Self::TaskGroupRemove { spec, .. }
+            | Self::TaskCompletionCheckpointSet { spec, .. }
+            | Self::TaskCompletionCheckpointClear { spec }
             | Self::TaskBlockerAdd { spec, .. }
             | Self::TaskBlockerRemove { spec, .. }
             | Self::TaskAssigneeSet { spec, .. }
@@ -289,6 +313,14 @@ impl Operation {
             Self::LifecycleDeprecate { .. } => "lifecycle.deprecate",
             Self::LifecycleSupersede { .. } => "lifecycle.supersede",
             Self::TaskProgressSet { .. } => "task.progress.set",
+            Self::TaskAddressAdd { .. } => "task.address.add",
+            Self::TaskAddressRemove { .. } => "task.address.remove",
+            Self::TaskLabelAdd { .. } => "task.label.add",
+            Self::TaskLabelRemove { .. } => "task.label.remove",
+            Self::TaskGroupAdd { .. } => "task.group.add",
+            Self::TaskGroupRemove { .. } => "task.group.remove",
+            Self::TaskCompletionCheckpointSet { .. } => "task.completion-checkpoint.set",
+            Self::TaskCompletionCheckpointClear { .. } => "task.completion-checkpoint.clear",
             Self::TaskBlockerAdd { .. } => "task.blocker.add",
             Self::TaskBlockerRemove { .. } => "task.blocker.remove",
             Self::TaskAssigneeSet { .. } => "task.assignee.set",

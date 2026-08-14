@@ -171,14 +171,6 @@ pub struct CoverageEntry {
     pub clause_id: String,
     pub clause_text: String,
     pub refined_by: Vec<String>,
-    /// Tasks that refine this clause, with their progress states.
-    pub tasks: Vec<TaskCoverage>,
-}
-
-/// Coverage info for a single task refining a clause.
-pub struct TaskCoverage {
-    pub id: String,
-    pub progress: crate::model::frontmatter::Progress,
 }
 
 pub fn coverage(registry: &SpecRegistry, id: &str) -> Vec<CoverageEntry> {
@@ -186,10 +178,8 @@ pub fn coverage(registry: &SpecRegistry, id: &str) -> Vec<CoverageEntry> {
         return vec![];
     };
 
-    // Collect refining requirements and tasks pointing to this doc, keyed by anchor.
+    // Collect only durable refining requirements, keyed by anchor.
     let mut req_children: std::collections::BTreeMap<String, Vec<String>> =
-        std::collections::BTreeMap::new();
-    let mut task_children: std::collections::BTreeMap<String, Vec<TaskCoverage>> =
         std::collections::BTreeMap::new();
 
     for child_doc in &registry.documents {
@@ -208,24 +198,6 @@ pub fn coverage(registry: &SpecRegistry, id: &str) -> Vec<CoverageEntry> {
                     }
                 }
             }
-            TypeSpecificFields::Task {
-                refines, progress, ..
-            } => {
-                for refine_target in refines {
-                    if let Some(anchor_pos) = refine_target.find('#') {
-                        let doc_id = &refine_target[..anchor_pos];
-                        let anchor = &refine_target[anchor_pos + 1..];
-                        if doc_id == id {
-                            task_children.entry(anchor.to_string()).or_default().push(
-                                TaskCoverage {
-                                    id: child_doc.id_str(),
-                                    progress: *progress,
-                                },
-                            );
-                        }
-                    }
-                }
-            }
             _ => {}
         }
     }
@@ -237,10 +209,38 @@ pub fn coverage(registry: &SpecRegistry, id: &str) -> Vec<CoverageEntry> {
                 clause_id: clause.id.clone(),
                 clause_text: clause.text.clone(),
                 refined_by: req_children.remove(&clause.id).unwrap_or_default(),
-                tasks: task_children.remove(&clause.id).unwrap_or_default(),
             });
         }
     }
 
     entries
+}
+
+/// List work items that address one durable specification or exact anchor.
+pub fn addressed_by(registry: &SpecRegistry, target: &str) -> Vec<String> {
+    let target_document = target.split_once('#').map(|(id, _)| id).unwrap_or(target);
+    let exact_anchor = target.contains('#');
+    let mut tasks = registry
+        .documents
+        .iter()
+        .filter_map(|document| {
+            let TypeSpecificFields::Task { addresses, .. } = &document.type_fields else {
+                return None;
+            };
+            addresses
+                .iter()
+                .any(|address| {
+                    if exact_anchor {
+                        address == target
+                    } else {
+                        address.split_once('#').map(|(id, _)| id).unwrap_or(address)
+                            == target_document
+                    }
+                })
+                .then(|| document.id_str())
+        })
+        .collect::<Vec<_>>();
+    tasks.sort();
+    tasks.dedup();
+    tasks
 }

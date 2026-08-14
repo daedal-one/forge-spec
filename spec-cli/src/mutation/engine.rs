@@ -261,11 +261,21 @@ impl CandidateWorkspace {
                 .replace_frontmatter_scalar("pinned_at", value),
             PinClear { spec } => self.doc_mut(spec)?.remove_frontmatter_key("pinned_at"),
             ImplementationCheckpointSet { spec, commit } => {
+                if self.documents.get(spec).is_some_and(|document| {
+                    document.semantic.universal.entity_type == EntityType::Task
+                }) {
+                    bail!("TASK work items do not carry implementation-adherence checkpoints; use task completion metadata");
+                }
                 validate_git_oid(commit)?;
                 self.doc_mut(spec)?
                     .replace_frontmatter_scalar("implemented", commit)
             }
             ImplementationCheckpointClear { spec } => {
+                if self.documents.get(spec).is_some_and(|document| {
+                    document.semantic.universal.entity_type == EntityType::Task
+                }) {
+                    bail!("TASK work items do not carry implementation-adherence checkpoints");
+                }
                 self.doc_mut(spec)?.remove_frontmatter_key("implemented")
             }
             RelatedAdd { spec, target } => {
@@ -435,6 +445,43 @@ impl CandidateWorkspace {
             LifecycleSupersede { spec, replacement } => self.supersede(spec, replacement),
 
             TaskProgressSet { spec, progress } => self.set_task_progress(spec, progress),
+            TaskAddressAdd { spec, target } => {
+                self.ensure_type(spec, EntityType::Task)?;
+                self.ensure_address_target(target)?;
+                self.add_list(spec, "addresses", target)
+            }
+            TaskAddressRemove { spec, target } => {
+                self.ensure_type(spec, EntityType::Task)?;
+                self.remove_list(spec, "addresses", target)
+            }
+            TaskLabelAdd { spec, label } => {
+                self.ensure_type(spec, EntityType::Task)?;
+                self.add_list(spec, "labels", label)
+            }
+            TaskLabelRemove { spec, label } => {
+                self.ensure_type(spec, EntityType::Task)?;
+                self.remove_list(spec, "labels", label)
+            }
+            TaskGroupAdd { spec, topic } => {
+                self.ensure_type(spec, EntityType::Task)?;
+                self.ensure_type(topic, EntityType::Topic)?;
+                self.add_list(spec, "groups", topic)
+            }
+            TaskGroupRemove { spec, topic } => {
+                self.ensure_type(spec, EntityType::Task)?;
+                self.remove_list(spec, "groups", topic)
+            }
+            TaskCompletionCheckpointSet { spec, commit } => {
+                self.ensure_type(spec, EntityType::Task)?;
+                validate_git_oid(commit)?;
+                self.doc_mut(spec)?
+                    .replace_frontmatter_scalar("completion_checkpoint", commit)
+            }
+            TaskCompletionCheckpointClear { spec } => {
+                self.ensure_type(spec, EntityType::Task)?;
+                self.doc_mut(spec)?
+                    .remove_frontmatter_key("completion_checkpoint")
+            }
             TaskBlockerAdd { spec, blocker } => {
                 self.ensure_type(spec, EntityType::Task)?;
                 self.ensure_type(blocker, EntityType::Task)?;
@@ -508,11 +555,8 @@ impl CandidateWorkspace {
             .documents
             .get(id)
             .with_context(|| format!("no spec with id '{id}'"))?;
-        if !matches!(
-            document.semantic.universal.entity_type,
-            EntityType::Req | EntityType::Task
-        ) {
-            bail!("only REQ and TASK specifications may refine another specification");
+        if document.semantic.universal.entity_type != EntityType::Req {
+            bail!("only REQ specifications may refine another requirement");
         }
         Ok(())
     }
@@ -522,11 +566,8 @@ impl CandidateWorkspace {
             .documents
             .get(id)
             .with_context(|| format!("no spec with id '{id}'"))?;
-        if !matches!(
-            document.semantic.universal.entity_type,
-            EntityType::Req | EntityType::Task
-        ) {
-            bail!("only REQ and TASK specifications may be categorized");
+        if document.semantic.universal.entity_type != EntityType::Req {
+            bail!("only REQ specifications may be categorized");
         }
         Ok(())
     }
@@ -546,6 +587,31 @@ impl CandidateWorkspace {
                 .any(|candidate| candidate == &anchor)
             {
                 bail!("refinement target '{target}' does not resolve");
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_address_target(&self, target: &str) -> Result<()> {
+        let qualified: QualifiedAnchor = target
+            .parse()
+            .map_err(|error: String| anyhow::anyhow!(error))?;
+        let id = qualified.spec_id.to_string();
+        let document = self
+            .documents
+            .get(&id)
+            .with_context(|| format!("no spec with id '{id}'"))?;
+        if document.semantic.universal.entity_type == EntityType::Task {
+            bail!("TASK addresses must target durable specification entities, not work items");
+        }
+        if let Some(anchor) = qualified.anchor {
+            if !document
+                .semantic
+                .anchors()
+                .iter()
+                .any(|candidate| candidate == &anchor)
+            {
+                bail!("task address target '{target}' does not resolve");
             }
         }
         Ok(())
@@ -683,7 +749,9 @@ impl CandidateWorkspace {
         let keys = [
             "related",
             "refines",
+            "addresses",
             "categorized_under",
+            "groups",
             "enforcement",
             "applies_to",
             "consumed_by",
@@ -1058,16 +1126,21 @@ fn validate_workspace_contracts(registry: &SpecRegistry) -> Result<()> {
                 refines,
                 categorized_under,
                 ..
-            }
-            | TypeSpecificFields::Task {
-                refines,
-                categorized_under,
-                ..
             } => {
                 for target in refines {
                     validate_refinement_target(registry, target)?;
                 }
                 for topic in categorized_under {
+                    ensure_registry_type(registry, topic, Some(EntityType::Topic))?;
+                }
+            }
+            TypeSpecificFields::Task {
+                addresses, groups, ..
+            } => {
+                for target in addresses {
+                    validate_address_target(registry, target)?;
+                }
+                for topic in groups {
                     ensure_registry_type(registry, topic, Some(EntityType::Topic))?;
                 }
             }
@@ -1087,6 +1160,27 @@ fn validate_workspace_contracts(registry: &SpecRegistry) -> Result<()> {
                 bail!("supersession graph contains a cycle at '{current}'");
             }
             current = next;
+        }
+    }
+    Ok(())
+}
+
+fn validate_address_target(registry: &SpecRegistry, target: &str) -> Result<()> {
+    let qualified: QualifiedAnchor = target
+        .parse()
+        .map_err(|error: String| anyhow::anyhow!(error))?;
+    let id = qualified.spec_id.to_string();
+    let document = ensure_registry_type(registry, &id, None)?;
+    if document.universal.entity_type == EntityType::Task {
+        bail!("TASK addresses must target durable specification entities, not work items");
+    }
+    if let Some(anchor) = qualified.anchor {
+        if !document
+            .anchors()
+            .iter()
+            .any(|candidate| candidate == &anchor)
+        {
+            bail!("task address target '{target}' does not resolve");
         }
     }
     Ok(())
@@ -1249,7 +1343,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         fs::write(
@@ -1317,7 +1411,7 @@ mod tests {
     }
 
     #[test]
-    fn categorization_rejects_non_requirement_and_non_task_targets() {
+    fn categorization_rejects_non_requirement_sources() {
         let temp = workspace();
         fs::write(
             temp.path().join("topic.spec.md"),
@@ -1335,6 +1429,40 @@ mod tests {
             .execute(&request, false)
             .is_err());
         assert_eq!(fs::read(project).unwrap(), before);
+    }
+
+    #[test]
+    fn task_addressing_is_typed_and_task_refinement_is_rejected() {
+        let temp = workspace();
+        let task = temp.path().join("work.spec.md");
+        fs::write(
+            &task,
+            "---\nid: TASK:demo/work\ntype: task\nstatus: accepted\nsummary: Work.\nowners: [carlo]\nprogress: pending\naddresses: []\nlabels: []\ngroups: []\nblocked_by: []\n---\n\n# Work\n",
+        )
+        .unwrap();
+
+        let address = ChangeRequest::new(vec![Operation::TaskAddressAdd {
+            spec: "TASK:demo/work".into(),
+            target: "REQ:auth/session#c-lifetime".into(),
+        }]);
+        MutationEngine::new(temp.path())
+            .execute(&address, false)
+            .unwrap();
+        assert!(fs::read_to_string(&task)
+            .unwrap()
+            .contains("addresses: [REQ:auth/session#c-lifetime]"));
+
+        let before = fs::read(&task).unwrap();
+        let refine = ChangeRequest::new(vec![Operation::RelationRefine {
+            spec: "TASK:demo/work".into(),
+            target: "REQ:auth/session#c-lifetime".into(),
+        }]);
+        let error = MutationEngine::new(temp.path())
+            .execute(&refine, false)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("only REQ specifications may refine"));
+        assert_eq!(fs::read(task).unwrap(), before);
     }
 
     #[test]
@@ -1419,7 +1547,7 @@ mod tests {
         fs::create_dir_all(temp.path().join("work")).unwrap();
         fs::write(
             temp.path().join("work/session.spec.md"),
-            "---\nid: TASK:work/session\ntype: task\nstatus: accepted\nsummary: Implement session.\nowners: [carlo]\nprogress: pending\nrefines: [REQ:auth/session#c-lifetime]\nassignee:\neta:\nblocked_by: []\n---\n# Work\n\nSee [session](spec:REQ:auth/session#c-lifetime).\n",
+            "---\nid: TASK:work/session\ntype: task\nstatus: accepted\nsummary: Implement session.\nowners: [carlo]\nprogress: pending\naddresses: [REQ:auth/session#c-lifetime]\nlabels: []\ngroups: []\nassignee:\neta:\nblocked_by: []\n---\n# Work\n\nSee [session](spec:REQ:auth/session#c-lifetime).\n",
         )
         .unwrap();
         let request = ChangeRequest::new(vec![Operation::SpecRename {
@@ -1472,7 +1600,7 @@ mod tests {
         fs::create_dir_all(temp.path().join("docs/generated")).unwrap();
         fs::write(
             specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         fs::write(
@@ -1571,7 +1699,7 @@ mod tests {
         fs::write(
             temp.path().join("_config.toml"),
             format!(
-                "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = {documentation_root:?}\ninclude = [\"guide.md\"]\n"
+                "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = {documentation_root:?}\ninclude = [\"guide.md\"]\n"
             ),
         )
         .unwrap();

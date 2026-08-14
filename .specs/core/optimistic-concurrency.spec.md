@@ -5,7 +5,7 @@ status: accepted
 summary: Guard typed mutations with deterministic content fingerprints.
 owners: [carlo]
 progress: done
-refines: [REQ:core/typed-mutation#c-concurrency]
+addresses: [REQ:core/typed-mutation#c-concurrency]
 assignee: carlo
 eta:
 blocked_by: []

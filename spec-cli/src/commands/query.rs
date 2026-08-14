@@ -18,13 +18,26 @@ pub fn relations(specs_dir: &Path, id: &str) -> Result<()> {
     let categorized = match &document.type_fields {
         crate::model::frontmatter::TypeSpecificFields::Requirement {
             categorized_under, ..
-        }
-        | crate::model::frontmatter::TypeSpecificFields::Task {
-            categorized_under, ..
         } => categorized_under.as_slice(),
         _ => &[],
     };
     print_group("categorized under", categorized);
+    match &document.type_fields {
+        crate::model::frontmatter::TypeSpecificFields::Task {
+            addresses,
+            groups,
+            blocked_by,
+            ..
+        } => {
+            print_group("addresses", addresses);
+            print_group("work groups", groups);
+            print_group("blocked by", blocked_by);
+        }
+        _ => print_group(
+            "addressed by work items",
+            &graph::query::addressed_by(&registry, id),
+        ),
+    }
     print_group("related", &document.universal.related);
     if let Some(value) = &document.universal.supersedes {
         print_group("supersedes", std::slice::from_ref(value));
@@ -121,31 +134,10 @@ pub fn coverage(specs_dir: &Path, id: &str) -> Result<()> {
 
     println!("Coverage for {id}:");
     for entry in &entries {
-        let status = match (entry.refined_by.is_empty(), entry.tasks.is_empty()) {
-            (true, true) => "UNCOVERED".to_string(),
-            (false, true) => "covered".to_string(),
-            (_, false) => {
-                use crate::model::frontmatter::Progress as P;
-                // WontDo tasks are intentional non-work and excluded from the
-                // denominator — counting them as outstanding would suggest
-                // there's still something to do when the team has already
-                // decided otherwise.
-                let total = entry
-                    .tasks
-                    .iter()
-                    .filter(|t| !matches!(t.progress, P::WontDo))
-                    .count();
-                let done = entry
-                    .tasks
-                    .iter()
-                    .filter(|t| matches!(t.progress, P::Done))
-                    .count();
-                if total == 0 {
-                    "wontdo".to_string()
-                } else {
-                    format!("tasks {done}/{total}")
-                }
-            }
+        let status = if entry.refined_by.is_empty() {
+            "UNCOVERED"
+        } else {
+            "covered"
         };
         println!(
             "  #{} ({}) — {}",
@@ -153,9 +145,6 @@ pub fn coverage(specs_dir: &Path, id: &str) -> Result<()> {
         );
         for child in &entry.refined_by {
             println!("    refined by: {child}");
-        }
-        for task in &entry.tasks {
-            println!("    task [{}] {}", task.progress.as_str(), task.id);
         }
     }
 

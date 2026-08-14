@@ -1,4 +1,4 @@
-baseline = "forge-spec-v0.5.0"
+baseline = "forge-spec-v0.6.0"
 project = "PROJECT:forge-spec"
 
 intellect_provider = "forge-intellect"

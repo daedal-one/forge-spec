@@ -89,11 +89,13 @@ fn inspect(specs_dir: PathBuf, command: InspectCommands) -> Result<()> {
             namespace,
             r#type,
             no_color,
+            include_tasks,
         } => commands::tree::run(
             &specs_dir,
             namespace.as_deref(),
             r#type.as_deref(),
             no_color,
+            include_tasks,
         ),
         InspectCommands::Graph { view } => commands::graph::run(&specs_dir, view),
         InspectCommands::Relations { id } => commands::query::relations(&specs_dir, &id),
@@ -347,10 +349,20 @@ fn relation(specs_dir: PathBuf, command: RelationCommands) -> Result<()> {
 
 fn task(specs_dir: PathBuf, command: TaskCommands) -> Result<()> {
     match command {
-        TaskCommands::List { state, under, all } => {
-            commands::task::list(&specs_dir, state, under.as_deref(), all)
-        }
+        TaskCommands::List {
+            state,
+            addressing,
+            all,
+        } => commands::task::list(&specs_dir, state, addressing.as_deref(), all),
         TaskCommands::Start { id } => commands::task::start(&specs_dir, &id),
+        TaskCommands::Address { id, target } => commands::task::address(&specs_dir, &id, &target),
+        TaskCommands::Unaddress { id, target } => {
+            commands::task::unaddress(&specs_dir, &id, &target)
+        }
+        TaskCommands::Label { id, value } => commands::task::label(&specs_dir, &id, &value),
+        TaskCommands::Unlabel { id, value } => commands::task::unlabel(&specs_dir, &id, &value),
+        TaskCommands::Group { id, topic } => commands::task::group(&specs_dir, &id, &topic),
+        TaskCommands::Ungroup { id, topic } => commands::task::ungroup(&specs_dir, &id, &topic),
         TaskCommands::Done { id } => commands::task::done(&specs_dir, &id),
         TaskCommands::Block { id, on } => commands::task::block(&specs_dir, &id, &on),
         TaskCommands::Reset { id } => commands::task::reset(&specs_dir, &id),
@@ -360,6 +372,10 @@ fn task(specs_dir: PathBuf, command: TaskCommands) -> Result<()> {
         TaskCommands::Unassign { id } => commands::task::unassign(&specs_dir, &id),
         TaskCommands::Schedule { id, eta } => commands::task::schedule(&specs_dir, &id, &eta),
         TaskCommands::Unschedule { id } => commands::task::unschedule(&specs_dir, &id),
+        TaskCommands::Checkpoint { id, commit } => {
+            commands::task::checkpoint(&specs_dir, &id, &commit)
+        }
+        TaskCommands::ClearCheckpoint { id } => commands::task::clear_checkpoint(&specs_dir, &id),
     }
 }
 

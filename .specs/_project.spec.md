@@ -13,8 +13,9 @@ owners: [carlo]
 ## Purpose
 
 Give humans and coding agents one authoritative, repository-native account of
-why a project exists and how that intent is refined into requirements,
-decisions, interfaces, tasks, and implementation evidence.
+why a project exists and how that intent is refined into durable requirements,
+decisions, and interfaces, with implementation work tracked separately and
+linked back to that intent.
 
 ## Scope
 

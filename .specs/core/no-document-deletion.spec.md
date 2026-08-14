@@ -5,7 +5,7 @@ status: accepted
 summary: Keep document deletion outside every supported mutation surface.
 owners: [carlo]
 progress: done
-refines: [REQ:core/typed-mutation#c-no-delete]
+addresses: [REQ:core/typed-mutation#c-no-delete]
 assignee: carlo
 eta:
 blocked_by: []

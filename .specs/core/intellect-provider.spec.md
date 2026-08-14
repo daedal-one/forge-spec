@@ -18,12 +18,13 @@ related:
 # Intellect provider and code adherence
 
 :::{requirement id="adherence" level="MUST"}
-- {#c-attestation} Every specification MAY declare one full Git object ID in
+- {#c-attestation} Every durable specification MAY declare one full Git object ID in
   `implemented`, meaning that its complete normative content was last verified
   as implemented at that checkpoint. The field is authoritative attestation,
-  not derived current-state evidence.
+  not derived current-state evidence. TASK work items MUST NOT carry
+  implementation-adherence checkpoints.
 - {#c-config} Project configuration MUST select one named intellect provider,
-  defaulting to `forge-intellect`; v0.5 recognizes no other implementation.
+  defaulting to `forge-intellect`; v0.6 recognizes no other implementation.
 - {#c-protocol} Forge-spec MUST exchange a versioned, deterministic adherence
   request and response with the provider, keyed by specification ID and one
   exact workspace state.
@@ -36,13 +37,13 @@ related:
 - {#c-state} Derived adherence MUST distinguish `unverified`, `current`,
   `stale`, `partial`, `violated`, `unknown`, `unresolved`, and
   `not-applicable`, with provider identity, completeness, exact state identity,
-  and reasons retained separately from authored lifecycle and TASK progress.
+  and reasons retained separately from authored lifecycle. TASK work items are
+  outside the adherence protocol.
 - {#c-display} A human tree row MUST render exactly one compact effective state
-  as a symbol and name. A non-accepted lifecycle controls first; otherwise an
-  unfinished TASK's progress controls; otherwise applicable adherence replaces
-  `accepted` or `done`. `not-applicable` falls back to `accepted` or `done`, and
-  a missing provider result fails closed to `unknown`. The underlying lifecycle,
-  TASK progress, checkpoint, and adherence values remain independently available.
+  as a symbol and name. A non-accepted lifecycle controls first; otherwise
+  applicable adherence replaces `accepted`. `not-applicable` falls back to
+  `accepted`, and a missing provider result fails closed to `unknown`. Work-item
+  views MUST render TASK progress directly without requesting adherence.
 - {#c-surfaces} Tree, render, interactive exploration, and implementation
   status or verification commands MUST consume the same provider snapshot;
   lint, migration, structural inspection, and unrelated mutations MUST remain
@@ -58,4 +59,6 @@ related:
   metadata without reporting the service as healthy.
 - {#c-mutation} Setting or clearing an implementation checkpoint and changing
   the configured provider MUST use the shared typed mutation engine.
+- {#c-selection} Provider requests and implementation status, verification, and
+  checkpoint commands MUST exclude TASK work items.
 :::

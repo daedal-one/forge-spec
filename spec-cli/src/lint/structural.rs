@@ -67,7 +67,14 @@ pub fn check_universal_fields(doc: &SpecDocument) -> Vec<Diagnostic> {
 
 /// R030: implementation checkpoints are complete Git object IDs.
 pub fn check_implemented_checkpoint(doc: &SpecDocument) -> Vec<Diagnostic> {
-    let Some(checkpoint) = doc.universal.implemented.as_deref() else {
+    let (checkpoint, field) = match &doc.type_fields {
+        TypeSpecificFields::Task {
+            completion_checkpoint,
+            ..
+        } => (completion_checkpoint.as_deref(), "completion_checkpoint"),
+        _ => (doc.universal.implemented.as_deref(), "implemented"),
+    };
+    let Some(checkpoint) = checkpoint else {
         return Vec::new();
     };
     let valid_length = checkpoint.len() == 40 || checkpoint.len() == 64;
@@ -80,7 +87,7 @@ pub fn check_implemented_checkpoint(doc: &SpecDocument) -> Vec<Diagnostic> {
     } else {
         vec![Diagnostic::error(
             "R030",
-            "implemented must be a full 40- or 64-character Git object ID",
+            format!("{field} must be a full 40- or 64-character Git object ID"),
             doc.source_path.clone(),
         )]
     }
@@ -206,8 +213,7 @@ pub fn check_project_root(registry: &SpecRegistry) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for child in &registry.documents {
         let refines: &[String] = match &child.type_fields {
-            TypeSpecificFields::Requirement { refines, .. }
-            | TypeSpecificFields::Task { refines, .. } => refines,
+            TypeSpecificFields::Requirement { refines, .. } => refines,
             _ => continue,
         };
         if refines.iter().any(|target| {
@@ -264,18 +270,17 @@ pub fn check_type_specific_fields(doc: &SpecDocument) -> Vec<Diagnostic> {
         (
             EntityType::Task,
             TypeSpecificFields::Task {
-                refines,
+                addresses,
                 blocked_by,
                 progress,
                 ..
             },
         ) => {
-            // R018: a task that has no parent to refine and no upstream blockers
-            // is dangling — surface as a warning so authors can attach it.
-            if refines.is_empty() && blocked_by.is_empty() {
+            // R018: unattached work is valid but easy to lose track of.
+            if addresses.is_empty() && blocked_by.is_empty() {
                 diags.push(Diagnostic::warning(
                     "R018",
-                    "TASK has neither `refines:` nor `blocked_by:` — task will not appear in any coverage report",
+                    "TASK has neither `addresses:` nor `blocked_by:` — work item is not attached to durable intent or upstream work",
                     doc.source_path.clone(),
                 ));
             }
@@ -382,7 +387,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -399,7 +404,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         let registry = SpecRegistry::load(temp.path()).unwrap();
@@ -414,7 +419,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -453,7 +458,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\nintellect_provider = \"unknown\"\n",
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\nintellect_provider = \"unknown\"\n",
         )
         .unwrap();
         std::fs::write(

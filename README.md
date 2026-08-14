@@ -18,7 +18,7 @@ mechanically validated.
 
 ## What's here
 
-- `specification.md` — the full Specs Format v0.5 specification
+- `specification.md` — the full Specs Format v0.6 specification
 - `format-memo.md` — one-page cheat sheet
 - `AGENTS.md` — compact reference for AI coding agents
 - `example/` — a working `.specs/` tree demonstrating the format
@@ -84,7 +84,9 @@ spec impact REQ:auth/session-management#c-lifetime
 spec impact --base origin/main --head working-tree --target agent
 spec inspect graph hierarchy        # project-rooted hierarchy as DOT
 spec inspect graph refinement       # refinement DAG only
-spec inspect tree                   # printed tree of all specs
+spec inspect tree                   # durable specification hierarchy
+spec inspect tree --include-tasks   # append a separate WORK ITEMS section
+spec inspect graph work             # task addressing/blocking graph
 spec implementation status         # provider-derived code adherence
 spec implementation verify REQ:auth/session-expiry
 spec implementation provider status # shared background provider
@@ -114,8 +116,8 @@ spec impact --base origin/main
 spec impact --base origin/main --head HEAD --target agent
 ```
 
-The command follows clause-qualified refinement paths transitively, includes
-TASK progress, collects explicit `spec:src:` and documentation surfaces, and recovers
+The command follows clause-qualified requirement refinement paths transitively,
+reports addressing TASK work items separately, collects explicit `spec:src:` and documentation surfaces, and recovers
 implementation and test paths from `Spec-Ref:` history. Git comparisons union
 the base and head graphs so deleted specs and removed relationships are not
 silently lost. Formatting-only edits are reported without inventing a semantic
@@ -126,12 +128,14 @@ document follows explicit spec backlinks into the refinement closure, while
 remaining context rather than refinement or coverage evidence.
 
 Human output is a review report. `--target agent` emits the same evidence as a
-deterministic `<forge-spec-impact schema-version="1">` XML envelope. Both
-outputs identify missing task, implementation, and test evidence and state the
+deterministic `<forge-spec-impact schema-version="2">` XML envelope. Both
+outputs identify related work, missing implementation and test evidence, and state the
 boundary explicitly: source links and Git history are traceability evidence,
-not proof of every runtime code dependency. `spec impact` never creates tasks
-or changes task state; review the report, add missing TASK specs deliberately,
-then use `spec task start <task-id>` when work actually begins.
+not proof of every runtime code dependency. TASK source links are never promoted
+to implementation evidence for addressed specifications. `spec impact` never
+creates work items or changes work state; review the report, add missing TASK
+work items deliberately, connect them with `spec task address`, then use
+`spec task start <task-id>` when work actually begins.
 
 ## Shell completion
 
@@ -201,23 +205,24 @@ line with `spec:src:path/file.ts:42-78` or by language-server symbol with
 The spec tree declares its format once in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.5.0"
+baseline = "forge-spec-v0.6.0"
 project = "PROJECT:example"
 intellect_provider = "forge-intellect"
 ```
 
-The project document is ambient context: documents without an explicit
-refinement or categorization parent are attached to it implicitly. This does
+The project document is ambient context: durable specifications without an
+explicit refinement or categorization parent are attached to it implicitly. This does
 not turn project prose into a requirement or change the meaning of `refines`.
 Human and agent renders include the project description before the requested
-specification.
+specification. TASK work items remain outside this hierarchy and instead point
+to one or more durable targets through `addresses`.
 
 Per-file revisions are derived from Git (`rN`, or `rN+dirty` for working-tree
 changes), so spec files do not carry version bookkeeping.
 
 ## Track implementation adherence
 
-Every spec may carry an authored implementation checkpoint:
+Every durable specification may carry an authored implementation checkpoint:
 
 ```yaml
 implemented: 0123456789abcdef0123456789abcdef01234567
@@ -241,9 +246,10 @@ spec inspect tree
 spec render REQ:auth/session-expiry --target agent
 ```
 
-Lifecycle, TASK progress, and adherence stay separate, so tree output can show
-`[accepted] [current]` or `✓ done [accepted] [stale]`. v0.5 defaults to and
-supports only the `forge-intellect` provider, but forge-spec has no build,
+TASK work items are excluded from provider requests and implementation commands;
+their progress and optional `completion_checkpoint` are workflow metadata only.
+The default tree hides them, while `--include-tasks` appends a separate work-item
+section. v0.6 defaults to and supports only the `forge-intellect` provider, but forge-spec has no build,
 installation, or mandatory runtime dependency on it. Lint, migration,
 mutation, impact, inspection, LSP, and other non-adherence workflows run
 without the provider. Read-only adherence surfaces such as tree, render,
@@ -263,7 +269,7 @@ PID, timeout, and log beside the worktree's Git administrative data—not in
 tracked project bytes. `spec implementation provider start
 --idle-timeout-seconds N` overrides the idle lifetime for an explicit start.
 
-For a fresh checkpoint, the v0.5 forge-intellect provider also requires the
+For a fresh checkpoint, the v0.6 forge-intellect provider also requires the
 candidate commit to carry `Spec-Ref: <id> (implements)`. This prevents
 `verify` from circularly declaring an arbitrary current commit implemented
 only because nothing has changed since it.
@@ -320,7 +326,7 @@ format transformation and reference redirect succeeds.
 ## Typed changes in CLI v0.7
 
 The executable is `spec 0.7.0`; the stored document format is
-`forge-spec-v0.5.0`. Supported writers compile human commands and editor
+`forge-spec-v0.6.0`. Supported writers compile human commands and editor
 actions into the same closed Rust operation enum. A versioned batch can group
 changes across the workspace:
 
@@ -359,11 +365,12 @@ availability must be enforced rather than reported as a warning.
 Rust consumers can project a saved `.specs/` tree plus a multi-file in-memory
 overlay through `spec_cli::projection`. Overlay entries create, replace, or
 delete spec, configuration, redirect, and configured Markdown inputs without
-writing them to disk. The result is a deterministic `forge-spec-state-v3`
-schema containing normalized specifications, clauses, relationships,
-documentation, cross-surface links, source selectors, and diagnostics; invalid
-intermediate input remains visible as an invalid state. `SpecState::diff`
-produces a deterministic `forge-spec-delta-v3` semantic delta.
+writing them to disk. The result is a deterministic `forge-spec-state-v4`
+schema containing normalized durable specifications, a separate work-item
+collection, clauses, relationships, documentation, cross-surface links, source
+selectors, and diagnostics; invalid intermediate input remains visible as an
+invalid state. `SpecState::diff` produces a deterministic
+`forge-spec-delta-v4` semantic delta.
 
 The projection surface deliberately performs no language-server lookup and
 contains no ledger, session, or temporal-graph policy. Downstream systems may

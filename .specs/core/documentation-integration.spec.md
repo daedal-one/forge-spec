@@ -17,7 +17,7 @@ Projects already contain durable knowledge in README files, guides, runbooks, an
 
 :::{requirement id="documentation-integration" level="MUST"}
 - {#c-collections} Documentation discovery MUST be opt-in through explicitly named, repository-relative collections with include and exclude patterns; arbitrary Markdown MUST NOT be enrolled implicitly.
-- {#c-references} Forge-spec MUST address an enrolled document by repository-relative path and MAY address a durable hierarchical Markdown heading using percent-encoded segments, as defined by the public [reference model](spec:doc:specification.md#heading=Specs%20Format%20v0.5%20%E2%80%94%20Specification/5.%20References).
+- {#c-references} Forge-spec MUST address an enrolled document by repository-relative path and MAY address a durable hierarchical Markdown heading using percent-encoded segments, as defined by the public [reference model](spec:doc:specification.md#heading=Specs%20Format%20v0.6%20%E2%80%94%20Specification/5.%20References).
 - {#c-index} The workspace index MUST expose collection placement, title, summary, headings, outgoing links, and incoming backlinks for enrolled Markdown, including ordinary relative Markdown links.
 - {#c-boundary} Documentation relationships MUST remain informational evidence and MUST NOT imply refinement, categorization, requirement coverage, or specification authority.
 - {#c-tooling} CLI, canonical projection, impact analysis, human and agent rendering, the language server, and the native editor workbench MUST share one documentation model and resolver.

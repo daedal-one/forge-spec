@@ -10,7 +10,7 @@ fn workspace() -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
         temp.path().join("_config.toml"),
-        "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+        "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
     )
     .unwrap();
     std::fs::write(
@@ -25,7 +25,7 @@ fn workspace() -> tempfile::TempDir {
     .unwrap();
     std::fs::write(
         temp.path().join("work.spec.md"),
-        "---\nid: TASK:demo/work\ntype: task\nstatus: accepted\nsummary: Implement the rule.\nowners: [carlo]\nprogress: pending\nrefines: [REQ:demo/example#c-rule]\nblocked_by: []\n---\n\n# Work\n",
+        "---\nid: TASK:demo/work\ntype: task\nstatus: accepted\nsummary: Implement the rule.\nowners: [carlo]\nprogress: pending\naddresses: [REQ:demo/example#c-rule]\nlabels: []\ngroups: []\nblocked_by: []\n---\n\n# Work\n",
     )
     .unwrap();
     temp
@@ -38,7 +38,7 @@ fn git_workspace() -> (tempfile::TempDir, std::path::PathBuf) {
     std::fs::create_dir(&specs).unwrap();
     std::fs::write(
         specs.join("_config.toml"),
-        "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+        "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
     )
     .unwrap();
     std::fs::write(
@@ -130,6 +130,69 @@ fn exposes_only_the_v04_top_level_hierarchy() {
             .unwrap()
             .contains("unrecognized subcommand"));
     }
+}
+
+#[test]
+fn specification_tree_hides_tasks_unless_work_items_are_requested() {
+    let temp = workspace();
+    let run = |extra: &[&str]| {
+        Command::new(binary())
+            .args([
+                "--specs-dir",
+                temp.path().to_str().unwrap(),
+                "inspect",
+                "tree",
+            ])
+            .args(extra)
+            .env("FORGE_SPEC_INTELLECT_PROVIDER_BIN", MISSING_PROVIDER)
+            .output()
+            .unwrap()
+    };
+
+    let default = run(&["--no-color"]);
+    assert!(default.status.success());
+    let default = String::from_utf8(default.stdout).unwrap();
+    assert!(!default.contains("TASK"));
+    assert!(!default.contains("demo/work"));
+
+    let with_work = run(&["--no-color", "--include-tasks"]);
+    assert!(with_work.status.success());
+    let with_work = String::from_utf8(with_work.stdout).unwrap();
+    assert!(with_work.contains("WORK ITEMS"));
+    assert!(with_work.contains("TASK"));
+    assert!(with_work.contains("TASK:demo/work"));
+}
+
+#[test]
+fn implementation_adherence_excludes_work_items() {
+    let temp = workspace();
+    let command = |args: &[&str]| {
+        Command::new(binary())
+            .args([
+                "--specs-dir",
+                temp.path().to_str().unwrap(),
+                "implementation",
+            ])
+            .args(args)
+            .env("FORGE_SPEC_INTELLECT_PROVIDER_BIN", MISSING_PROVIDER)
+            .output()
+            .unwrap()
+    };
+
+    let task_status = command(&["status", "TASK:demo/work"]);
+    assert!(!task_status.status.success());
+    assert!(
+        String::from_utf8_lossy(&task_status.stderr).contains("outside implementation adherence")
+    );
+
+    let all = command(&["status", "--json"]);
+    assert!(all.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&all.stdout).unwrap();
+    assert!(json["specifications"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|state| state["id"] != "TASK:demo/work"));
 }
 
 #[test]
@@ -331,7 +394,7 @@ fn documentation_commands_and_render_share_heading_resolution() {
     std::fs::create_dir_all(&docs).unwrap();
     std::fs::write(
         specs.join("_config.toml"),
-        "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+        "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
     )
     .unwrap();
     std::fs::write(

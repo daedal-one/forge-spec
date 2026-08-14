@@ -5,7 +5,7 @@ status: accepted
 summary: Add an editable document index for byte-preserving semantic rewrites.
 owners: [carlo]
 progress: done
-refines: [REQ:core/typed-mutation#c-lossless]
+addresses: [REQ:core/typed-mutation#c-lossless]
 assignee: carlo
 eta:
 blocked_by: []

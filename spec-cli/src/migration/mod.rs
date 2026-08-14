@@ -13,6 +13,7 @@ pub const LEGACY_SPEC_BASELINE: &str = "forge-spec-v0.1.0";
 pub const V0_2_SPEC_BASELINE: &str = "forge-spec-v0.2.0";
 pub const V0_3_SPEC_BASELINE: &str = "forge-spec-v0.3.0";
 pub const V0_4_SPEC_BASELINE: &str = "forge-spec-v0.4.0";
+pub const V0_5_SPEC_BASELINE: &str = "forge-spec-v0.5.0";
 
 type ApplyMigration = fn(&Path) -> Result<MigrationStepReport>;
 type VerifyMigration = fn(&Path) -> Result<()>;
@@ -43,6 +44,11 @@ const MIGRATIONS: &[MigrationDefinition] = &[
         guide: include_str!("../../migrations/forge-spec-v0.4.0-to-v0.5.0.yaml"),
         apply: apply_v0_4_to_v0_5,
         verify: verify_v0_4_to_v0_5,
+    },
+    MigrationDefinition {
+        guide: include_str!("../../migrations/forge-spec-v0.5.0-to-v0.6.0.yaml"),
+        apply: apply_v0_5_to_v0_6,
+        verify: verify_v0_5_to_v0_6,
     },
 ];
 
@@ -627,6 +633,100 @@ fn verify_v0_4_to_v0_5(specs_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+fn apply_v0_5_to_v0_6(specs_dir: &Path) -> Result<MigrationStepReport> {
+    let mut report = MigrationStepReport::default();
+    let mut writes = Vec::new();
+    for path in spec_paths(specs_dir)? {
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let migrated = migrate_task_frontmatter(&content)
+            .with_context(|| format!("migrating work item {}", path.display()))?;
+        if migrated != content {
+            writes.push((path, migrated.into_bytes()));
+            report.documents_changed += 1;
+        }
+    }
+    crate::mutation::atomic_write_files(&writes)?;
+    Ok(report)
+}
+
+fn verify_v0_5_to_v0_6(specs_dir: &Path) -> Result<()> {
+    for path in spec_paths(specs_dir)? {
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let (yaml, _, _) = split_frontmatter(&content)?;
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml)?;
+        let Some(mapping) = value.as_mapping() else {
+            continue;
+        };
+        if yaml_string(mapping, "type").is_some_and(|value| value == "task") {
+            for legacy in ["refines", "aspects", "categorized_under", "implemented"] {
+                if mapping.contains_key(serde_yaml::Value::String(legacy.into())) {
+                    bail!("legacy TASK field '{legacy}' remains in {}", path.display());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn migrate_task_frontmatter(content: &str) -> Result<String> {
+    let (yaml, _, _) = split_frontmatter(content)?;
+    let value: serde_yaml::Value = serde_yaml::from_str(yaml)?;
+    let Some(mapping) = value.as_mapping() else {
+        return Ok(content.to_string());
+    };
+    if yaml_string(mapping, "type").is_none_or(|value| value != "task") {
+        return Ok(content.to_string());
+    }
+
+    let mut output = content.to_string();
+    for (legacy, current) in [
+        ("refines", "addresses"),
+        ("aspects", "labels"),
+        ("categorized_under", "groups"),
+        ("implemented", "completion_checkpoint"),
+    ] {
+        let legacy_key = serde_yaml::Value::String(legacy.into());
+        let current_key = serde_yaml::Value::String(current.into());
+        if !mapping.contains_key(&legacy_key) {
+            continue;
+        }
+        if mapping.contains_key(&current_key) {
+            bail!("TASK declares both legacy '{legacy}' and v0.6 '{current}' fields");
+        }
+        output = rename_top_level_yaml_key(&output, legacy, current);
+    }
+    Ok(output)
+}
+
+fn yaml_string<'a>(mapping: &'a serde_yaml::Mapping, key: &str) -> Option<&'a str> {
+    mapping
+        .get(serde_yaml::Value::String(key.into()))
+        .and_then(serde_yaml::Value::as_str)
+}
+
+fn rename_top_level_yaml_key(content: &str, from: &str, to: &str) -> String {
+    let prefix = format!("{from}:");
+    let mut in_frontmatter = false;
+    let mut output = String::with_capacity(content.len() + to.len().saturating_sub(from.len()));
+    for line in content.split_inclusive('\n') {
+        let logical = line.trim_end_matches(['\r', '\n']);
+        if logical == "---" {
+            in_frontmatter = !in_frontmatter;
+            output.push_str(line);
+            continue;
+        }
+        if in_frontmatter && line.starts_with(&prefix) {
+            output.push_str(to);
+            output.push_str(&line[from.len()..]);
+        } else {
+            output.push_str(line);
+        }
+    }
+    output
+}
+
 fn remove_derived_frontmatter(content: &str) -> Result<String> {
     let close = content
         .strip_prefix("---")
@@ -854,5 +954,57 @@ mod tests {
         assert!(!std::fs::read_to_string(spec)
             .unwrap()
             .contains("implemented:"));
+    }
+
+    #[test]
+    fn v0_6_migration_separates_task_fields_losslessly_and_idempotently() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("_config.toml"),
+            format!("baseline = \"{V0_5_SPEC_BASELINE}\"\nproject = \"PROJECT:demo\"\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo.\nowners: [dev]\n---\n\n# Demo\n",
+        )
+        .unwrap();
+        let task = temp.path().join("work.spec.md");
+        let checkpoint = "0123456789abcdef0123456789abcdef01234567";
+        std::fs::write(
+            &task,
+            format!(
+                "---\nid: TASK:demo/work\ntype: task\nstatus: accepted\nsummary: Work.\nowners: [dev]\nimplemented: {checkpoint}\nprogress: done\nrefines: [PROJECT:demo]\naspects: [bootstrap]\ncategorized_under: []\nblocked_by: []\n---\n\n# Work\n\nrefines: remains ordinary body text\n"
+            ),
+        )
+        .unwrap();
+
+        let plan = MigrationPlan::build(V0_5_SPEC_BASELINE, CURRENT_SPEC_BASELINE).unwrap();
+        let first = plan.apply(temp.path()).unwrap();
+        let second = plan.apply(temp.path()).unwrap();
+        assert_eq!(first[0].documents_changed, 1);
+        assert_eq!(second[0].documents_changed, 0);
+
+        let content = std::fs::read_to_string(&task).unwrap();
+        assert!(content.contains("completion_checkpoint: 0123456789abcdef"));
+        assert!(content.contains("addresses: [PROJECT:demo]"));
+        assert!(content.contains("labels: [bootstrap]"));
+        assert!(content.contains("groups: []"));
+        assert!(content.contains("refines: remains ordinary body text"));
+        let document = crate::parse::parse_document(&task).unwrap();
+        let crate::model::frontmatter::TypeSpecificFields::Task {
+            addresses,
+            labels,
+            groups,
+            completion_checkpoint,
+            ..
+        } = document.type_fields
+        else {
+            panic!("expected work item")
+        };
+        assert_eq!(addresses, ["PROJECT:demo"]);
+        assert_eq!(labels, ["bootstrap"]);
+        assert!(groups.is_empty());
+        assert_eq!(completion_checkpoint.as_deref(), Some(checkpoint));
     }
 }

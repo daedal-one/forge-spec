@@ -5,14 +5,14 @@ status: accepted
 summary: Expose and verify the deterministic read-only specification projection API.
 owners: [carlo]
 progress: done
-refines:
+addresses:
   - REQ:core/canonical-projection#c-overlay
   - REQ:core/canonical-projection#c-canonical-state
   - REQ:core/canonical-projection#c-invalid-state
   - REQ:core/canonical-projection#c-exact-relations
   - REQ:core/canonical-projection#c-deterministic-diff
   - REQ:core/canonical-projection#c-read-only
-aspects: [overlay, schema, diagnostics, relations, diff, safety]
+labels: [overlay, schema, diagnostics, relations, diff, safety]
 assignee: carlo
 eta:
 blocked_by: []

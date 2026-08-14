@@ -17,19 +17,22 @@ related: [REQ:explorer/incremental-index, REQ:core/change-impact]
   specification, configuration, and redirect files. It MUST reject paths that
   escape the supplied root.
 - {#c-canonical-state} The result MUST use a versioned public schema and
-  deterministic ordering for configuration, specifications, typed blocks,
-  clause anchors, tasks, redirects, explicit relationships, source selectors,
-  and diagnostics. It MUST contain no absolute host paths.
+  deterministic ordering for configuration, durable specifications, typed
+  blocks, clause anchors, redirects, explicit relationships, source selectors,
+  diagnostics, and a separate work-item collection. It MUST contain no absolute
+  host paths.
 - {#c-invalid-state} Invalid specification, configuration, or redirect input
   MUST remain represented as sorted diagnostics with an invalid state;
   projection MUST NOT silently omit the input or depend on language-server
   availability.
 - {#c-exact-relations} Projection MUST retain exact clause-qualified refinement
-  targets, aspects, categorization, explicit references, source selectors, and
-  synthesized project containment as distinct relationship kinds.
+  targets, aspects, categorization, explicit references, source selectors,
+  synthesized project containment, task addressing, and task blocking as
+  distinct relationship kinds. Task addressing MUST NOT imply specification
+  refinement or source evidence.
 - {#c-deterministic-diff} The library MUST compute a deterministic semantic
   delta between two canonical states, covering added, removed, and changed
-  specifications and relationships.
+  durable specifications, work items, and relationships.
 - {#c-read-only} Projection MUST perform no workspace writes. Equivalent saved
   and overlaid bytes MUST produce byte-identical canonical state.
 :::

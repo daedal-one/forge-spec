@@ -136,6 +136,7 @@ pub struct ImpactTask {
     pub summary: Option<String>,
     pub depth: usize,
     pub snapshot: SnapshotSide,
+    pub addresses: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -143,6 +144,7 @@ pub struct ImpactSummary {
     pub changed_inputs: usize,
     pub affected_specs: usize,
     pub requirements: usize,
+    #[serde(rename = "related_work_items")]
     pub tasks: usize,
     pub explicit_source_references: usize,
     pub documentation_surfaces: usize,
@@ -165,6 +167,7 @@ pub struct ImpactReport {
     pub source_surfaces: Vec<SourceSurface>,
     pub documentation_surfaces: Vec<DocumentationSurface>,
     pub history: Vec<HistoryEvidence>,
+    #[serde(rename = "related_work")]
     pub tasks: Vec<ImpactTask>,
     pub gaps: Vec<String>,
     pub notes: Vec<String>,
@@ -584,8 +587,7 @@ fn modified_inputs(
 
 fn refinement_targets(document: &SpecDocument) -> BTreeSet<String> {
     match &document.type_fields {
-        TypeSpecificFields::Requirement { refines, .. }
-        | TypeSpecificFields::Task { refines, .. } => refines.iter().cloned().collect(),
+        TypeSpecificFields::Requirement { refines, .. } => refines.iter().cloned().collect(),
         _ => BTreeSet::new(),
     }
 }
@@ -658,7 +660,7 @@ fn finish_report(
     let affected_specs = finalize_specs(&pending, snapshots);
     let source_surfaces = collect_source_surfaces(&affected_specs, snapshots);
     let documentation_surfaces = collect_documentation_surfaces(&affected_specs, snapshots);
-    let tasks = collect_tasks(&affected_specs, snapshots);
+    let tasks = collect_tasks(&inputs, &affected_specs, snapshots);
     let mut notes = Vec::new();
     if inputs.is_empty() {
         notes.push("No specification changes were found in the selected Git range.".to_string());
@@ -666,6 +668,12 @@ fn finish_report(
     if inputs.iter().all(|item| !item.cascade) && !inputs.is_empty() {
         notes.push(
             "Only formatting-level changes were detected; no downstream cascade was inferred."
+                .to_string(),
+        );
+    }
+    if !inputs.is_empty() && affected_specs.is_empty() && !tasks.is_empty() {
+        notes.push(
+            "Only transient work items changed; the durable specification closure is unchanged."
                 .to_string(),
         );
     }
@@ -691,7 +699,6 @@ fn finish_report(
         &affected_specs,
         &source_surfaces,
         &history,
-        &tasks,
         snapshots,
     );
     let project = snapshots
@@ -762,6 +769,9 @@ fn cascade_input(
     let Some(root) = snapshot.document(&root_id) else {
         return;
     };
+    if root.universal.entity_type == EntityType::Task {
+        return;
+    }
     merge_pending(
         pending,
         &root_id,
@@ -776,6 +786,9 @@ fn cascade_input(
 
     if root.universal.entity_type == EntityType::Project {
         for document in &snapshot.registry.documents {
+            if document.universal.entity_type == EntityType::Task {
+                continue;
+            }
             let id = document.id_str();
             if id == root_id {
                 continue;
@@ -879,8 +892,7 @@ fn direct_refining_children(registry: &SpecRegistry, target: &str) -> Vec<(Strin
 
     for document in &registry.documents {
         let refines: &[String] = match &document.type_fields {
-            TypeSpecificFields::Requirement { refines, .. }
-            | TypeSpecificFields::Task { refines, .. } => refines,
+            TypeSpecificFields::Requirement { refines, .. } => refines,
             _ => continue,
         };
         for refinement in refines {
@@ -1083,21 +1095,69 @@ fn collect_documentation_surfaces(
     surfaces.into_values().collect()
 }
 
-fn collect_tasks(affected: &[ImpactedSpec], snapshots: &[&Snapshot]) -> Vec<ImpactTask> {
+fn collect_tasks(
+    inputs: &[ImpactInput],
+    affected: &[ImpactedSpec],
+    snapshots: &[&Snapshot],
+) -> Vec<ImpactTask> {
+    let selected_task_ids = inputs
+        .iter()
+        .map(|input| document_id(&input.reference))
+        .filter(|id| {
+            snapshots.iter().any(|snapshot| {
+                snapshot
+                    .document(id)
+                    .is_some_and(|document| document.universal.entity_type == EntityType::Task)
+            })
+        })
+        .collect::<BTreeSet<_>>();
+    let affected_depth = affected
+        .iter()
+        .map(|specification| (specification.id.as_str(), specification.depth))
+        .collect::<BTreeMap<_, _>>();
+    let mut task_ids = selected_task_ids
+        .iter()
+        .map(|id| (*id).to_string())
+        .collect::<BTreeSet<_>>();
+    for snapshot in snapshots {
+        for document in &snapshot.registry.documents {
+            let TypeSpecificFields::Task { addresses, .. } = &document.type_fields else {
+                continue;
+            };
+            if addresses.iter().any(|address| {
+                affected_depth.contains_key(document_id(address))
+                    || inputs.iter().any(|input| input.reference == *address)
+            }) {
+                task_ids.insert(document.id_str());
+            }
+        }
+    }
+
     let mut tasks = Vec::new();
-    for impacted in affected {
+    for id in task_ids {
         let selected = snapshots.iter().rev().find_map(|snapshot| {
-            let document = snapshot.document(&impacted.id)?;
-            let TypeSpecificFields::Task { progress, .. } = &document.type_fields else {
+            let document = snapshot.document(&id)?;
+            let TypeSpecificFields::Task {
+                progress,
+                addresses,
+                ..
+            } = &document.type_fields
+            else {
                 return None;
             };
-            Some((*snapshot, document, *progress))
+            Some((*snapshot, document, *progress, addresses.clone()))
         });
-        let Some((snapshot, document, progress)) = selected else {
+        let Some((snapshot, document, progress, addresses)) = selected else {
             continue;
         };
+        let depth = addresses
+            .iter()
+            .filter_map(|address| affected_depth.get(document_id(address)).copied())
+            .min()
+            .map(|depth| depth + 1)
+            .unwrap_or(0);
         tasks.push(ImpactTask {
-            id: impacted.id.clone(),
+            id,
             progress: progress.as_str().to_string(),
             summary: document
                 .universal
@@ -1105,8 +1165,9 @@ fn collect_tasks(affected: &[ImpactedSpec], snapshots: &[&Snapshot]) -> Vec<Impa
                 .as_deref()
                 .map(str::trim)
                 .map(str::to_string),
-            depth: impacted.depth,
+            depth,
             snapshot: snapshot.side,
+            addresses,
         });
     }
     tasks.sort_by(|left, right| {
@@ -1183,10 +1244,9 @@ fn coverage_gaps(
     affected: &[ImpactedSpec],
     sources: &[SourceSurface],
     history: &[HistoryEvidence],
-    tasks: &[ImpactTask],
     snapshots: &[&Snapshot],
 ) -> Vec<String> {
-    if inputs.is_empty() || inputs.iter().all(|item| !item.cascade) {
+    if inputs.is_empty() || affected.is_empty() || inputs.iter().all(|item| !item.cascade) {
         return Vec::new();
     }
     let mut gaps = BTreeSet::new();
@@ -1211,7 +1271,7 @@ fn coverage_gaps(
         }
     }
     for leaf in affected.iter().filter(|spec| !parents.contains(&spec.id)) {
-        if leaf.entity_type != "requirement" && leaf.entity_type != "task" {
+        if leaf.entity_type != "requirement" {
             continue;
         }
         let explicit = sources
@@ -1227,9 +1287,6 @@ fn coverage_gaps(
             ));
         }
     }
-    if tasks.is_empty() {
-        gaps.insert("No implementation TASK is attached to the impact closure".to_string());
-    }
     let has_test = sources.iter().any(|surface| surface.test_path)
         || history.iter().any(|event| {
             event.kind == "tests" || event.files.iter().any(|path| is_test_path(path))
@@ -1242,7 +1299,7 @@ fn coverage_gaps(
     for input in inputs.iter().filter(|item| item.reference.contains('#')) {
         if affected.len() == 1 {
             gaps.insert(format!(
-                "No refining specification or task targets {}",
+                "No refining specification targets {}",
                 input.reference
             ));
         }
@@ -1368,7 +1425,7 @@ pub fn render_human(report: &ImpactReport) -> String {
         output.push_str(&format!("Project: {project}\n"));
     }
     output.push_str(&format!(
-        "Summary: {} changed input(s), {} affected spec(s), {} documentation surface(s), {} explicit source reference(s), {} historical event(s), {} implementation file(s), {} test file(s), {} task(s), {} gap(s), max depth {}.\n",
+        "Summary: {} changed input(s), {} affected spec(s), {} documentation surface(s), {} explicit source reference(s), {} historical event(s), {} implementation file(s), {} test file(s), {} related work item(s), {} gap(s), max depth {}.\n",
         report.summary.changed_inputs,
         report.summary.affected_specs,
         report.summary.documentation_surfaces,
@@ -1477,17 +1534,18 @@ pub fn render_human(report: &ImpactReport) -> String {
         }
     }
 
-    output.push_str("\n## Tasks\n\n");
+    output.push_str("\n## Related work items\n\n");
     if report.tasks.is_empty() {
-        output.push_str("- None attached to the impact closure.\n");
+        output.push_str("- None addresses the impact closure.\n");
     } else {
         for task in &report.tasks {
             output.push_str(&format!(
-                "- `{}` — {} (depth {}, {})\n",
+                "- `{}` — {} (depth {}, {})\n  addresses: {}\n",
                 task.id,
                 task.progress,
                 task.depth,
                 task.snapshot.as_str(),
+                task.addresses.join(", "),
             ));
         }
     }
@@ -1509,7 +1567,7 @@ pub fn render_human(report: &ImpactReport) -> String {
     output.push_str("\n## Agent handoff\n\n");
     output.push_str("1. Review every affected path and evidence gap; impact is explicit or historically inferred, not a code-dependency proof.\n");
     output.push_str("2. Render affected specs with `spec render <id> --target agent --include-source` before editing.\n");
-    output.push_str("3. Create missing TASK specs deliberately, then use `spec task start <task-id>` when implementation begins.\n");
+    output.push_str("3. Review related work items separately; addressing a specification is traceability, not coverage or adherence evidence.\n");
     output.push_str(
         "4. Validate with `spec lint --require-symbols` and the affected project tests.\n",
     );
@@ -1520,7 +1578,7 @@ pub fn render_agent(report: &ImpactReport) -> String {
     let mut output = String::new();
     output.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     output.push_str(&format!(
-        "<forge-spec-impact schema-version=\"1\" mode=\"{}\"",
+        "<forge-spec-impact schema-version=\"2\" mode=\"{}\"",
         escape_xml(&report.mode)
     ));
     if let Some(project) = &report.project {
@@ -1534,7 +1592,7 @@ pub fn render_agent(report: &ImpactReport) -> String {
     }
     output.push_str(">\n");
     output.push_str(&format!(
-        "  <summary changed-inputs=\"{}\" affected-specs=\"{}\" requirements=\"{}\" tasks=\"{}\" documentation-surfaces=\"{}\" explicit-source-references=\"{}\" historical-events=\"{}\" implementation-files=\"{}\" test-files=\"{}\" max-depth=\"{}\" coverage-gaps=\"{}\" />\n",
+        "  <summary changed-inputs=\"{}\" affected-specs=\"{}\" requirements=\"{}\" related-work-items=\"{}\" documentation-surfaces=\"{}\" explicit-source-references=\"{}\" historical-events=\"{}\" implementation-files=\"{}\" test-files=\"{}\" max-depth=\"{}\" coverage-gaps=\"{}\" />\n",
         report.summary.changed_inputs,
         report.summary.affected_specs,
         report.summary.requirements,
@@ -1640,17 +1698,24 @@ pub fn render_agent(report: &ImpactReport) -> String {
         }
         output.push_str("    </event>\n");
     }
-    output.push_str("  </history>\n  <tasks>\n");
+    output.push_str("  </history>\n  <related-work>\n");
     for task in &report.tasks {
         output.push_str(&format!(
-            "    <task id=\"{}\" progress=\"{}\" depth=\"{}\" snapshot=\"{}\" />\n",
+            "    <work-item id=\"{}\" progress=\"{}\" depth=\"{}\" snapshot=\"{}\">\n",
             escape_xml(&task.id),
             escape_xml(&task.progress),
             task.depth,
             task.snapshot.as_str(),
         ));
+        for address in &task.addresses {
+            output.push_str(&format!(
+                "      <address target=\"{}\" />\n",
+                escape_xml(address)
+            ));
+        }
+        output.push_str("    </work-item>\n");
     }
-    output.push_str("  </tasks>\n  <coverage-gaps>\n");
+    output.push_str("  </related-work>\n  <coverage-gaps>\n");
     for gap in &report.gaps {
         output.push_str(&format!("    <gap>{}</gap>\n", escape_xml(gap)));
     }
@@ -1661,7 +1726,7 @@ pub fn render_agent(report: &ImpactReport) -> String {
     output.push_str("  </notes>\n  <agent-handoff>\n");
     output.push_str("    <instruction>Review every affected path and evidence gap; this report is not a code-dependency proof.</instruction>\n");
     output.push_str("    <instruction>Render affected specifications with spec render ID --target agent --include-source before editing.</instruction>\n");
-    output.push_str("    <instruction>Create missing TASK specifications deliberately and run spec task start TASK-ID when implementation begins.</instruction>\n");
+    output.push_str("    <instruction>Review related work separately; TASK addressing is traceability, not refinement, coverage, or adherence evidence.</instruction>\n");
     output.push_str("    <validation>spec lint --require-symbols</validation>\n");
     output.push_str("  </agent-handoff>\n</forge-spec-impact>\n");
     output
@@ -1705,9 +1770,9 @@ mod tests {
         )
     }
 
-    fn task(id: &str, refines: &str, source: &str) -> String {
+    fn task(id: &str, addresses: &str, source: &str) -> String {
         format!(
-            "---\nid: {id}\ntype: task\nstatus: accepted\nsummary: Implement it.\nowners: [dev]\nprogress: pending\nrefines: [{refines}]\n---\n\n# Task\n\n[implementation](spec:src:{source})\n"
+            "---\nid: {id}\ntype: task\nstatus: accepted\nsummary: Implement it.\nowners: [dev]\nprogress: pending\naddresses: [{addresses}]\nlabels: []\ngroups: []\n---\n\n# Task\n\n[implementation](spec:src:{source})\n"
         )
     }
 
@@ -1716,7 +1781,7 @@ mod tests {
         let specs = temp.path().join(".specs");
         write(
             &specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
         );
         write(&specs.join("_project.spec.md"), project());
         write(
@@ -1834,7 +1899,8 @@ mod tests {
         let temp = fixture();
         let report = analyze_subject(&temp.path().join(".specs"), "PROJECT:demo").unwrap();
 
-        assert_eq!(report.summary.affected_specs, 4);
+        assert_eq!(report.summary.affected_specs, 3);
+        assert_eq!(report.tasks.len(), 1);
         assert_eq!(report.affected_specs[0].id, "PROJECT:demo");
         assert!(report
             .affected_specs
@@ -1857,15 +1923,11 @@ mod tests {
             vec![
                 (&"REQ:demo/root".to_string(), 0),
                 (&"REQ:demo/child".to_string(), 1),
-                (&"TASK:demo/implement".to_string(), 2),
             ]
         );
         assert_eq!(report.tasks.len(), 1);
-        assert_eq!(report.source_surfaces.len(), 1);
-        assert_eq!(
-            report.source_surfaces[0].symbol.as_deref(),
-            Some("Feature/run")
-        );
+        assert_eq!(report.tasks[0].addresses, ["REQ:demo/child#detail"]);
+        assert!(report.source_surfaces.is_empty());
     }
 
     #[test]
@@ -1876,11 +1938,12 @@ mod tests {
 
         // Selecting a typed block includes its nested clauses, hence the child
         // refining c-one is intentionally affected.
-        assert_eq!(report.affected_specs.len(), 3);
+        assert_eq!(report.affected_specs.len(), 2);
+        assert_eq!(report.tasks.len(), 1);
 
         let report = analyze_subject(&temp.path().join(".specs"), "REQ:demo/child#detail").unwrap();
-        assert_eq!(report.affected_specs.len(), 2);
-        assert_eq!(report.affected_specs[1].id, "TASK:demo/implement");
+        assert_eq!(report.affected_specs.len(), 1);
+        assert_eq!(report.tasks[0].id, "TASK:demo/implement");
     }
 
     #[test]
@@ -1890,9 +1953,10 @@ mod tests {
         let xml = render_agent(&report);
 
         assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
-        assert!(xml.contains("<forge-spec-impact schema-version=\"1\" mode=\"subject\""));
-        assert!(xml.contains("<source reference=\"spec:src:src/feature.rs#symbol=Feature/run\""));
-        assert!(xml.contains("<task id=\"TASK:demo/implement\" progress=\"pending\""));
+        assert!(xml.contains("<forge-spec-impact schema-version=\"2\" mode=\"subject\""));
+        assert!(!xml.contains("spec:src:src/feature.rs#symbol=Feature/run"));
+        assert!(xml.contains("<work-item id=\"TASK:demo/implement\" progress=\"pending\""));
+        assert!(xml.contains("<address target=\"REQ:demo/child#detail\""));
     }
 
     #[test]
@@ -1912,8 +1976,8 @@ mod tests {
         assert!(report.inputs.iter().any(|input| {
             input.reference == "REQ:demo/root#c-one" && input.change == "parent-block-modified"
         }));
-        assert_eq!(report.summary.affected_specs, 3);
-        assert_eq!(report.affected_specs[2].id, "TASK:demo/implement");
+        assert_eq!(report.summary.affected_specs, 2);
+        assert_eq!(report.tasks[0].id, "TASK:demo/implement");
         assert_eq!(report.base.as_deref(), Some("HEAD"));
         assert_eq!(report.head.as_deref(), Some(WORKING_TREE));
     }
@@ -1932,13 +1996,10 @@ mod tests {
                 && input.change == "removed"
                 && input.snapshots == BTreeSet::from([SnapshotSide::Base])
         }));
-        assert_eq!(report.summary.affected_specs, 2);
+        assert_eq!(report.summary.affected_specs, 1);
         assert_eq!(report.affected_specs[0].id, "REQ:demo/child");
-        assert_eq!(report.affected_specs[1].id, "TASK:demo/implement");
-        assert_eq!(
-            report.affected_specs[1].snapshots,
-            BTreeSet::from([SnapshotSide::Base])
-        );
+        assert_eq!(report.tasks[0].id, "TASK:demo/implement");
+        assert_eq!(report.tasks[0].snapshot, SnapshotSide::Head);
     }
 
     #[test]
@@ -1947,7 +2008,7 @@ mod tests {
         let specs = temp.path().join(".specs");
         write(
             &specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
         );
         write(
             &temp.path().join("docs/guide.md"),
@@ -1971,9 +2032,9 @@ mod tests {
             vec![
                 (&"REQ:demo/root".to_string(), 1),
                 (&"REQ:demo/child".to_string(), 2),
-                (&"TASK:demo/implement".to_string(), 3),
             ]
         );
+        assert_eq!(report.tasks[0].id, "TASK:demo/implement");
         assert_eq!(report.documentation_surfaces.len(), 2);
         assert!(report
             .documentation_surfaces
@@ -1990,6 +2051,6 @@ mod tests {
         assert!(report.inputs.iter().any(|input| {
             input.reference == "spec:doc:docs/guide.md" && input.change == "modified"
         }));
-        assert_eq!(report.summary.affected_specs, 3);
+        assert_eq!(report.summary.affected_specs, 2);
     }
 }

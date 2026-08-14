@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use crate::model::frontmatter::TypeSpecificFields;
+use crate::model::id::EntityType;
 use crate::model::registry::SpecRegistry;
 
 /// A spec graph with node/edge data suitable for querying and DOT output.
@@ -12,26 +13,59 @@ pub struct SpecGraph {
 }
 
 impl SpecGraph {
+    /// Build the orthogonal work graph. Edges go from TASK to addressed intent
+    /// or upstream TASK and never participate in specification hierarchy.
+    pub fn work(registry: &SpecRegistry) -> Self {
+        let mut graph = DiGraph::new();
+        let mut node_map = BTreeMap::new();
+
+        for document in &registry.documents {
+            let id = document.id_str();
+            let index = graph.add_node(id.clone());
+            node_map.insert(id, index);
+        }
+        for document in &registry.documents {
+            let TypeSpecificFields::Task {
+                addresses,
+                blocked_by,
+                ..
+            } = &document.type_fields
+            else {
+                continue;
+            };
+            let source = node_map[&document.id_str()];
+            for target in addresses {
+                let target = document_id(target);
+                if let Some(&destination) = node_map.get(target) {
+                    graph.add_edge(source, destination, "addresses".to_string());
+                }
+            }
+            for target in blocked_by {
+                if let Some(&destination) = node_map.get(document_id(target)) {
+                    graph.add_edge(source, destination, "blocked by".to_string());
+                }
+            }
+        }
+        Self { graph, node_map }
+    }
+
     /// Build the refinement graph. Edges go from child → parent.
     pub fn refinement(registry: &SpecRegistry) -> Self {
         let mut graph = DiGraph::new();
         let mut node_map = BTreeMap::new();
 
         for doc in &registry.documents {
+            if doc.universal.entity_type == EntityType::Task {
+                continue;
+            }
             let id = doc.id_str();
             let idx = graph.add_node(id.clone());
             node_map.insert(id, idx);
         }
 
         for doc in &registry.documents {
-            // Both REQs and TASKs can refine other specs; the spec format
-            // treats TASK refinement the same way (a TASK refines a clause
-            // on its parent REQ).
             let (refines, aspects): (&[String], &[String]) = match &doc.type_fields {
                 TypeSpecificFields::Requirement {
-                    refines, aspects, ..
-                } => (refines, aspects),
-                TypeSpecificFields::Task {
                     refines, aspects, ..
                 } => (refines, aspects),
                 _ => continue,
@@ -67,19 +101,17 @@ impl SpecGraph {
         let mut node_map = BTreeMap::new();
 
         for doc in &registry.documents {
+            if doc.universal.entity_type == EntityType::Task {
+                continue;
+            }
             let id = doc.id_str();
             let idx = graph.add_node(id.clone());
             node_map.insert(id, idx);
         }
 
         for doc in &registry.documents {
-            // Same story for categorization — TASKs can also be categorized
-            // under a TOPIC and should appear as the topic's children.
             let categorized_under: &[String] = match &doc.type_fields {
                 TypeSpecificFields::Requirement {
-                    categorized_under, ..
-                } => categorized_under,
-                TypeSpecificFields::Task {
                     categorized_under, ..
                 } => categorized_under,
                 _ => continue,
@@ -112,6 +144,9 @@ impl SpecGraph {
         let mut node_map = BTreeMap::new();
 
         for doc in &registry.documents {
+            if doc.universal.entity_type == EntityType::Task {
+                continue;
+            }
             let id = doc.id_str();
             let idx = graph.add_node(id.clone());
             node_map.insert(id, idx);
@@ -119,17 +154,14 @@ impl SpecGraph {
 
         let mut placed = std::collections::BTreeSet::new();
         for doc in &registry.documents {
+            if doc.universal.entity_type == EntityType::Task {
+                continue;
+            }
             let child_id = doc.id_str();
             let child_node = node_map[&child_id];
             let (refines, aspects, categorized_under): (&[String], &[String], &[String]) =
                 match &doc.type_fields {
                     TypeSpecificFields::Requirement {
-                        refines,
-                        aspects,
-                        categorized_under,
-                        ..
-                    } => (refines, aspects, categorized_under),
-                    TypeSpecificFields::Task {
                         refines,
                         aspects,
                         categorized_under,
@@ -173,7 +205,10 @@ impl SpecGraph {
             let project_node = node_map[&project_id];
             for doc in &registry.documents {
                 let id = doc.id_str();
-                if id != project_id && !placed.contains(&id) {
+                if doc.universal.entity_type != EntityType::Task
+                    && id != project_id
+                    && !placed.contains(&id)
+                {
                     graph.add_edge(node_map[&id], project_node, "project".to_string());
                 }
             }
@@ -203,7 +238,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         write(
             &temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
         );
         write(
             &temp.path().join("_project.spec.md"),
@@ -229,6 +264,10 @@ mod tests {
             &temp.path().join("dangling.spec.md"),
             "---\nid: REQ:demo/dangling\ntype: requirement\nstatus: draft\nsummary: Dangling.\nowners: [dev]\nlevel: MUST\nrefines: [REQ:demo/root#missing]\n---\n\n# Dangling\n",
         );
+        write(
+            &temp.path().join("work.spec.md"),
+            "---\nid: TASK:demo/work\ntype: task\nstatus: accepted\nsummary: Work.\nowners: [dev]\nprogress: pending\naddresses: [REQ:demo/root]\nlabels: [implementation]\ngroups: [TOPIC:demo/core]\nblocked_by: []\n---\n\n# Work\n",
+        );
 
         let registry = SpecRegistry::load(temp.path()).unwrap();
         assert_eq!(
@@ -243,5 +282,14 @@ mod tests {
             crate::graph::query::hierarchy_children(&registry, "REQ:demo/root"),
             vec!["REQ:demo/child"]
         );
+        assert!(!super::SpecGraph::hierarchy(&registry)
+            .node_map
+            .contains_key("TASK:demo/work"));
+        assert!(!super::SpecGraph::refinement(&registry)
+            .node_map
+            .contains_key("TASK:demo/work"));
+        assert!(super::SpecGraph::work(&registry)
+            .node_map
+            .contains_key("TASK:demo/work"));
     }
 }

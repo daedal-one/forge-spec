@@ -5,7 +5,7 @@ status: accepted
 summary: 'Publish the additive v0.4 documentation vocabulary, migration guidance, CLI completions, and adoption documentation.'
 owners: [carlo]
 progress: done
-refines: [REQ:core/documentation-integration#c-migration]
+addresses: [REQ:core/documentation-integration#c-migration]
 assignee:
 eta:
 blocked_by: []

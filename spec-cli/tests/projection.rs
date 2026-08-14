@@ -6,7 +6,7 @@ use spec_cli::projection::{
     RelationshipKind, SPEC_DELTA_SCHEMA_VERSION, SPEC_STATE_SCHEMA_VERSION,
 };
 
-const CONFIG: &str = "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n";
+const CONFIG: &str = "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n";
 
 const PROJECT: &str = r#"---
 id: PROJECT:demo
@@ -85,6 +85,27 @@ owners: [dev]
 # Security
 "#;
 
+const WORK_ITEM: &str = r#"---
+id: TASK:demo/implement-child
+type: task
+status: accepted
+summary: Implement the child behavior.
+owners: [dev]
+progress: done
+addresses: [REQ:demo/child, REQ:demo/parent-a#c-a]
+labels: [projection, graph]
+assignee: dev
+eta:
+blocked_by: []
+groups: [TOPIC:demo/security]
+completion_checkpoint: 0123456789abcdef0123456789abcdef01234567
+---
+
+# Implement child
+
+[Working notes](spec:src:src/work.rs#symbol=Work/run)
+"#;
+
 const OLD: &str = r#"---
 id: GLO:demo/old
 type: glossary
@@ -117,6 +138,7 @@ fn final_tree(root: &Path) {
     write(&root.join("parents/b.spec.md"), PARENT_B);
     write(&root.join("child.spec.md"), CHILD);
     write(&root.join("topic.spec.md"), TOPIC);
+    write(&root.join("work.spec.md"), WORK_ITEM);
     write(
         &root.join("_redirects.toml"),
         "[[redirect]]\nfrom = \"REQ:demo/legacy\"\nto = \"REQ:demo/child\"\n",
@@ -136,6 +158,10 @@ fn final_overlay() -> Overlay {
         (
             ".specs/topic.spec.md".into(),
             OverlayEntry::Upsert(TOPIC.as_bytes().to_vec()),
+        ),
+        (
+            ".specs/work.spec.md".into(),
+            OverlayEntry::Upsert(WORK_ITEM.as_bytes().to_vec()),
         ),
         (
             ".specs/_redirects.toml".into(),
@@ -162,6 +188,15 @@ fn saved_and_multi_file_overlay_bytes_converge_without_writes() {
 
     assert_eq!(projected.schema_version, SPEC_STATE_SCHEMA_VERSION);
     assert_eq!(projected.config.intellect_provider, "forge-intellect");
+    assert!(projected
+        .specifications
+        .iter()
+        .all(|specification| specification.entity_type != "task"));
+    assert_eq!(projected.work_items.len(), 1);
+    assert_eq!(
+        projected.work_items[0].completion_checkpoint.as_deref(),
+        Some("0123456789abcdef0123456789abcdef01234567")
+    );
     assert_eq!(
         projected
             .specifications
@@ -213,6 +248,18 @@ fn retains_exact_relationship_kinds_aspect_pairing_and_source_selectors() {
             && edge.target == "REQ:demo/parent-a#c-a"
     }));
     assert!(state.relationships.iter().any(|edge| {
+        edge.kind == RelationshipKind::TaskAddresses
+            && edge.source == "TASK:demo/implement-child"
+            && edge.target == "REQ:demo/child"
+    }));
+    assert!(!state.relationships.iter().any(|edge| {
+        edge.source == "TASK:demo/implement-child"
+            && matches!(
+                edge.kind,
+                RelationshipKind::Refinement | RelationshipKind::ProjectContainment
+            )
+    }));
+    assert!(state.relationships.iter().any(|edge| {
         edge.kind == RelationshipKind::Categorization
             && edge.source == "REQ:demo/child"
             && edge.target == "TOPIC:demo/security"
@@ -246,6 +293,10 @@ fn retains_exact_relationship_kinds_aspect_pairing_and_source_selectors() {
     assert!(state.source_references.iter().all(|reference| {
         reference.source == "REQ:demo/child" && reference.id.starts_with("REQ:demo/child|")
     }));
+    assert!(state
+        .source_references
+        .iter()
+        .all(|reference| reference.source != "TASK:demo/implement-child"));
 }
 
 #[test]
@@ -318,6 +369,7 @@ fn semantic_delta_is_complete_and_deterministic() {
     let delta = before.diff(&after);
     assert_eq!(delta.schema_version, SPEC_DELTA_SCHEMA_VERSION);
     assert_eq!(delta.added_specifications.len(), 3);
+    assert_eq!(delta.added_work_items.len(), 1);
     assert_eq!(delta.removed_specifications.len(), 1);
     assert!(delta
         .added_relationships
@@ -336,7 +388,7 @@ fn projects_configured_documentation_links_headings_and_overlay_deltas() {
     let specs = temp.path().join(".specs");
     write(
         &specs.join("_config.toml"),
-        "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+        "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
     );
     write(
         &specs.join("_project.spec.md"),

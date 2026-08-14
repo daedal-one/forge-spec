@@ -5,7 +5,7 @@ status: accepted
 summary: Define the strict versioned operation catalogue for supported changes.
 owners: [carlo]
 progress: done
-refines: [REQ:core/typed-mutation#c-typed]
+addresses: [REQ:core/typed-mutation#c-typed]
 assignee: carlo
 eta:
 blocked_by: []

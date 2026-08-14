@@ -46,9 +46,9 @@ source editor at the addressed file, range, or symbol.
 When opened with a typed-block or clause anchor, the viewer MUST reveal and
 visually focus that exact semantic unit, MUST distinguish the focused anchor in
 the editor tab, and MUST retain the surrounding specification as its canonical
-document context. It MUST list every specification whose canonical `refines`
+document context. It MUST list every requirement whose canonical `refines`
 relationship targets that exact anchor under **Refined by**, and each entry MUST
-open the refining specification in its forge-spec native rendering. The list
+open the refining requirement in its forge-spec native rendering. The list
 MUST update with the workspace index.
 :::
 

@@ -5,7 +5,7 @@ status: accepted
 summary: Route CLI and editor authoring through the shared Rust mutation engine.
 owners: [carlo]
 progress: done
-refines: [REQ:core/typed-mutation#c-shared]
+addresses: [REQ:core/typed-mutation#c-shared]
 assignee: carlo
 eta:
 blocked_by: []

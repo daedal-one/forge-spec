@@ -5,7 +5,7 @@ status: accepted
 summary: Validate and persist workspace mutations as recoverable transactions.
 owners: [carlo]
 progress: done
-refines: [REQ:core/typed-mutation#c-atomic]
+addresses: [REQ:core/typed-mutation#c-atomic]
 assignee: carlo
 eta:
 blocked_by: []

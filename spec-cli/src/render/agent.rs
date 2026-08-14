@@ -76,10 +76,10 @@ fn render_spec_full(
     let u = &doc.universal;
 
     // Opening tag with attributes
-    let tag = if u.entity_type == EntityType::Project {
-        "project"
-    } else {
-        "spec"
+    let tag = match u.entity_type {
+        EntityType::Project => "project",
+        EntityType::Task => "work-item",
+        _ => "spec",
     };
     out.push_str(&format!(
         "  <{tag} id=\"{}\" type=\"{}\" status=\"{}\" revision=\"{}\" baseline=\"{}\"",
@@ -92,6 +92,20 @@ fn render_spec_full(
 
     if let Some(implemented) = &u.implemented {
         out.push_str(&format!(" implemented=\"{}\"", escape_xml(implemented)));
+    }
+    if let TypeSpecificFields::Task {
+        progress,
+        completion_checkpoint,
+        ..
+    } = &doc.type_fields
+    {
+        out.push_str(&format!(" progress=\"{}\"", progress.as_str()));
+        if let Some(checkpoint) = completion_checkpoint {
+            out.push_str(&format!(
+                " completion-checkpoint=\"{}\"",
+                escape_xml(checkpoint)
+            ));
+        }
     }
     if let Some(state) = adherence.and_then(|snapshot| snapshot.get(&id)) {
         out.push_str(&format!(
@@ -113,6 +127,20 @@ fn render_spec_full(
             "    <summary>{}</summary>\n",
             escape_xml(summary.trim())
         ));
+    }
+
+    if let TypeSpecificFields::Task {
+        addresses,
+        labels,
+        blocked_by,
+        groups,
+        ..
+    } = &doc.type_fields
+    {
+        render_values("addresses", "address", addresses, out);
+        render_values("labels", "label", labels, out);
+        render_values("blocked-by", "task", blocked_by, out);
+        render_values("groups", "topic", groups, out);
     }
 
     render_adherence(&id, adherence, out);
@@ -209,10 +237,10 @@ fn render_spec_summary(
 ) {
     let id = doc.id_str();
     let summary = doc.universal.summary.as_deref().unwrap_or("");
-    let tag = if doc.universal.entity_type == EntityType::Project {
-        "project"
-    } else {
-        "spec"
+    let tag = match doc.universal.entity_type {
+        EntityType::Project => "project",
+        EntityType::Task => "work-item",
+        _ => "spec",
     };
     let adherence_attributes = adherence
         .and_then(|snapshot| snapshot.get(&id))
@@ -280,6 +308,17 @@ fn revision_for(doc: &SpecDocument) -> String {
         .unwrap_or_else(|_| "unavailable".into())
 }
 
+fn render_values(container: &str, item: &str, values: &[String], out: &mut String) {
+    if values.is_empty() {
+        return;
+    }
+    out.push_str(&format!("    <{container}>\n"));
+    for value in values {
+        out.push_str(&format!("      <{item}>{}</{item}>\n", escape_xml(value)));
+    }
+    out.push_str(&format!("    </{container}>\n"));
+}
+
 fn escape_xml(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -297,7 +336,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(

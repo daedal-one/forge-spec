@@ -17,7 +17,7 @@ enum StateFilter {
 pub fn list(
     specs_dir: &Path,
     state: Option<TaskState>,
-    under: Option<&str>,
+    addressing: Option<&str>,
     all: bool,
 ) -> Result<()> {
     let registry = SpecRegistry::load(specs_dir)?;
@@ -33,18 +33,20 @@ pub fn list(
     let mut rows = Vec::<(Progress, String, String)>::new();
     for document in &registry.documents {
         let TypeSpecificFields::Task {
-            progress, refines, ..
+            progress,
+            addresses,
+            ..
         } = &document.type_fields
         else {
             continue;
         };
-        if under.is_some_and(|under| {
-            !refines.iter().any(|target| {
-                target == under
+        if addressing.is_some_and(|addressing| {
+            !addresses.iter().any(|target| {
+                target == addressing
                     || target
                         .split('#')
                         .next()
-                        .is_some_and(|parent| parent == under)
+                        .is_some_and(|parent| parent == addressing)
             })
         }) {
             continue;
@@ -91,6 +93,66 @@ pub fn list(
 
 pub fn start(specs_dir: &Path, id: &str) -> Result<()> {
     progress(specs_dir, id, Progress::InProgress)
+}
+
+pub fn address(specs_dir: &Path, id: &str, target: &str) -> Result<()> {
+    super::change::run_operations(
+        specs_dir,
+        vec![Operation::TaskAddressAdd {
+            spec: id.into(),
+            target: target.into(),
+        }],
+    )
+}
+
+pub fn unaddress(specs_dir: &Path, id: &str, target: &str) -> Result<()> {
+    super::change::run_operations(
+        specs_dir,
+        vec![Operation::TaskAddressRemove {
+            spec: id.into(),
+            target: target.into(),
+        }],
+    )
+}
+
+pub fn label(specs_dir: &Path, id: &str, value: &str) -> Result<()> {
+    super::change::run_operations(
+        specs_dir,
+        vec![Operation::TaskLabelAdd {
+            spec: id.into(),
+            label: value.into(),
+        }],
+    )
+}
+
+pub fn unlabel(specs_dir: &Path, id: &str, value: &str) -> Result<()> {
+    super::change::run_operations(
+        specs_dir,
+        vec![Operation::TaskLabelRemove {
+            spec: id.into(),
+            label: value.into(),
+        }],
+    )
+}
+
+pub fn group(specs_dir: &Path, id: &str, topic: &str) -> Result<()> {
+    super::change::run_operations(
+        specs_dir,
+        vec![Operation::TaskGroupAdd {
+            spec: id.into(),
+            topic: topic.into(),
+        }],
+    )
+}
+
+pub fn ungroup(specs_dir: &Path, id: &str, topic: &str) -> Result<()> {
+    super::change::run_operations(
+        specs_dir,
+        vec![Operation::TaskGroupRemove {
+            spec: id.into(),
+            topic: topic.into(),
+        }],
+    )
 }
 
 pub fn done(specs_dir: &Path, id: &str) -> Result<()> {
@@ -150,6 +212,23 @@ pub fn schedule(specs_dir: &Path, id: &str, eta: &str) -> Result<()> {
 
 pub fn unschedule(specs_dir: &Path, id: &str) -> Result<()> {
     super::change::run_operations(specs_dir, vec![Operation::TaskEtaClear { spec: id.into() }])
+}
+
+pub fn checkpoint(specs_dir: &Path, id: &str, commit: &str) -> Result<()> {
+    super::change::run_operations(
+        specs_dir,
+        vec![Operation::TaskCompletionCheckpointSet {
+            spec: id.into(),
+            commit: commit.into(),
+        }],
+    )
+}
+
+pub fn clear_checkpoint(specs_dir: &Path, id: &str) -> Result<()> {
+    super::change::run_operations(
+        specs_dir,
+        vec![Operation::TaskCompletionCheckpointClear { spec: id.into() }],
+    )
 }
 
 fn progress(specs_dir: &Path, id: &str, progress: Progress) -> Result<()> {

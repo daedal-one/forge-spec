@@ -5,7 +5,7 @@ status: accepted
 summary: Replace the flat v0.3 parser with the discoverable v0.4 command tree.
 owners: [carlo]
 progress: done
-refines: [REQ:core/typed-mutation#c-discoverable]
+addresses: [REQ:core/typed-mutation#c-discoverable]
 assignee: carlo
 eta:
 blocked_by: []

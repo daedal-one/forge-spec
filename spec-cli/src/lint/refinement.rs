@@ -24,11 +24,10 @@ pub fn check_refinement(registry: &SpecRegistry) -> Vec<Diagnostic> {
         node_map.insert(id, idx);
     }
 
-    // Add refinement edges (child -> parent). Both REQ and TASK can refine.
+    // Add durable requirement refinement edges (child -> parent).
     for doc in &registry.documents {
         let refines: &[String] = match &doc.type_fields {
             TypeSpecificFields::Requirement { refines, .. } => refines,
-            TypeSpecificFields::Task { refines, .. } => refines,
             _ => continue,
         };
         let child_id = doc.id_str();
@@ -101,7 +100,76 @@ pub fn check_refinement(registry: &SpecRegistry) -> Vec<Diagnostic> {
     // R012: aspects required for multi-parent refinement
     diags.extend(check_aspects(registry));
 
+    // R032: work-item links are typed, resolvable, and orthogonal.
+    diags.extend(check_work_items(registry));
+
     diags
+}
+
+fn check_work_items(registry: &SpecRegistry) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for document in &registry.documents {
+        let TypeSpecificFields::Task {
+            addresses,
+            groups,
+            blocked_by,
+            ..
+        } = &document.type_fields
+        else {
+            continue;
+        };
+        for address in addresses {
+            let (exists, _) = registry.reference_exists(address);
+            if !exists {
+                diagnostics.push(Diagnostic::error(
+                    "R032",
+                    format!("TASK address target '{address}' does not resolve"),
+                    document.source_path.clone(),
+                ));
+                continue;
+            }
+            let (resolved, _) = registry.resolve_redirect(address);
+            let target_id = resolved
+                .split_once('#')
+                .map(|(id, _)| id)
+                .unwrap_or(&resolved);
+            if registry
+                .get_by_id(target_id)
+                .is_some_and(|target| target.universal.entity_type == EntityType::Task)
+            {
+                diagnostics.push(Diagnostic::error(
+                    "R032",
+                    format!("TASK address target '{address}' is another work item"),
+                    document.source_path.clone(),
+                ));
+            }
+        }
+        for group in groups {
+            if registry
+                .get_by_id(group)
+                .is_none_or(|target| target.universal.entity_type != EntityType::Topic)
+            {
+                diagnostics.push(Diagnostic::error(
+                    "R032",
+                    format!("TASK group '{group}' must resolve to TOPIC"),
+                    document.source_path.clone(),
+                ));
+            }
+        }
+        for blocker in blocked_by {
+            if registry
+                .get_by_id(blocker)
+                .is_none_or(|target| target.universal.entity_type != EntityType::Task)
+            {
+                diagnostics.push(Diagnostic::error(
+                    "R032",
+                    format!("TASK blocker '{blocker}' must resolve to TASK"),
+                    document.source_path.clone(),
+                ));
+            }
+        }
+    }
+    diagnostics
 }
 
 /// R009: Level monotonicity — a MUST clause cannot be refined exclusively
@@ -199,12 +267,11 @@ fn find_refining_levels(registry: &SpecRegistry, clause_ref: &str) -> Vec<Level>
 fn check_coverage(registry: &SpecRegistry) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
 
-    // Collect all refines targets (REQ and TASK both refine).
+    // Collect durable requirement refinement targets.
     let mut refined_targets: BTreeSet<String> = BTreeSet::new();
     for doc in &registry.documents {
         let refines: &[String] = match &doc.type_fields {
             TypeSpecificFields::Requirement { refines, .. } => refines,
-            TypeSpecificFields::Task { refines, .. } => refines,
             _ => continue,
         };
         for r in refines {
@@ -247,9 +314,6 @@ fn check_aspects(registry: &SpecRegistry) -> Vec<Diagnostic> {
             TypeSpecificFields::Requirement {
                 refines, aspects, ..
             } => (refines, aspects),
-            TypeSpecificFields::Task {
-                refines, aspects, ..
-            } => (refines, aspects),
             _ => continue,
         };
         {
@@ -278,7 +342,7 @@ mod tests {
         let specs = temp.keep();
         std::fs::write(
             specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -294,7 +358,7 @@ mod tests {
         std::fs::write(
             specs.join("task.spec.md"),
             format!(
-                "---\nid: TASK:demo/implementation\ntype: task\nstatus: accepted\nsummary: Implement the service.\nowners: [dev]\nprogress: done\nrefines: {task_refines}\naspects: []\nassignee: dev\neta:\nblocked_by: []\n---\n\n# Implementation\n"
+                "---\nid: TASK:demo/implementation\ntype: task\nstatus: accepted\nsummary: Implement the service.\nowners: [dev]\nprogress: done\naddresses: {task_refines}\nlabels: []\ngroups: []\nassignee: dev\neta:\nblocked_by: []\n---\n\n# Implementation\n"
             ),
         )
         .unwrap();
@@ -310,12 +374,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_requirement_refinement_targets() {
+    fn task_addresses_may_target_non_requirement_intent() {
         let registry = registry_with_interface_and_task("[IFC:demo/service#c-call]");
         let diagnostics = check_refinement(&registry);
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "R008"
-                && diagnostic.message.contains("must resolve to a requirement")
-        }));
+        assert!(diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "R008" && diagnostic.code != "R032"));
     }
 }

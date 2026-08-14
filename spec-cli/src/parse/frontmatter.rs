@@ -68,6 +68,9 @@ pub fn parse_frontmatter(
     let owners = raw.owners.unwrap_or_default();
     let related = raw.related.unwrap_or_default();
 
+    let task_implemented = (entity_type == EntityType::Task)
+        .then(|| raw.implemented.clone())
+        .flatten();
     let universal = UniversalFrontmatter {
         id: spec_id,
         entity_type,
@@ -75,7 +78,9 @@ pub fn parse_frontmatter(
         summary: raw.summary,
         owners,
         pinned_at: raw.pinned_at,
-        implemented: raw.implemented,
+        implemented: (entity_type != EntityType::Task)
+            .then_some(raw.implemented)
+            .flatten(),
         related,
         supersedes: raw.supersedes,
         superseded_by: raw.superseded_by,
@@ -130,12 +135,13 @@ pub fn parse_frontmatter(
                 .unwrap_or(Progress::Pending);
             TypeSpecificFields::Task {
                 progress,
-                refines: raw.refines.unwrap_or_default(),
-                aspects: raw.aspects.unwrap_or_default(),
+                addresses: raw.addresses.or(raw.refines).unwrap_or_default(),
+                labels: raw.labels.or(raw.aspects).unwrap_or_default(),
                 assignee: raw.assignee,
                 eta: raw.eta,
                 blocked_by: raw.blocked_by.unwrap_or_default(),
-                categorized_under: raw.categorized_under.unwrap_or_default(),
+                groups: raw.groups.or(raw.categorized_under).unwrap_or_default(),
+                completion_checkpoint: raw.completion_checkpoint.or(task_implemented),
             }
         }
     };
@@ -193,5 +199,41 @@ owners: [carlo]
         assert_eq!(uni.id.to_string(), "PROJECT:forge-spec");
         assert!(warnings.is_empty());
         assert!(matches!(fields, TypeSpecificFields::Project));
+    }
+
+    #[test]
+    fn parses_v06_work_item_without_adherence_checkpoint() {
+        let yaml = r#"
+id: TASK:auth/implement-session
+type: task
+status: accepted
+summary: Implement sessions.
+owners: [carlo]
+implemented: 0123456789abcdef0123456789abcdef01234567
+progress: done
+addresses: [REQ:auth/session-expiry#c-lifetime]
+labels: [auth]
+groups: [TOPIC:auth/session]
+blocked_by: []
+"#;
+        let (universal, fields, _) = parse_frontmatter(yaml).unwrap();
+        assert!(universal.implemented.is_none());
+        let TypeSpecificFields::Task {
+            addresses,
+            labels,
+            groups,
+            completion_checkpoint,
+            ..
+        } = fields
+        else {
+            panic!("expected TASK")
+        };
+        assert_eq!(addresses, ["REQ:auth/session-expiry#c-lifetime"]);
+        assert_eq!(labels, ["auth"]);
+        assert_eq!(groups, ["TOPIC:auth/session"]);
+        assert_eq!(
+            completion_checkpoint.as_deref(),
+            Some("0123456789abcdef0123456789abcdef01234567")
+        );
     }
 }

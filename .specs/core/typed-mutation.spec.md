@@ -36,6 +36,10 @@ related:
   list style, and surrounding CommonMark prose.
 - {#c-no-delete} No supported mutation surface MUST expose an operation that
   deletes a specification document.
+- {#c-work-items} TASK mutations MUST expose progress, addressing, labels,
+  grouping, blocking, and completion checkpoints as work-item operations and
+  MUST reject refinement, categorization, or implementation-adherence
+  operations on TASK documents.
 - {#c-shared} The CLI, language server, and editor integrations MUST compile
   human actions into the same Rust operation enum and transaction engine.
 :::

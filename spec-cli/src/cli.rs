@@ -119,6 +119,9 @@ pub enum InspectCommands {
         r#type: Option<String>,
         #[arg(long)]
         no_color: bool,
+        /// Append transient work items in a separate, non-hierarchical section
+        #[arg(long)]
+        include_tasks: bool,
     },
     /// Emit one typed graph as DOT
     Graph {
@@ -467,12 +470,37 @@ pub enum TaskCommands {
         #[arg(long, value_enum)]
         state: Option<TaskState>,
         #[arg(long)]
-        under: Option<String>,
+        addressing: Option<String>,
         #[arg(long)]
         all: bool,
     },
     Start {
         id: String,
+    },
+    /// Attach work to durable intended behavior without refining or covering it
+    Address {
+        id: String,
+        target: String,
+    },
+    Unaddress {
+        id: String,
+        target: String,
+    },
+    Label {
+        id: String,
+        value: String,
+    },
+    Unlabel {
+        id: String,
+        value: String,
+    },
+    Group {
+        id: String,
+        topic: String,
+    },
+    Ungroup {
+        id: String,
+        topic: String,
     },
     Done {
         id: String,
@@ -503,6 +531,13 @@ pub enum TaskCommands {
         eta: String,
     },
     Unschedule {
+        id: String,
+    },
+    Checkpoint {
+        id: String,
+        commit: String,
+    },
+    ClearCheckpoint {
         id: String,
     },
 }
@@ -600,6 +635,7 @@ pub enum GraphView {
     Hierarchy,
     Refinement,
     Categorization,
+    Work,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

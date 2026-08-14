@@ -1,6 +1,6 @@
 # Specs Format — Hands-on Memo
 
-One-page reference for Specs Format v0.5. For the full spec, see `specification.md`.
+One-page reference for Specs Format v0.6. For the full spec, see `specification.md`.
 
 ## File layout
 
@@ -9,9 +9,9 @@ One-page reference for Specs Format v0.5. For the full spec, see `specification.
 .specs/_project.spec.md
 ```
 
-Every tree has one `PROJECT:<slug>` document. All other documents implicitly
+Every tree has one `PROJECT:<slug>` document. Durable specifications implicitly
 descend from it when they do not have an explicit refinement or categorization
-parent.
+parent. TASK work items are separate and never enter the specification hierarchy.
 
 ## Minimal frontmatter
 
@@ -31,7 +31,7 @@ aspects: [duration]     # required if refines has multiple parents
 Declare the format once in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.5.0"
+baseline = "forge-spec-v0.6.0"
 project = "PROJECT:example"
 intellect_provider = "forge-intellect"
 ```
@@ -109,7 +109,7 @@ refines:
 | `GLO`   | glossary                         |
 | `TOPIC` | informal grouping                |
 | `SCN`   | scenario                         |
-| `TASK`  | implementation task              |
+| `TASK`  | transient implementation work item |
 | `src:`  | (virtual) source-tree reference  |
 | `doc:`  | (virtual) enrolled Markdown reference |
 
@@ -134,12 +134,15 @@ spec render REQ:auth/foo --target=agent --include-docs
 spec lsp                                   # forge-spec editor language server
 spec inspect graph hierarchy               # DOT of project hierarchy
 spec inspect graph refinement              # DOT of refinement DAG only
+spec inspect graph work                    # DOT of work-item links
+spec inspect tree --include-tasks          # append WORK ITEMS separately
 spec history rebuild                       # rebuild .specs/_history/
 spec migrate plan --target agent           # composed migration context
 spec migrate apply                         # migrate format + apply redirects
 spec inspect orphans                       # leaf specs with no children
 spec change batch --from changes.json --dry-run
 spec task start TASK:auth/foo              # begin implementation work
+spec task address TASK:auth/foo REQ:auth/foo#c-clause
 spec implementation status                 # exact-workspace adherence snapshot
 spec implementation verify REQ:auth/foo    # verify + record full Git checkpoint
 spec implementation provider start         # ensure one background provider
@@ -175,6 +178,7 @@ referencing an `ADR:` in the same commit.
 | `R029`   | ordinary relative Markdown link does not resolve                     | fix or enroll the linked Markdown file     |
 | `R030`   | malformed `implemented` Git object ID                                | use `spec implementation verify <id>`      |
 | `R031`   | unsupported intellect provider                                       | select `forge-intellect`                    |
+| `R032`   | invalid TASK addressing, grouping, or blocking target                 | link work items to valid durable specs, topics, or tasks |
 | `R-redir`| reference traversed a redirect (info)                              | rewrite to the canonical target           |
 
 ## Status escape hatch

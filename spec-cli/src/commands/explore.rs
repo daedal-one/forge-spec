@@ -240,7 +240,10 @@ impl App {
         // Build tree: namespace -> type -> [doc_idx]
         let mut grouped: BTreeMap<String, BTreeMap<&'static str, Vec<usize>>> = BTreeMap::new();
         for (idx, doc) in registry.documents.iter().enumerate() {
-            if doc.universal.entity_type == crate::model::id::EntityType::Project {
+            if matches!(
+                doc.universal.entity_type,
+                crate::model::id::EntityType::Project | crate::model::id::EntityType::Task
+            ) {
                 continue;
             }
             let ns = doc.universal.id.namespace.clone();
@@ -558,19 +561,19 @@ impl App {
                 }
             }
             TypeSpecificFields::Task {
-                refines,
-                categorized_under,
+                addresses,
+                groups,
                 blocked_by,
                 ..
             } => {
-                for r in refines {
-                    push_jump(&mut actions, &mut seen, "refines", r);
+                for r in addresses {
+                    push_jump(&mut actions, &mut seen, "addresses", r);
                 }
                 for r in blocked_by {
                     push_jump(&mut actions, &mut seen, "blocked-by", r);
                 }
-                for r in categorized_under {
-                    push_jump(&mut actions, &mut seen, "under", r);
+                for r in groups {
+                    push_jump(&mut actions, &mut seen, "work-group", r);
                 }
             }
             TypeSpecificFields::Invariant {
@@ -994,8 +997,8 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                             "refines",
                             Style::default().fg(Color::DarkGray),
                         )));
-                        for r in refines {
-                            lines.push(Line::from(format!("  ↳ {r}")));
+                        for reference in refines {
+                            lines.push(Line::from(format!("  ↳ {reference}")));
                         }
                     }
                     if !aspects.is_empty() {
@@ -1013,7 +1016,8 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                 }
                 TypeSpecificFields::Task {
                     progress,
-                    refines,
+                    addresses,
+                    labels,
                     assignee,
                     eta,
                     blocked_by,
@@ -1037,14 +1041,20 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                             Span::raw(e.clone()),
                         ]));
                     }
-                    if !refines.is_empty() {
+                    if !addresses.is_empty() {
                         lines.push(Line::from(Span::styled(
-                            "refines",
+                            "addresses",
                             Style::default().fg(Color::DarkGray),
                         )));
-                        for r in refines {
-                            lines.push(Line::from(format!("  ↳ {r}")));
+                        for address in addresses {
+                            lines.push(Line::from(format!("  ↳ {address}")));
                         }
+                    }
+                    if !labels.is_empty() {
+                        lines.push(Line::from(vec![
+                            Span::styled("labels  ", Style::default().fg(Color::DarkGray)),
+                            Span::raw(labels.join(", ")),
+                        ]));
                     }
                     if !blocked_by.is_empty() {
                         lines.push(Line::from(Span::styled(
@@ -1442,15 +1452,11 @@ fn reverse_refs(registry: &SpecRegistry, target_id: &str) -> Vec<(&'static str, 
             continue;
         }
 
-        // refined-by — handled separately via the refinement graph in
-        // callers, since the graph also picks up TASK→REQ refinement.
+        // refined-by is handled separately via the durable refinement graph.
 
-        // categorizes — REQ/TASK pointing here via `categorized_under`.
+        // categorizes — durable requirements pointing here via `categorized_under`.
         let cu: Option<&[String]> = match &other.type_fields {
             TypeSpecificFields::Requirement {
-                categorized_under, ..
-            } => Some(categorized_under),
-            TypeSpecificFields::Task {
                 categorized_under, ..
             } => Some(categorized_under),
             _ => None,
@@ -1458,6 +1464,12 @@ fn reverse_refs(registry: &SpecRegistry, target_id: &str) -> Vec<(&'static str, 
         if let Some(cu) = cu {
             if cu.iter().any(|r| strips_to_me(r)) {
                 out.push(("categorizes", other_id.clone()));
+            }
+        }
+
+        if let TypeSpecificFields::Task { addresses, .. } = &other.type_fields {
+            if addresses.iter().any(|reference| strips_to_me(reference)) {
+                out.push(("addressed-by", other_id.clone()));
             }
         }
 

@@ -5,7 +5,7 @@ status: accepted
 summary: Expose versioned multi-operation changes and deterministic dry runs.
 owners: [carlo]
 progress: done
-refines: [REQ:core/typed-mutation#c-batch]
+addresses: [REQ:core/typed-mutation#c-batch]
 assignee: carlo
 eta:
 blocked_by: []

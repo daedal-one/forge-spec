@@ -172,6 +172,39 @@ fn render_frontmatter_table(
             out.push_str(&format!("| **Decision date** | {decision_date} |\n"));
             out.push_str(&format!("| **Decided by** | {} |\n", decided_by.join(", ")));
         }
+        TypeSpecificFields::Task {
+            progress,
+            addresses,
+            labels,
+            assignee,
+            eta,
+            blocked_by,
+            groups,
+            completion_checkpoint,
+        } => {
+            out.push_str(&format!("| **Progress** | {} |\n", progress.as_str()));
+            if !addresses.is_empty() {
+                out.push_str(&format!("| **Addresses** | {} |\n", addresses.join(", ")));
+            }
+            if !labels.is_empty() {
+                out.push_str(&format!("| **Labels** | {} |\n", labels.join(", ")));
+            }
+            if let Some(assignee) = assignee {
+                out.push_str(&format!("| **Assignee** | {assignee} |\n"));
+            }
+            if let Some(eta) = eta {
+                out.push_str(&format!("| **ETA** | {eta} |\n"));
+            }
+            if !blocked_by.is_empty() {
+                out.push_str(&format!("| **Blocked by** | {} |\n", blocked_by.join(", ")));
+            }
+            if !groups.is_empty() {
+                out.push_str(&format!("| **Work groups** | {} |\n", groups.join(", ")));
+            }
+            if let Some(checkpoint) = completion_checkpoint {
+                out.push_str(&format!("| **Completion checkpoint** | `{checkpoint}` |\n"));
+            }
+        }
         _ => {}
     }
 }

@@ -21,11 +21,12 @@ use crate::model::config::{
 };
 use crate::model::document::SpecDocument;
 use crate::model::frontmatter::TypeSpecificFields;
+use crate::model::id::EntityType;
 use crate::model::reference::{SourceTarget, SpecReference};
 use crate::model::registry::{Redirect, SpecRegistry};
 
-pub const SPEC_STATE_SCHEMA_VERSION: &str = "forge-spec-state-v3";
-pub const SPEC_DELTA_SCHEMA_VERSION: &str = "forge-spec-delta-v3";
+pub const SPEC_STATE_SCHEMA_VERSION: &str = "forge-spec-state-v4";
+pub const SPEC_DELTA_SCHEMA_VERSION: &str = "forge-spec-delta-v4";
 pub const SPEC_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Repository-relative changes layered over the saved `.specs/` tree.
@@ -100,15 +101,6 @@ pub enum ProjectedAttributes {
     Glossary,
     Topic,
     Scenario,
-    Task {
-        progress: String,
-        refines: Vec<String>,
-        aspects: Vec<String>,
-        assignee: Option<String>,
-        eta: Option<String>,
-        blocked_by: Vec<String>,
-        categorized_under: Vec<String>,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -125,6 +117,29 @@ pub struct ProjectedSpecification {
     pub supersedes: Option<String>,
     pub superseded_by: Option<String>,
     pub attributes: ProjectedAttributes,
+    pub blocks: Vec<ProjectedBlock>,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ProjectedWorkItem {
+    pub id: String,
+    pub path: String,
+    pub status: String,
+    pub summary: Option<String>,
+    pub owners: Vec<String>,
+    pub pinned_at: Option<String>,
+    pub related: Vec<String>,
+    pub supersedes: Option<String>,
+    pub superseded_by: Option<String>,
+    pub progress: String,
+    pub addresses: Vec<String>,
+    pub labels: Vec<String>,
+    pub assignee: Option<String>,
+    pub eta: Option<String>,
+    pub blocked_by: Vec<String>,
+    pub groups: Vec<String>,
+    pub completion_checkpoint: Option<String>,
     pub blocks: Vec<ProjectedBlock>,
     pub body: String,
 }
@@ -177,6 +192,7 @@ pub enum RelationshipKind {
     Related,
     Supersedes,
     SupersededBy,
+    TaskAddresses,
     TaskBlockedBy,
     InvariantEnforcement,
     InvariantAppliesTo,
@@ -241,6 +257,7 @@ pub struct SpecState {
     pub valid: bool,
     pub config: ProjectedConfig,
     pub specifications: Vec<ProjectedSpecification>,
+    pub work_items: Vec<ProjectedWorkItem>,
     pub documentation: Vec<ProjectedDocumentation>,
     pub documentation_links: Vec<ProjectedDocumentationLink>,
     pub redirects: Vec<ProjectedRedirect>,
@@ -269,6 +286,14 @@ pub struct ChangedSpecification {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangedWorkItem {
+    pub id: String,
+    pub path: String,
+    pub before: ProjectedWorkItem,
+    pub after: ProjectedWorkItem,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChangedDocumentation {
     pub path: String,
     pub before: ProjectedDocumentation,
@@ -291,6 +316,9 @@ pub struct SpecDelta {
     pub added_specifications: Vec<ProjectedSpecification>,
     pub removed_specifications: Vec<ProjectedSpecification>,
     pub changed_specifications: Vec<ChangedSpecification>,
+    pub added_work_items: Vec<ProjectedWorkItem>,
+    pub removed_work_items: Vec<ProjectedWorkItem>,
+    pub changed_work_items: Vec<ChangedWorkItem>,
     pub added_documentation: Vec<ProjectedDocumentation>,
     pub removed_documentation: Vec<ProjectedDocumentation>,
     pub changed_documentation: Vec<ChangedDocumentation>,
@@ -334,6 +362,39 @@ impl SpecDelta {
             .filter_map(|((id, path), value)| {
                 let previous = before_specs.get(&(id.clone(), path.clone()))?;
                 (*previous != *value).then(|| ChangedSpecification {
+                    id: id.clone(),
+                    path: path.clone(),
+                    before: (*previous).clone(),
+                    after: (*value).clone(),
+                })
+            })
+            .collect();
+
+        let before_work_items = before
+            .work_items
+            .iter()
+            .map(|item| ((item.id.clone(), item.path.clone()), item))
+            .collect::<BTreeMap<_, _>>();
+        let after_work_items = after
+            .work_items
+            .iter()
+            .map(|item| ((item.id.clone(), item.path.clone()), item))
+            .collect::<BTreeMap<_, _>>();
+        let added_work_items = after_work_items
+            .iter()
+            .filter(|(key, _)| !before_work_items.contains_key(*key))
+            .map(|(_, value)| (*value).clone())
+            .collect();
+        let removed_work_items = before_work_items
+            .iter()
+            .filter(|(key, _)| !after_work_items.contains_key(*key))
+            .map(|(_, value)| (*value).clone())
+            .collect();
+        let changed_work_items = after_work_items
+            .iter()
+            .filter_map(|((id, path), value)| {
+                let previous = before_work_items.get(&(id.clone(), path.clone()))?;
+                (*previous != *value).then(|| ChangedWorkItem {
                     id: id.clone(),
                     path: path.clone(),
                     before: (*previous).clone(),
@@ -386,6 +447,9 @@ impl SpecDelta {
             added_specifications,
             removed_specifications,
             changed_specifications,
+            added_work_items,
+            removed_work_items,
+            changed_work_items,
             added_documentation,
             removed_documentation,
             changed_documentation,
@@ -569,7 +633,14 @@ fn project_files(
     let specifications = registry
         .documents
         .iter()
+        .filter(|document| document.universal.entity_type != EntityType::Task)
         .map(project_specification)
+        .collect::<Vec<_>>();
+    let work_items = registry
+        .documents
+        .iter()
+        .filter(|document| document.universal.entity_type == EntityType::Task)
+        .map(project_work_item)
         .collect::<Vec<_>>();
     let (relationships, source_references, mut source_diagnostics) =
         project_relationships(&registry);
@@ -611,6 +682,7 @@ fn project_files(
             declared: config.declared,
         },
         specifications,
+        work_items,
         documentation,
         documentation_links,
         redirects: redirects
@@ -915,25 +987,68 @@ fn project_specification(document: &SpecDocument) -> ProjectedSpecification {
         TypeSpecificFields::Glossary => ProjectedAttributes::Glossary,
         TypeSpecificFields::Topic => ProjectedAttributes::Topic,
         TypeSpecificFields::Scenario => ProjectedAttributes::Scenario,
-        TypeSpecificFields::Task {
-            progress,
-            refines,
-            aspects,
-            assignee,
-            eta,
-            blocked_by,
-            categorized_under,
-        } => ProjectedAttributes::Task {
-            progress: progress.as_str().into(),
-            // These arrays are positionally paired by the format.
-            refines: refines.clone(),
-            aspects: aspects.clone(),
-            assignee: assignee.clone(),
-            eta: eta.clone(),
-            blocked_by: sorted(blocked_by),
-            categorized_under: sorted(categorized_under),
-        },
+        TypeSpecificFields::Task { .. } => {
+            unreachable!("work items are projected separately from specifications")
+        }
     };
+    let blocks = project_blocks(document);
+
+    ProjectedSpecification {
+        id: document.id_str(),
+        entity_type: document.universal.entity_type.type_name().into(),
+        path: path_string(&document.source_path),
+        status: document.universal.status.as_str().into(),
+        summary: document.universal.summary.clone(),
+        owners: sorted(&document.universal.owners),
+        pinned_at: document.universal.pinned_at.clone(),
+        implemented: document.universal.implemented.clone(),
+        related: sorted(&document.universal.related),
+        supersedes: document.universal.supersedes.clone(),
+        superseded_by: document.universal.superseded_by.clone(),
+        attributes,
+        blocks,
+        body: document.body_raw.clone(),
+    }
+}
+
+fn project_work_item(document: &SpecDocument) -> ProjectedWorkItem {
+    let TypeSpecificFields::Task {
+        progress,
+        addresses,
+        labels,
+        assignee,
+        eta,
+        blocked_by,
+        groups,
+        completion_checkpoint,
+    } = &document.type_fields
+    else {
+        unreachable!("only TASK entities are projected as work items")
+    };
+    ProjectedWorkItem {
+        id: document.id_str(),
+        path: path_string(&document.source_path),
+        status: document.universal.status.as_str().into(),
+        summary: document.universal.summary.clone(),
+        owners: sorted(&document.universal.owners),
+        pinned_at: document.universal.pinned_at.clone(),
+        related: sorted(&document.universal.related),
+        supersedes: document.universal.supersedes.clone(),
+        superseded_by: document.universal.superseded_by.clone(),
+        progress: progress.as_str().into(),
+        addresses: addresses.clone(),
+        labels: labels.clone(),
+        assignee: assignee.clone(),
+        eta: eta.clone(),
+        blocked_by: sorted(blocked_by),
+        groups: sorted(groups),
+        completion_checkpoint: completion_checkpoint.clone(),
+        blocks: project_blocks(document),
+        body: document.body_raw.clone(),
+    }
+}
+
+fn project_blocks(document: &SpecDocument) -> Vec<ProjectedBlock> {
     let mut blocks = document
         .blocks
         .iter()
@@ -957,23 +1072,7 @@ fn project_specification(document: &SpecDocument) -> ProjectedSpecification {
         })
         .collect::<Vec<_>>();
     blocks.sort();
-
-    ProjectedSpecification {
-        id: document.id_str(),
-        entity_type: document.universal.entity_type.type_name().into(),
-        path: path_string(&document.source_path),
-        status: document.universal.status.as_str().into(),
-        summary: document.universal.summary.clone(),
-        owners: sorted(&document.universal.owners),
-        pinned_at: document.universal.pinned_at.clone(),
-        implemented: document.universal.implemented.clone(),
-        related: sorted(&document.universal.related),
-        supersedes: document.universal.supersedes.clone(),
-        superseded_by: document.universal.superseded_by.clone(),
-        attributes,
-        blocks,
-        body: document.body_raw.clone(),
-    }
+    blocks
 }
 
 fn project_documentation_collections(
@@ -1023,7 +1122,11 @@ fn project_documentation_links(registry: &SpecRegistry) -> Vec<ProjectedDocument
         for located in &specification.references {
             if let SpecReference::Documentation(target) = &located.reference {
                 links.insert(ProjectedDocumentationLink {
-                    source_kind: "specification".to_string(),
+                    source_kind: if specification.universal.entity_type == EntityType::Task {
+                        "work_item".to_string()
+                    } else {
+                        "specification".to_string()
+                    },
                     source: specification.id_str(),
                     target_kind: DocumentationLinkKind::Documentation,
                     target: target.to_string(),
@@ -1075,15 +1178,33 @@ fn project_relationships(
 
     for document in &registry.documents {
         let source = document.id_str();
+        if let TypeSpecificFields::Task {
+            addresses,
+            blocked_by,
+            ..
+        } = &document.type_fields
+        {
+            for target in addresses {
+                relationships.insert(relationship(
+                    RelationshipKind::TaskAddresses,
+                    &source,
+                    target,
+                    Vec::new(),
+                ));
+            }
+            for target in blocked_by {
+                relationships.insert(relationship(
+                    RelationshipKind::TaskBlockedBy,
+                    &source,
+                    target,
+                    Vec::new(),
+                ));
+            }
+            continue;
+        }
         let (refines, aspects, categorized_under): (&[String], &[String], &[String]) =
             match &document.type_fields {
                 TypeSpecificFields::Requirement {
-                    refines,
-                    aspects,
-                    categorized_under,
-                    ..
-                }
-                | TypeSpecificFields::Task {
                     refines,
                     aspects,
                     categorized_under,
@@ -1146,16 +1267,6 @@ fn project_relationships(
         }
 
         match &document.type_fields {
-            TypeSpecificFields::Task { blocked_by, .. } => {
-                for target in blocked_by {
-                    relationships.insert(relationship(
-                        RelationshipKind::TaskBlockedBy,
-                        &source,
-                        target,
-                        Vec::new(),
-                    ));
-                }
-            }
             TypeSpecificFields::Invariant {
                 enforcement,
                 applies_to,

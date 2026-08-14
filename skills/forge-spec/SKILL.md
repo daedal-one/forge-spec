@@ -36,7 +36,7 @@ Use the `spec` CLI to create a small, coherent specification tree that is readab
 
 Create only specifications that improve an engineering decision or verification boundary. Avoid mirroring every source file.
 
-- Maintain exactly one configured `PROJECT:<slug>` description as the tree's purpose and boundary. Everything else implicitly belongs beneath it, but containment does not mean refinement.
+- Maintain exactly one configured `PROJECT:<slug>` description as the durable specification tree's purpose and boundary. Durable specifications implicitly belong beneath it, but containment does not mean refinement.
 - Use `TOPIC` to group a durable domain.
 - Use `REQ` for observable behavior and constraints.
 - Use `INV` for a property that must always hold.
@@ -44,7 +44,7 @@ Create only specifications that improve an engineering decision or verification 
 - Use `ADR` for a consequential decision and its tradeoffs.
 - Use `GLO` when a term could be interpreted differently.
 - Use `SCN` for an important end-to-end journey or failure path.
-- Use `TASK` for traceable implementation work refining a requirement.
+- Use `TASK` for transient, traceable implementation work that `addresses` one or more durable specifications without refining or satisfying them.
 
 Leave new documents as `draft` until their content has been reviewed or is clearly established by project evidence.
 
@@ -72,6 +72,10 @@ Leave new documents as `draft` until their content has been reviewed or is clear
    label. Pull derived state with `spec implementation status` and record a
    checkpoint only through `spec implementation verify <id>`, after the
    configured forge-intellect provider returns complete current evidence.
+9. Keep TASK work items outside the durable hierarchy and adherence model. Link
+   them with `addresses`, use task labels/groups/blockers for work metadata, and
+   inspect them explicitly with `spec inspect tree --include-tasks` or
+   `spec inspect graph work`.
 
 ## Validate the result
 
@@ -100,7 +104,7 @@ spec impact <relevant-id-or-anchor> --target agent
 spec impact --base <merge-base-or-upstream> --target agent
 ```
 
-Treat explicit source references and Git-trailer history as traceability evidence, not a complete runtime dependency graph. Review every transitive refinement path and reported gap. Create missing TASK specs deliberately and use `spec task start <task-id>` only when implementation begins; `spec impact` is read-only.
+Treat explicit source references and Git-trailer history as traceability evidence, not a complete runtime dependency graph. Review every transitive durable refinement path and reported gap. Create missing TASK work items deliberately, connect them with `spec task address`, and use `spec task start <task-id>` only when implementation begins; `spec impact` is read-only and reports related work separately.
 
 For existing documents, prefer typed `spec change`, `spec lifecycle`,
 `spec relation`, and `spec task` commands. For coordinated agent edits, submit

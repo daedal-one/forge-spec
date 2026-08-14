@@ -5,7 +5,7 @@ status: accepted
 summary: Publish and integrate the v0.5 implementation-attestation and intellect-provider contract.
 owners: [carlo]
 progress: done
-refines:
+addresses:
   - REQ:core/intellect-provider#c-attestation
   - REQ:core/intellect-provider#c-config
   - REQ:core/intellect-provider#c-protocol
@@ -14,7 +14,7 @@ refines:
   - REQ:core/intellect-provider#c-surfaces
   - REQ:core/intellect-provider#c-standalone
   - REQ:core/intellect-provider#c-mutation
-aspects: [attestation, configuration, protocol, lifecycle, evidence, presentation, standalone-operation, authoring]
+labels: [attestation, configuration, protocol, lifecycle, evidence, presentation, standalone-operation, authoring]
 assignee: carlo
 eta:
 blocked_by: []

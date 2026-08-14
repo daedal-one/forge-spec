@@ -5,11 +5,11 @@ status: accepted
 summary: 'Implement configured Markdown collections, heading identity, reference validation, backlinks, projection, rendering, and impact traversal.'
 owners: [carlo]
 progress: done
-refines: [REQ:core/documentation-integration#c-collections, REQ:core/documentation-integration#c-references, REQ:core/documentation-integration#c-index, REQ:core/documentation-integration#c-boundary]
+addresses: [REQ:core/documentation-integration#c-collections, REQ:core/documentation-integration#c-references, REQ:core/documentation-integration#c-index, REQ:core/documentation-integration#c-boundary]
 assignee:
 eta:
 blocked_by: []
-aspects:
+labels:
   - collections
   - references
   - index

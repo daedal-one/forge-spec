@@ -209,7 +209,9 @@ summary: >
   TODO: one-line description of the work.
 owners: []
 progress: pending
-refines: []
+addresses: []
+labels: []
+groups: []
 assignee:
 eta:
 blocked_by: []
@@ -219,7 +221,7 @@ blocked_by: []
 
 ## Plan
 
-TODO: describe the work, links to the parent requirement, and any
+TODO: describe the work, links to the durable behavior it addresses, and any
 specific files / functions to touch. Reference source with
 `[ident](spec:src:path/to/file.rs:42-78)`.
 

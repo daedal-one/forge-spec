@@ -9,12 +9,12 @@ fn write(path: &Path, content: &str) {
 }
 
 #[test]
-fn agent_impact_report_cascades_from_clause_to_task_and_source() {
+fn agent_impact_report_keeps_related_work_outside_spec_and_source_closure() {
     let temp = tempfile::tempdir().unwrap();
     let specs = temp.path().join(".specs");
     write(
         &specs.join("_config.toml"),
-        "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+        "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
     );
     write(
         &specs.join("_project.spec.md"),
@@ -26,7 +26,7 @@ fn agent_impact_report_cascades_from_clause_to_task_and_source() {
     );
     write(
         &specs.join("task.spec.md"),
-        "---\nid: TASK:demo/implement\ntype: task\nstatus: accepted\nsummary: Implement behavior.\nowners: [dev]\nprogress: pending\nrefines: [REQ:demo/root#c-one]\n---\n\n# Implement\n\n[code](spec:src:src/feature.rs#symbol=Feature/run)\n",
+        "---\nid: TASK:demo/implement\ntype: task\nstatus: accepted\nsummary: Implement behavior.\nowners: [dev]\nprogress: pending\naddresses: [REQ:demo/root#c-one]\nlabels: []\ngroups: []\n---\n\n# Implement\n\n[code](spec:src:src/feature.rs#symbol=Feature/run)\n",
     );
 
     let output = Command::new(env!("CARGO_BIN_EXE_spec"))
@@ -42,7 +42,8 @@ fn agent_impact_report_cascades_from_clause_to_task_and_source() {
         String::from_utf8_lossy(&output.stderr)
     );
     let report = String::from_utf8(output.stdout).unwrap();
-    assert!(report.contains("<forge-spec-impact schema-version=\"1\" mode=\"subject\""));
-    assert!(report.contains("<task id=\"TASK:demo/implement\" progress=\"pending\""));
-    assert!(report.contains("spec:src:src/feature.rs#symbol=Feature/run"));
+    assert!(report.contains("<forge-spec-impact schema-version=\"2\" mode=\"subject\""));
+    assert!(report.contains("<work-item id=\"TASK:demo/implement\" progress=\"pending\""));
+    assert!(report.contains("<address target=\"REQ:demo/root#c-one\""));
+    assert!(!report.contains("spec:src:src/feature.rs#symbol=Feature/run"));
 }

@@ -174,12 +174,13 @@ pub enum TypeSpecificFields {
     Scenario,
     Task {
         progress: Progress,
-        refines: Vec<String>,
-        aspects: Vec<String>,
+        addresses: Vec<String>,
+        labels: Vec<String>,
         assignee: Option<String>,
         eta: Option<String>,
         blocked_by: Vec<String>,
-        categorized_under: Vec<String>,
+        groups: Vec<String>,
+        completion_checkpoint: Option<String>,
     },
 }
 
@@ -219,4 +220,8 @@ pub struct RawFrontmatter {
     pub assignee: Option<String>,
     pub eta: Option<String>,
     pub blocked_by: Option<Vec<String>>,
+    pub addresses: Option<Vec<String>>,
+    pub labels: Option<Vec<String>>,
+    pub groups: Option<Vec<String>>,
+    pub completion_checkpoint: Option<String>,
 }

@@ -13,6 +13,7 @@ pub fn run(specs_dir: &Path, view: GraphView) -> Result<()> {
         GraphView::Hierarchy => (SpecGraph::hierarchy(&registry), "project hierarchy"),
         GraphView::Refinement => (SpecGraph::refinement(&registry), "refinement"),
         GraphView::Categorization => (SpecGraph::categorization(&registry), "categorization"),
+        GraphView::Work => (SpecGraph::work(&registry), "work items"),
     };
     print!("{}", render_dot(&graph, &registry, label));
     Ok(())

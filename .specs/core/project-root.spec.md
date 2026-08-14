@@ -24,9 +24,10 @@ durable principles as context rather than as a refinable requirement.
 :::
 
 :::{requirement id="containment" level="MUST"}
-Every non-project document without a resolvable refinement or categorization
-parent MUST implicitly descend from PROJECT in the navigational hierarchy;
-explicit refinement and categorization semantics MUST remain unchanged.
+Every non-project durable specification without a resolvable refinement or
+categorization parent MUST implicitly descend from PROJECT in the navigational
+hierarchy; explicit refinement and categorization semantics MUST remain
+unchanged. TASK work items MUST remain outside that hierarchy.
 :::
 
 :::{requirement id="rendering" level="MUST"}

@@ -1,0 +1,38 @@
+from: forge-spec-v0.5.0
+to: forge-spec-v0.6.0
+summary: >
+  Separates transient implementation work from the durable specification graph
+  and gives TASK documents explicit, non-adherence addressing semantics.
+changes:
+  - id: separate-work-items
+    kind: semantics
+    area: graph
+    description: TASK documents no longer participate in project containment, refinement, categorization, clause coverage, or implementation adherence.
+  - id: add-task-addressing
+    kind: schema
+    area: frontmatter
+    description: TASK refines becomes addresses, aspects becomes labels, categorized_under becomes groups, and implemented becomes completion_checkpoint.
+  - id: split-canonical-projection
+    kind: schema
+    area: projection
+    description: Canonical state publishes durable specifications and transient work_items separately with TaskAddresses and TaskBlockedBy relations.
+instructions:
+  - id: rewrite-task-fields
+    actor: cli
+    action: Rename legacy TASK fields without changing their values, ordering, body, references, or lifecycle state.
+    verification: Every TASK parses with addresses, labels, groups, and optional completion_checkpoint; no legacy task field remains.
+  - id: preserve-durable-semantics
+    actor: cli
+    action: Exclude TASK documents from specification hierarchy, refinement, categorization, clause coverage, and adherence surfaces.
+    verification: Adding or changing a TASK does not change any durable specification closure or adherence state.
+  - id: review-addresses
+    actor: agent
+    when: A migrated task previously used refinement as a proxy for implementation work.
+    action: Review addresses as traceability only and attach implementation evidence directly to durable specifications.
+    verification: Work-item completion is not presented as proof that addressed behavior adheres.
+validation:
+  - command: spec lint
+  - command: spec inspect tree
+  - command: spec inspect tree --include-tasks
+  - command: spec inspect graph work
+  - command: spec implementation status

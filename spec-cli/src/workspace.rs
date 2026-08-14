@@ -18,6 +18,7 @@ use crate::documentation::{
 use crate::model::config::SpecConfig;
 use crate::model::document::SpecDocument;
 use crate::model::frontmatter::TypeSpecificFields;
+use crate::model::id::EntityType;
 use crate::model::reference::{SourceTarget, SpecReference};
 use crate::model::registry::SpecRegistry;
 
@@ -38,6 +39,7 @@ pub struct ExplorerSnapshot {
     pub stats: IndexStats,
     pub project_id: Option<String>,
     pub documents: Vec<ExplorerDocument>,
+    pub work_items: Vec<ExplorerDocument>,
     pub documentation_collections: Vec<ExplorerDocumentationCollection>,
     pub documentation: Vec<ExplorerDocumentation>,
 }
@@ -57,6 +59,10 @@ pub struct ExplorerDocument {
     pub uri: String,
     pub refines: Vec<String>,
     pub categorized_under: Vec<String>,
+    pub addresses: Vec<String>,
+    pub labels: Vec<String>,
+    pub groups: Vec<String>,
+    pub completion_checkpoint: Option<String>,
     pub blocks: Vec<ExplorerBlock>,
     pub sources: Vec<ExplorerSource>,
     pub documentation: Vec<ExplorerReference>,
@@ -233,9 +239,18 @@ impl WorkspaceIndex {
             .registry
             .documents
             .iter()
+            .filter(|document| document.universal.entity_type != EntityType::Task)
             .map(|document| explorer_document(document, &self.registry))
             .collect::<Vec<_>>();
         documents.sort_by(|left, right| left.id.cmp(&right.id));
+        let mut work_items = self
+            .registry
+            .documents
+            .iter()
+            .filter(|document| document.universal.entity_type == EntityType::Task)
+            .map(|document| explorer_document(document, &self.registry))
+            .collect::<Vec<_>>();
+        work_items.sort_by(|left, right| left.id.cmp(&right.id));
         let mut documentation = self
             .registry
             .documentation
@@ -253,6 +268,7 @@ impl WorkspaceIndex {
             stats: self.stats,
             project_id: self.registry.project_id(),
             documents,
+            work_items,
             documentation_collections: self
                 .registry
                 .config
@@ -660,18 +676,28 @@ fn explorer_document(document: &SpecDocument, registry: &SpecRegistry) -> Explor
             canonical_hierarchy_refs(registry, refines),
             canonical_hierarchy_refs(registry, categorized_under),
         ),
-        TypeSpecificFields::Task {
-            progress,
-            refines,
-            categorized_under,
-            ..
-        } => (
+        TypeSpecificFields::Task { progress, .. } => (
             Some(progress.as_str().to_string()),
             None,
-            canonical_hierarchy_refs(registry, refines),
-            canonical_hierarchy_refs(registry, categorized_under),
+            Vec::new(),
+            Vec::new(),
         ),
         _ => (None, None, Vec::new(), Vec::new()),
+    };
+    let (addresses, labels, groups, completion_checkpoint) = match &document.type_fields {
+        TypeSpecificFields::Task {
+            addresses,
+            labels,
+            groups,
+            completion_checkpoint,
+            ..
+        } => (
+            canonical_hierarchy_refs(registry, addresses),
+            labels.clone(),
+            canonical_hierarchy_refs(registry, groups),
+            completion_checkpoint.clone(),
+        ),
+        _ => (Vec::new(), Vec::new(), Vec::new(), None),
     };
     let blocks = document
         .blocks
@@ -757,6 +783,10 @@ fn explorer_document(document: &SpecDocument, registry: &SpecRegistry) -> Explor
             .unwrap_or_else(|_| document.source_path.to_string_lossy().into_owned()),
         refines,
         categorized_under,
+        addresses,
+        labels,
+        groups,
+        completion_checkpoint,
         blocks,
         sources,
         documentation,
@@ -1008,7 +1038,7 @@ mod tests {
         std::fs::create_dir_all(&specs).unwrap();
         std::fs::write(
             specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -1040,7 +1070,7 @@ mod tests {
         std::fs::create_dir_all(&docs).unwrap();
         std::fs::write(
             specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.5.0\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+            "baseline = \"forge-spec-v0.6.0\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
         )
         .unwrap();
         let guide = docs.join("start.md");

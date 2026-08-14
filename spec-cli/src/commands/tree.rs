@@ -14,6 +14,7 @@ pub fn run(
     namespace_filter: Option<&str>,
     type_filter: Option<&str>,
     no_color: bool,
+    include_tasks: bool,
 ) -> Result<()> {
     if no_color {
         colored::control::set_override(false);
@@ -26,6 +27,9 @@ pub fn run(
     let mut grouped: BTreeMap<String, BTreeMap<&'static str, Vec<usize>>> = BTreeMap::new();
     for (idx, doc) in registry.documents.iter().enumerate() {
         if doc.universal.entity_type == EntityType::Project {
+            continue;
+        }
+        if doc.universal.entity_type == EntityType::Task {
             continue;
         }
         let ns = &doc.universal.id.namespace;
@@ -49,14 +53,21 @@ pub fn run(
     }
 
     let project = registry.project();
-    if grouped.is_empty() && project.is_none() {
+    let has_visible_tasks = include_tasks
+        && registry.documents.iter().any(|document| {
+            document.universal.entity_type == EntityType::Task
+                && namespace_filter
+                    .is_none_or(|namespace| document.universal.id.namespace == namespace)
+                && type_filter.is_none_or(|entity_type| entity_type.eq_ignore_ascii_case("TASK"))
+        });
+    if grouped.is_empty() && project.is_none() && !has_visible_tasks {
         println!("(no specs match the filter)");
         return Ok(());
     }
 
     let tree_prefix = if let Some(project) = project {
         let implementation = adherence.get(&project.id_str()).map(|state| &state.state);
-        let state = effective_state_label(project.universal.status, None, implementation);
+        let state = effective_state_label(project.universal.status, implementation);
         let summary = project
             .universal
             .summary
@@ -71,10 +82,9 @@ pub fn run(
             state,
             summary.dimmed()
         );
-        if grouped.is_empty() {
-            return Ok(());
+        if !grouped.is_empty() {
+            println!("└── {}", ".specs/".bold());
         }
-        println!("└── {}", ".specs/".bold());
         "    "
     } else {
         println!("{}", ".specs/".bold());
@@ -119,11 +129,7 @@ pub fn run(
                 .unwrap_or("");
             let summary_trimmed = first_line(summary);
             let ty_colored = colorize_type(ty);
-            let progress = match &doc.type_fields {
-                TypeSpecificFields::Task { progress, .. } => Some(*progress),
-                _ => None,
-            };
-            let state = effective_state_label(doc.universal.status, progress, adherence_state);
+            let state = effective_state_label(doc.universal.status, adherence_state);
             let line = if summary_trimmed.is_empty() {
                 format!("{ty_colored:<5} {slug} {state}")
             } else {
@@ -136,7 +142,73 @@ pub fn run(
         }
     }
 
+    if include_tasks {
+        render_work_items(&registry, namespace_filter, type_filter);
+    }
+
     Ok(())
+}
+
+fn render_work_items(
+    registry: &SpecRegistry,
+    namespace_filter: Option<&str>,
+    type_filter: Option<&str>,
+) {
+    if type_filter.is_some_and(|entity_type| !entity_type.eq_ignore_ascii_case("TASK")) {
+        return;
+    }
+    let mut tasks = registry
+        .documents
+        .iter()
+        .filter(|document| document.universal.entity_type == EntityType::Task)
+        .filter(|document| {
+            namespace_filter.is_none_or(|namespace| document.universal.id.namespace == namespace)
+        })
+        .collect::<Vec<_>>();
+    tasks.sort_by_key(|document| document.id_str());
+    if tasks.is_empty() {
+        return;
+    }
+
+    println!("{}", "WORK ITEMS".bold());
+    for (index, document) in tasks.iter().enumerate() {
+        let branch = if index + 1 == tasks.len() {
+            "└──"
+        } else {
+            "├──"
+        };
+        let TypeSpecificFields::Task { progress, .. } = &document.type_fields else {
+            unreachable!("TASK entity has task fields")
+        };
+        let state = if document.universal.status == Status::Accepted {
+            state_label(progress_state(*progress))
+        } else {
+            effective_state_label(document.universal.status, None)
+        };
+        let summary = document
+            .universal
+            .summary
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default();
+        println!(
+            "{branch} {} {} {state} {}",
+            colorize_type("TASK"),
+            document.id_str(),
+            first_line(summary).dimmed()
+        );
+    }
+}
+
+fn progress_state(progress: Progress) -> DisplayState {
+    match progress {
+        Progress::Pending => DisplayState::Pending,
+        Progress::InProgress => DisplayState::InProgress,
+        Progress::Done => DisplayState::Done,
+        Progress::Blocked => DisplayState::Blocked,
+        Progress::Deferred => DisplayState::Deferred,
+        Progress::WontDo => DisplayState::WontDo,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,31 +232,15 @@ enum DisplayState {
     Unresolved,
 }
 
-fn effective_state(
-    status: Status,
-    progress: Option<Progress>,
-    adherence: Option<&AdherenceState>,
-) -> DisplayState {
+fn effective_state(status: Status, adherence: Option<&AdherenceState>) -> DisplayState {
     match status {
         Status::Draft => DisplayState::Draft,
         Status::Deprecated => DisplayState::Deprecated,
         Status::Superseded => DisplayState::Superseded,
-        Status::Accepted => match progress {
-            Some(Progress::Pending) => DisplayState::Pending,
-            Some(Progress::InProgress) => DisplayState::InProgress,
-            Some(Progress::Blocked) => DisplayState::Blocked,
-            Some(Progress::Deferred) => DisplayState::Deferred,
-            Some(Progress::WontDo) => DisplayState::WontDo,
-            Some(Progress::Done) => match adherence {
-                Some(AdherenceState::NotApplicable) => DisplayState::Done,
-                Some(state) => adherence_state(state),
-                None => DisplayState::Unknown,
-            },
-            None => match adherence {
-                Some(AdherenceState::NotApplicable) => DisplayState::Accepted,
-                Some(state) => adherence_state(state),
-                None => DisplayState::Unknown,
-            },
+        Status::Accepted => match adherence {
+            Some(AdherenceState::NotApplicable) => DisplayState::Accepted,
+            Some(state) => adherence_state(state),
+            None => DisplayState::Unknown,
         },
     }
 }
@@ -204,10 +260,9 @@ fn adherence_state(state: &AdherenceState) -> DisplayState {
 
 fn effective_state_label(
     status: Status,
-    progress: Option<Progress>,
     adherence: Option<&AdherenceState>,
 ) -> colored::ColoredString {
-    state_label(effective_state(status, progress, adherence))
+    state_label(effective_state(status, adherence))
 }
 
 fn state_label(state: DisplayState) -> colored::ColoredString {
@@ -308,63 +363,38 @@ mod tests {
             (Status::Superseded, DisplayState::Superseded),
         ] {
             assert_eq!(
-                effective_state(status, Some(Progress::Done), Some(&AdherenceState::Current)),
+                effective_state(status, Some(&AdherenceState::Current)),
                 expected
             );
         }
     }
 
     #[test]
-    fn open_task_progress_controls_the_display_state() {
+    fn task_progress_is_independent_from_adherence() {
         for (progress, expected) in [
             (Progress::Pending, DisplayState::Pending),
             (Progress::InProgress, DisplayState::InProgress),
+            (Progress::Done, DisplayState::Done),
             (Progress::Blocked, DisplayState::Blocked),
             (Progress::Deferred, DisplayState::Deferred),
             (Progress::WontDo, DisplayState::WontDo),
         ] {
-            assert_eq!(
-                effective_state(
-                    Status::Accepted,
-                    Some(progress),
-                    Some(&AdherenceState::Violated)
-                ),
-                expected
-            );
-        }
-    }
-
-    #[test]
-    fn done_task_enters_the_adherence_states() {
-        for (adherence, expected) in [
-            (AdherenceState::Unverified, DisplayState::Unverified),
-            (AdherenceState::Current, DisplayState::Current),
-            (AdherenceState::Stale, DisplayState::Stale),
-            (AdherenceState::Partial, DisplayState::Partial),
-            (AdherenceState::Violated, DisplayState::Violated),
-            (AdherenceState::Unknown, DisplayState::Unknown),
-            (AdherenceState::Unresolved, DisplayState::Unresolved),
-            (AdherenceState::NotApplicable, DisplayState::Done),
-        ] {
-            assert_eq!(
-                effective_state(Status::Accepted, Some(Progress::Done), Some(&adherence)),
-                expected
-            );
+            assert_eq!(progress_state(progress), expected);
         }
     }
 
     #[test]
     fn accepted_non_task_uses_adherence_or_lifecycle_fallback() {
         assert_eq!(
-            effective_state(Status::Accepted, None, Some(&AdherenceState::Current)),
+            effective_state(Status::Accepted, Some(&AdherenceState::Current)),
             DisplayState::Current
         );
         assert_eq!(
-            effective_state(Status::Accepted, None, Some(&AdherenceState::NotApplicable)),
+            effective_state(Status::Accepted, Some(&AdherenceState::NotApplicable)),
             DisplayState::Accepted
         );
         assert_eq!(
-            effective_state(Status::Accepted, None, None),
+            effective_state(Status::Accepted, None),
             DisplayState::Unknown
         );
     }
