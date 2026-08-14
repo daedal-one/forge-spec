@@ -12,6 +12,7 @@ related:
   - REQ:core/intellect-provider
   - REQ:core/project-root
   - REQ:core/typed-mutation
+implemented: 66e39f141d227d388ddee95964feedc03069dfdb
 ---
 
 # Orthogonal implementation work
