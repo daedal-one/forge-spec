@@ -50,6 +50,13 @@ related:
 :::
 
 The authoritative format contract is defined by the [Specs Format
-specification](spec:doc:specification.md), and the normalized cross-process
-contract is implemented by the [canonical projection
-module](spec:src:spec-cli/src/projection.rs).
+specification](spec:doc:specification.md). The durable implementation evidence
+boundary spans [frontmatter parsing](spec:src:spec-cli/src/parse/frontmatter.rs),
+[graph construction](spec:src:spec-cli/src/graph/build.rs), [structural
+validation](spec:src:spec-cli/src/lint/structural.rs), [typed task
+mutations](spec:src:spec-cli/src/commands/task.rs), [tree
+presentation](spec:src:spec-cli/src/commands/tree.rs), [impact
+analysis](spec:src:spec-cli/src/impact/mod.rs), [adherence request
+selection](spec:src:spec-cli/src/intellect.rs), [canonical
+projection](spec:src:spec-cli/src/projection.rs), and the [v0.6
+migration](spec:src:spec-cli/src/migration/mod.rs).
