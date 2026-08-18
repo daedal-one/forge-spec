@@ -4,9 +4,9 @@ type: requirement
 status: accepted
 level: MUST
 summary: >
-  Authored implementation checkpoints remain in specifications while a
-  configured intellect provider supplies exact, evidence-backed code adherence
-  for the selected workspace state.
+  Immutable attestations outside tracked specification bytes record verified
+  implementation states while a configured intellect provider derives
+  exact, evidence-backed code adherence for the selected workspace state.
 owners: [carlo]
 refines: []
 related:
@@ -18,16 +18,18 @@ related:
 # Intellect provider and code adherence
 
 :::{requirement id="adherence" level="MUST"}
-- {#c-attestation} Every durable specification MAY declare one full Git object ID in
-  `implemented`, meaning that its complete normative content was last verified
-  as implemented at that checkpoint. The field is authoritative attestation,
-  not derived current-state evidence. TASK work items MUST NOT carry
-  implementation-adherence checkpoints.
+- {#c-attestation} Every durable specification MAY have an immutable adherence
+  attestation outside tracked workspace bytes. An
+  attestation MUST bind the specification ID, canonical normative-intent digest,
+  candidate Git commit and tree, declared evidence boundary, provider and policy
+  identity, completeness, evidence, verifier, and verification time. Durable
+  specifications and TASK work items MUST NOT carry authored adherence fields.
 - {#c-config} Project configuration MUST select one named intellect provider,
   defaulting to `forge-intellect`; v0.6 recognizes no other implementation.
 - {#c-protocol} Forge-spec MUST exchange a versioned, deterministic adherence
-  request and response with the provider, keyed by specification ID and one
-  exact workspace state.
+  request and response with the provider, keyed by specification ID, canonical
+  intent digest, and one exact workspace state. Recording and revoking
+  attestations MUST be explicit protocol operations.
 - {#c-lifecycle} Adherence-aware commands MUST discover or atomically start one
   healthy worktree-scoped background provider, complete a health handshake,
   and request one coherent state without stopping the shared process. The
@@ -37,8 +39,8 @@ related:
 - {#c-state} Derived adherence MUST distinguish `unverified`, `current`,
   `stale`, `partial`, `violated`, `unknown`, `unresolved`, and
   `not-applicable`, with provider identity, completeness, exact state identity,
-  and reasons retained separately from authored lifecycle. TASK work items are
-  outside the adherence protocol.
+  reasons, selected attestation, and evidence retained separately from authored
+  lifecycle. TASK work items are outside the adherence protocol.
 - {#c-display} A human tree row MUST render exactly one compact effective state
   as a symbol and name. A non-accepted lifecycle controls first; otherwise
   applicable adherence replaces `accepted`. `not-applicable` falls back to
@@ -51,14 +53,25 @@ related:
 - {#c-standalone} Forge-spec MUST have no build, installation, or mandatory
   runtime dependency on an intellect provider. Read-only adherence surfaces
   MUST remain usable with explicit `unknown` state when the provider is absent;
-  only recording a new verification checkpoint MUST fail closed.
+  only recording or revoking an adherence attestation MUST fail closed.
 - {#c-service} `spec implementation provider start|status|stop` MUST manage an
   authenticated loopback provider in the background. Its endpoint, process,
   and log metadata MUST live outside tracked workspace bytes, be isolated per
   Git worktree, reject mismatched workspace roots, and tolerate stale control
   metadata without reporting the service as healthy.
-- {#c-mutation} Setting or clearing an implementation checkpoint and changing
-  the configured provider MUST use the shared typed mutation engine.
-- {#c-selection} Provider requests and implementation status, verification, and
-  checkpoint commands MUST exclude TASK work items.
+- {#c-mutation} Recording or revoking an adherence attestation MUST NOT modify
+  the checked-out branch, index, or working tree. Changing the configured
+  provider remains a tracked typed mutation.
+- {#c-selection} Provider requests and implementation status, attestation, and
+  revocation commands MUST exclude TASK work items.
+- {#c-portability} Attestation bytes MUST be canonical and content-addressed.
+  The provider MUST retain them in append-only durable history and publish the
+  same logical objects through a dedicated Git notes namespace without making a
+  commit on the checked-out branch. Revocation MUST append a tombstone rather
+  than erase attestation history, and unavailable or unsynchronized attestation
+  storage MUST fail closed to `unknown` rather than `unverified`.
+- {#c-migration} A deterministic migration MUST convert legacy `implemented`
+  fields into external attestations, remove the fields from durable
+  specifications, preserve TASK completion metadata, and reject conflicting
+  legacy and external checkpoints instead of silently choosing one.
 :::

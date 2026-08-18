@@ -121,6 +121,38 @@ pub struct ProjectedSpecification {
     pub body: String,
 }
 
+#[derive(Serialize)]
+struct CanonicalSpecificationIntent<'a> {
+    schema: &'static str,
+    id: &'a str,
+    entity_type: &'a str,
+    summary: &'a Option<String>,
+    pinned_at: &'a Option<String>,
+    attributes: &'a ProjectedAttributes,
+    blocks: &'a [ProjectedBlock],
+    body: &'a str,
+}
+
+/// Digest only authored normative intent. File placement, lifecycle,
+/// stewardship metadata, and the legacy `implemented` checkpoint are
+/// deliberately excluded so operational edits and external-attestation
+/// migration do not manufacture a new normative revision.
+pub fn specification_intent_digest(document: &SpecDocument) -> Result<String> {
+    let projected = project_specification(document);
+    let bytes = serde_json::to_vec(&CanonicalSpecificationIntent {
+        schema: "forge-spec-intent-v1",
+        id: &projected.id,
+        entity_type: &projected.entity_type,
+        summary: &projected.summary,
+        pinned_at: &projected.pinned_at,
+        attributes: &projected.attributes,
+        blocks: &projected.blocks,
+        body: &projected.body,
+    })
+    .context("encoding canonical specification intent")?;
+    Ok(blake3::hash(&bytes).to_hex().to_string())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ProjectedWorkItem {
     pub id: String,

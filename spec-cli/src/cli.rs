@@ -559,14 +559,27 @@ pub enum ImplementationCommands {
         #[arg(long)]
         json: bool,
     },
-    /// Verify adherence and record its exact Git checkpoint
+    /// Verify adherence and append immutable external attestations
     Verify {
-        id: String,
+        #[arg(value_name = "ID")]
+        ids: Vec<String>,
+        /// Verify every durable specification named by an implements trailer
+        #[arg(long)]
+        all: bool,
         #[arg(long)]
         at: Option<String>,
     },
-    /// Remove an authored implementation checkpoint
+    /// Revoke the selected external adherence attestation
+    Revoke {
+        id: String,
+        #[arg(long, default_value = "manual revocation")]
+        reason: String,
+    },
+    /// Deprecated alias for implementation revoke
+    #[command(hide = true)]
     Clear { id: String },
+    /// Convert legacy implemented fields into external attestations
+    MigrateAttestations,
 }
 
 #[derive(Args)]

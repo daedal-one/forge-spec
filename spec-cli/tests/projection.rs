@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use spec_cli::model::registry::SpecRegistry;
 use spec_cli::projection::{
-    project, DocumentationLinkKind, Overlay, OverlayEntry, ProjectedSourceSelector,
-    RelationshipKind, SPEC_DELTA_SCHEMA_VERSION, SPEC_STATE_SCHEMA_VERSION,
+    project, specification_intent_digest, DocumentationLinkKind, Overlay, OverlayEntry,
+    ProjectedSourceSelector, RelationshipKind, SPEC_DELTA_SCHEMA_VERSION,
+    SPEC_STATE_SCHEMA_VERSION,
 };
 
 const CONFIG: &str = "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n";
@@ -218,6 +220,44 @@ fn saved_and_multi_file_overlay_bytes_converge_without_writes() {
         .unwrap()
         .windows(base.path().as_os_str().len())
         .any(|window| window == base.path().as_os_str().as_encoded_bytes()));
+}
+
+#[test]
+fn canonical_intent_digest_ignores_legacy_checkpoint_but_not_normative_text() {
+    let temp = tempfile::tempdir().unwrap();
+    let specs = temp.path().join(".specs");
+    final_tree(&specs);
+    let registry = SpecRegistry::load(&specs).unwrap();
+    let child = registry.get_by_id("REQ:demo/child").unwrap();
+    let before = specification_intent_digest(child).unwrap();
+
+    let path = specs.join("child.spec.md");
+    let content = std::fs::read_to_string(&path).unwrap();
+    write(
+        &path,
+        &content.replace(
+            "implemented: 0123456789abcdef0123456789abcdef01234567\n",
+            "",
+        ),
+    );
+    let registry = SpecRegistry::load(&specs).unwrap();
+    let without_legacy =
+        specification_intent_digest(registry.get_by_id("REQ:demo/child").unwrap()).unwrap();
+    assert_eq!(without_legacy, before);
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    write(&path, &content.replace("status: accepted", "status: draft"));
+    let registry = SpecRegistry::load(&specs).unwrap();
+    let lifecycle_changed =
+        specification_intent_digest(registry.get_by_id("REQ:demo/child").unwrap()).unwrap();
+    assert_eq!(lifecycle_changed, before);
+
+    let content = std::fs::read_to_string(&path).unwrap();
+    write(&path, &content.replace("# Child", "# Changed child"));
+    let registry = SpecRegistry::load(&specs).unwrap();
+    let changed =
+        specification_intent_digest(registry.get_by_id("REQ:demo/child").unwrap()).unwrap();
+    assert_ne!(changed, before);
 }
 
 #[test]

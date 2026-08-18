@@ -41,10 +41,11 @@ pub enum Operation {
     PinSet { spec: String, value: String },
     #[serde(rename = "pin.clear")]
     PinClear { spec: String },
-    #[serde(rename = "implementation.checkpoint.set")]
-    ImplementationCheckpointSet { spec: String, commit: String },
-    #[serde(rename = "implementation.checkpoint.clear")]
-    ImplementationCheckpointClear { spec: String },
+    /// Internal cleanup step used only after legacy evidence was imported by
+    /// the intellect provider. It is deliberately absent from the serialized
+    /// public mutation protocol.
+    #[serde(skip)]
+    LegacyImplementationCheckpointClear { spec: String },
     #[serde(rename = "related.add")]
     RelatedAdd { spec: String, target: String },
     #[serde(rename = "related.remove")]
@@ -209,8 +210,7 @@ impl Operation {
             | Self::OwnerRemove { spec, .. }
             | Self::PinSet { spec, .. }
             | Self::PinClear { spec }
-            | Self::ImplementationCheckpointSet { spec, .. }
-            | Self::ImplementationCheckpointClear { spec }
+            | Self::LegacyImplementationCheckpointClear { spec }
             | Self::RelatedAdd { spec, .. }
             | Self::RelatedRemove { spec, .. }
             | Self::RequirementLevelSet { spec, .. }
@@ -274,8 +274,9 @@ impl Operation {
             Self::OwnerRemove { .. } => "owner.remove",
             Self::PinSet { .. } => "pin.set",
             Self::PinClear { .. } => "pin.clear",
-            Self::ImplementationCheckpointSet { .. } => "implementation.checkpoint.set",
-            Self::ImplementationCheckpointClear { .. } => "implementation.checkpoint.clear",
+            Self::LegacyImplementationCheckpointClear { .. } => {
+                "legacy.implementation.checkpoint.clear"
+            }
             Self::RelatedAdd { .. } => "related.add",
             Self::RelatedRemove { .. } => "related.remove",
             Self::RequirementLevelSet { .. } => "requirement.level.set",

@@ -306,10 +306,18 @@ fn implementation(specs_dir: PathBuf, command: ImplementationCommands) -> Result
         ImplementationCommands::Status { id, json } => {
             commands::implementation::status(&specs_dir, id.as_deref(), json)
         }
-        ImplementationCommands::Verify { id, at } => {
-            commands::implementation::verify(&specs_dir, &id, at.as_deref())
+        ImplementationCommands::Verify { ids, all, at } => {
+            commands::implementation::verify(&specs_dir, &ids, all, at.as_deref())
         }
-        ImplementationCommands::Clear { id } => commands::implementation::clear(&specs_dir, &id),
+        ImplementationCommands::Revoke { id, reason } => {
+            commands::implementation::revoke(&specs_dir, &id, &reason)
+        }
+        ImplementationCommands::Clear { id } => {
+            commands::implementation::revoke(&specs_dir, &id, "legacy clear command")
+        }
+        ImplementationCommands::MigrateAttestations => {
+            commands::implementation::migrate_attestations(&specs_dir)
+        }
     }
 }
 

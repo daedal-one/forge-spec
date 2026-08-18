@@ -145,10 +145,9 @@ fn check_work_items(registry: &SpecRegistry) -> Vec<Diagnostic> {
             }
         }
         for group in groups {
-            if registry
-                .get_by_id(group)
-                .is_none_or(|target| target.universal.entity_type != EntityType::Topic)
-            {
+            if registry.get_by_id(group).map_or(true, |target| {
+                target.universal.entity_type != EntityType::Topic
+            }) {
                 diagnostics.push(Diagnostic::error(
                     "R032",
                     format!("TASK group '{group}' must resolve to TOPIC"),
@@ -157,10 +156,9 @@ fn check_work_items(registry: &SpecRegistry) -> Vec<Diagnostic> {
             }
         }
         for blocker in blocked_by {
-            if registry
-                .get_by_id(blocker)
-                .is_none_or(|target| target.universal.entity_type != EntityType::Task)
-            {
+            if registry.get_by_id(blocker).map_or(true, |target| {
+                target.universal.entity_type != EntityType::Task
+            }) {
                 diagnostics.push(Diagnostic::error(
                     "R032",
                     format!("TASK blocker '{blocker}' must resolve to TASK"),

@@ -260,17 +260,7 @@ impl CandidateWorkspace {
                 .doc_mut(spec)?
                 .replace_frontmatter_scalar("pinned_at", value),
             PinClear { spec } => self.doc_mut(spec)?.remove_frontmatter_key("pinned_at"),
-            ImplementationCheckpointSet { spec, commit } => {
-                if self.documents.get(spec).is_some_and(|document| {
-                    document.semantic.universal.entity_type == EntityType::Task
-                }) {
-                    bail!("TASK work items do not carry implementation-adherence checkpoints; use task completion metadata");
-                }
-                validate_git_oid(commit)?;
-                self.doc_mut(spec)?
-                    .replace_frontmatter_scalar("implemented", commit)
-            }
-            ImplementationCheckpointClear { spec } => {
+            LegacyImplementationCheckpointClear { spec } => {
                 if self.documents.get(spec).is_some_and(|document| {
                     document.semantic.universal.entity_type == EntityType::Task
                 }) {
@@ -1647,16 +1637,19 @@ mod tests {
     }
 
     #[test]
-    fn implementation_checkpoint_set_and_clear_are_typed_and_validated() {
+    fn legacy_checkpoint_cleanup_is_internal_to_the_typed_engine() {
         let temp = workspace();
         let checkpoint = "0123456789abcdef0123456789abcdef01234567";
-        let set = ChangeRequest::new(vec![Operation::ImplementationCheckpointSet {
-            spec: "REQ:auth/session".into(),
-            commit: checkpoint.into(),
-        }]);
-        MutationEngine::new(temp.path())
-            .execute(&set, false)
-            .unwrap();
+        let path = temp.path().join("auth/session.spec.md");
+        let content = fs::read_to_string(&path).unwrap();
+        fs::write(
+            &path,
+            content.replace(
+                "owners: [carlo]\n",
+                &format!("owners: [carlo]\nimplemented: {checkpoint}\n"),
+            ),
+        )
+        .unwrap();
         let registry = SpecRegistry::load(temp.path()).unwrap();
         assert_eq!(
             registry
@@ -1668,7 +1661,7 @@ mod tests {
             Some(checkpoint)
         );
 
-        let clear = ChangeRequest::new(vec![Operation::ImplementationCheckpointClear {
+        let clear = ChangeRequest::new(vec![Operation::LegacyImplementationCheckpointClear {
             spec: "REQ:auth/session".into(),
         }]);
         MutationEngine::new(temp.path())
@@ -1682,13 +1675,8 @@ mod tests {
             .implemented
             .is_none());
 
-        let invalid = ChangeRequest::new(vec![Operation::ImplementationCheckpointSet {
-            spec: "REQ:auth/session".into(),
-            commit: "short".into(),
-        }]);
-        assert!(MutationEngine::new(temp.path())
-            .execute(&invalid, false)
-            .is_err());
+        let public_set = r#"{"schema":"forge-spec-change/v1","operations":[{"op":"implementation.checkpoint.set","spec":"REQ:auth/session","commit":"0123456789abcdef0123456789abcdef01234567"}]}"#;
+        assert!(serde_json::from_str::<ChangeRequest>(public_set).is_err());
     }
 
     #[test]

@@ -285,10 +285,25 @@ fn render_adherence(id: &str, adherence: Option<&AdherenceSnapshot>, out: &mut S
         return;
     };
     out.push_str(&format!(
-        "    <adherence state=\"{}\" complete=\"{}\" provider=\"{}\">\n",
+        "    <adherence state=\"{}\" complete=\"{}\" provider=\"{}\" intent-digest=\"{}\"{}{}>\n",
         state.state.as_str(),
         state.complete,
         escape_xml(&snapshot.provider),
+        escape_xml(&state.intent_digest),
+        state
+            .attestation_id
+            .as_ref()
+            .map_or_else(String::new, |id| format!(
+                " attestation-id=\"{}\"",
+                escape_xml(id)
+            )),
+        state
+            .checkpoint
+            .as_ref()
+            .map_or_else(String::new, |checkpoint| format!(
+                " checkpoint=\"{}\"",
+                escape_xml(checkpoint)
+            )),
     ));
     for reason in &state.reasons {
         out.push_str(&format!("      <reason>{}</reason>\n", escape_xml(reason)));
@@ -329,6 +344,7 @@ fn escape_xml(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::intellect::{AdherenceState, SpecAdherence, WorkspaceState, INTELLECT_PROTOCOL};
     use crate::render::scope::{compute_scope, DetailLevel};
 
     #[test]
@@ -364,5 +380,60 @@ mod tests {
         let requirement = output.find("<spec id=\"REQ:demo/work\"").unwrap();
         assert!(project < requirement);
         assert!(output.contains("<descendant id=\"REQ:demo/work\""));
+    }
+
+    #[test]
+    fn renders_external_attestation_identity_and_intent_digest() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("_config.toml"),
+            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("_project.spec.md"),
+            "---\nid: PROJECT:demo\ntype: project\nstatus: accepted\nsummary: Demo purpose.\nowners: [dev]\n---\n\n# Demo\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("req.spec.md"),
+            "---\nid: REQ:demo/work\ntype: requirement\nstatus: accepted\nsummary: Work.\nowners: [dev]\nlevel: MUST\nrefines: []\n---\n\n# Work\n",
+        )
+        .unwrap();
+        let registry = SpecRegistry::load(temp.path()).unwrap();
+        let scope = compute_scope(
+            &registry,
+            "REQ:demo/work",
+            DetailLevel::None,
+            DetailLevel::None,
+            None,
+        );
+        let snapshot = AdherenceSnapshot {
+            schema: INTELLECT_PROTOCOL.into(),
+            provider: "forge-intellect".into(),
+            provider_version: "0.2.0".into(),
+            workspace: WorkspaceState {
+                root: temp.path().display().to_string(),
+                head: "0123456789abcdef0123456789abcdef01234567".into(),
+                worktree: "clean".into(),
+            },
+            complete: true,
+            specifications: vec![SpecAdherence {
+                id: "REQ:demo/work".into(),
+                intent_digest: "intent-digest".into(),
+                attestation_id: Some("attestation-id".into()),
+                checkpoint: Some("0123456789abcdef0123456789abcdef01234567".into()),
+                state: AdherenceState::Current,
+                complete: true,
+                reasons: vec!["evidence is current".into()],
+                evidence: vec!["source:src/lib.rs".into()],
+            }],
+        };
+
+        let output = render_agent(&registry, &scope, Some(&snapshot));
+        assert!(output.contains("state=\"current\" complete=\"true\""));
+        assert!(output.contains("intent-digest=\"intent-digest\""));
+        assert!(output.contains("attestation-id=\"attestation-id\""));
+        assert!(output.contains("checkpoint=\"0123456789abcdef0123456789abcdef01234567\""));
     }
 }

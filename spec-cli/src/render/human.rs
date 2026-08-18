@@ -91,7 +91,9 @@ fn render_frontmatter_table(
         out.push_str(&format!("| **Pinned at** | `{sha}` |\n"));
     }
     if let Some(ref sha) = u.implemented {
-        out.push_str(&format!("| **Implemented** | `{sha}` |\n"));
+        out.push_str(&format!(
+            "| **Legacy implementation checkpoint** | `{sha}` |\n"
+        ));
     }
     if let Some(snapshot) = adherence {
         if let Some(state) = snapshot.get(&doc.id_str()) {
@@ -100,6 +102,14 @@ fn render_frontmatter_table(
                 "| **Intellect provider** | {} {} |\n",
                 snapshot.provider, snapshot.provider_version
             ));
+            if let Some(attestation) = &state.attestation_id {
+                out.push_str(&format!(
+                    "| **Adherence attestation** | `{attestation}` |\n"
+                ));
+            }
+            if let Some(checkpoint) = &state.checkpoint {
+                out.push_str(&format!("| **Verified checkpoint** | `{checkpoint}` |\n"));
+            }
             if !state.reasons.is_empty() {
                 out.push_str(&format!(
                     "| **Adherence reason** | {} |\n",

@@ -12,7 +12,6 @@ related:
   - REQ:core/intellect-provider
   - REQ:core/project-root
   - REQ:core/typed-mutation
-implemented: 66e39f141d227d388ddee95964feedc03069dfdb
 ---
 
 # Orthogonal implementation work
@@ -36,10 +35,10 @@ implemented: 66e39f141d227d388ddee95964feedc03069dfdb
 - {#c-impact} Change-impact and relation inspection MUST report addressed work
   separately from the specification closure. Work-item changes MUST NOT imply
   that intended behavior changed.
-- {#c-adherence} Authored implementation checkpoints and provider-derived
-  adherence MUST apply only to durable specification entities. TASK completion
-  evidence MUST remain workflow metadata and MUST NOT become implementation
-  evidence for an addressed specification.
+- {#c-adherence} External adherence attestations and provider-derived state MUST
+  apply only to durable specification entities. TASK completion evidence MUST
+  remain workflow metadata and MUST NOT become implementation evidence for an
+  addressed specification.
 - {#c-projection} Canonical projection MUST publish durable specifications and
   work items as distinct collections, with typed task-address and task-blocker
   relationships that downstream graph consumers cannot confuse with

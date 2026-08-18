@@ -25,9 +25,9 @@ In scope:
   explicitly enrolled project documentation.
 - Tracking refinement (a high-level requirement decomposed into
   sub-requirements) at clause-level granularity.
-- Recording the exact commit at which each spec was last verified as
-  implemented, and deriving its present code-adherence state through a local
-  intellect provider.
+- Recording immutable external attestations for exact specification and code
+  states, and deriving present code adherence through a local intellect
+  provider without changing tracked specification bytes.
 - Producing two render targets from the same source: human (Markdown for
   Pandoc / Typst / static-site rendering) and agent (structured envelope
   optimized for LLM context).
@@ -140,7 +140,7 @@ body that may contain typed fenced divs.
 | `summary`    | conditional        | required if any other spec references this one                     |
 | `owners`     | yes                | non-empty list of identifiers                                      |
 | `pinned_at`  | no                 | git SHA used to resolve `src:` references                          |
-| `implemented`| no; never on TASK  | full Git object ID at which complete adherence was last verified   |
+| `implemented`| legacy only; never on TASK | deprecated checkpoint migrated to an external attestation |
 | `related`    | no                 | list of related spec IDs (informational, no graph semantics)       |
 | `supersedes` | no                 | spec ID this one replaces                                          |
 | `superseded_by` | no              | reverse pointer; auto-managed by `spec lifecycle supersede`        |
@@ -525,26 +525,27 @@ references resolve against HEAD. Pin when:
 - A historical spec describes behavior at a specific commit (e.g., a
   superseded ADR).
 
-### 7.4 `implemented`
+### 7.4 External adherence attestations
 
-`implemented` is an authored attestation containing one complete Git object
-ID. It means the specification's complete normative content was checked
-against code at that commit. It is not a cached `current` flag and it is never
-advanced by migration, history indexing, or inference. The current adherence
-state is derived by the configured intellect provider for the exact selected
-HEAD and working-tree identity (§10.6).
+Adherence is an immutable observation, not authored specification content.
+`spec implementation verify` asks the configured provider to append an
+external attestation binding the durable specification ID, canonical normative
+intent digest, candidate Git commit and tree, declared source boundary,
+provider and policy identity, verifier, time, completeness, and evidence. The
+operation does not change `HEAD`, the index, or working-tree bytes.
 
-TASK never carries `implemented`. A migrated TASK checkpoint becomes
-`completion_checkpoint`, which records workflow evidence only. Historical
-`Spec-Ref: TASK:... (implements)` trailers remain auditable legacy events but
-are not implementation-adherence evidence for either the task or the durable
-specifications it addresses. New implementation trailers target durable
-specification IDs or anchors directly.
+Forge Intellect retains the canonical content-addressed record in append-only
+history and replicates it through `refs/notes/forge-spec/adherence`. Revocation
+appends a tombstone; it never deletes the original record. The current
+adherence state remains derived for the exact selected workspace (§10.6).
 
-Because recording the field itself changes a specification file, provider
-comparison ignores only the `implemented:` scalar when deciding whether the
-specification's normative content changed. All other frontmatter and body
-changes invalidate the earlier verification boundary.
+Legacy durable-spec `implemented` fields remain readable only for migration.
+`spec implementation migrate-attestations` imports their evidence before it
+removes the scalars with one validated workspace mutation. TASK never
+participates in adherence; its `completion_checkpoint` remains workflow
+metadata. Historical
+`Spec-Ref: TASK:... (implements)` trailers are auditable legacy events but are
+not adherence evidence.
 
 ---
 
@@ -676,9 +677,10 @@ config in `.specs/_lint.toml`.
 | `R027`      | error    | `spec:doc:` path targets are enrolled                               |
 | `R028`      | error    | `spec:doc:` heading paths resolve uniquely                          |
 | `R029`      | error    | Ordinary relative Markdown links resolve within enrolled documentation |
-| `R030`      | error    | `implemented` or TASK `completion_checkpoint` is a full Git object ID |
+| `R030`      | error    | Legacy `implemented` and TASK `completion_checkpoint` values are full Git object IDs |
 | `R031`      | error    | Configured intellect provider is supported by the active baseline     |
 | `R032`      | error    | TASK addresses durable entities, groups under TOPIC, and blocks on TASK |
+| `R033`      | warning  | Durable-spec `implemented` is legacy and should be migrated externally |
 | `R-redir`   | info     | Reference traverses a redirect                                       |
 
 `status: draft` downgrades `R002`–`R012` from error to warning. This is the
@@ -720,8 +722,9 @@ Subcommands:
 | `spec task ...`                     | list/update work progress, addressing, labels, groups, blockers, ownership, schedule, and completion checkpoint |
 | `spec implementation provider start\|status\|stop` | manage the shared worktree provider              |
 | `spec implementation status [id]`  | pull current adherence state from the intellect provider       |
-| `spec implementation verify <id>`  | verify adherence and record the exact successful checkpoint    |
-| `spec implementation clear <id>`   | remove the authored implementation checkpoint                  |
+| `spec implementation verify <id>... [--all]` | verify and append external attestations without tracked writes |
+| `spec implementation revoke <id>`  | append a reasoned revocation tombstone                          |
+| `spec implementation migrate-attestations` | import and remove legacy `implemented` fields          |
 | `spec history show\|rebuild`        | query or atomically regenerate derived Git history            |
 | `spec migrate plan\|apply`          | safely inspect or apply composed format migrations            |
 | `spec lsp`                          | run the forge-spec language server over stdio                 |
@@ -787,7 +790,7 @@ patterns explicitly with `spec change documentation collection-add`.
 The v0.4→v0.5 migration adds
 `intellect_provider = "forge-intellect"`, advances the baseline, and leaves
 `implemented` absent on every existing specification. It never invents code
-adherence. Maintainers establish checkpoints individually with
+adherence. Maintainers establish external attestations individually with
 `spec implementation verify` after provider-backed review.
 
 The v0.5→v0.6 migration separates implementation work from durable intent. On
@@ -981,11 +984,18 @@ bytes.
 
 ### 10.6 Intellect providers and code adherence
 
-Forge-spec owns authored intent and the durable `implemented` checkpoint.
-Current adherence is derived observation: forge-spec asks an intellect
-provider to assess those authored inputs against one exact repository state,
-then presents the result without writing it back into lifecycle or work-item
-fields. Forge-intellect is the only provider identity defined by v0.6.
+Forge-spec owns authored intent and its canonical normative digest. Adherence
+attestations are immutable external observations: forge-spec asks an intellect
+provider to record or assess them against one exact repository state, then
+presents the result without writing it into lifecycle, specification, or
+work-item fields. Forge-intellect is the only provider identity defined by
+v0.6.
+
+The `forge-spec-intent-v1` digest covers the specification ID and type,
+summary, source-reference pin, type-specific normative attributes, typed blocks
+and clauses, and body. It excludes file placement, lifecycle, stewardship
+metadata, and the legacy `implemented` scalar. Declared source paths and their
+Git content digest form a separate evidence boundary in the attestation.
 
 Adherence-aware commands discover or atomically start one lightweight
 `forge-intellect provider serve` process scoped to the Git worktree. Concurrent
@@ -1006,28 +1016,30 @@ remains available for protocol diagnostics, but ordinary forge-spec commands
 use the shared server.
 
 Every client performs a health handshake and requests one coherent snapshot.
-The protocol schema is `forge-spec-intellect/v1`. Each request contains:
+The protocol schema is `forge-spec-intellect/v2`. It defines health,
+adherence, attest, revoke, legacy-import, and shutdown operations. Each
+adherence subject contains:
 
 - the canonical workspace root, full HEAD object ID, and a deterministic
   identity for all tracked and untracked working-tree bytes;
-- every selected durable specification's ID, type, lifecycle state, relative path,
-  authored `implemented` checkpoint, and unique referenced source paths; and
-- an optional candidate checkpoint used only by
-  `spec implementation verify`.
+- every selected durable specification's ID, type, lifecycle state, canonical
+  intent digest, relative path, unique referenced source paths, and optional
+  legacy checkpoint; and
+- an exact candidate supplied only for attestation recording.
 
 The provider independently recomputes the workspace identity and rejects a
 request if HEAD, working-tree bytes, root, protocol, or specification set is
 incoherent. The response repeats that exact workspace state and identifies the
-provider name and version. Every per-spec result retains the authored or
-candidate checkpoint, one state, an evidence-completeness flag, ordered
-reasons, and explicit evidence boundaries. Responses with missing, duplicate,
-or unexpected spec IDs are invalid.
+provider name and version. Every per-spec result retains the canonical intent
+digest, selected attestation ID and checkpoint, one state, an
+evidence-completeness flag, ordered reasons, and explicit evidence boundaries.
+Responses with missing, duplicate, or unexpected spec IDs are invalid.
 
 The derived state vocabulary is:
 
 | state | meaning |
 |-------|---------|
-| `unverified` | no implementation checkpoint has been authored |
+| `unverified` | no active external attestation or legacy checkpoint exists |
 | `current` | complete provider evidence supports adherence at the exact requested state |
 | `stale` | normative spec content or bounded source evidence changed after verification |
 | `partial` | some, but not all, required evidence resolved |
@@ -1036,7 +1048,7 @@ The derived state vocabulary is:
 | `unresolved` | the checkpoint, spec, source, or selected history cannot be resolved |
 | `not-applicable` | the entity has no code-adherence predicate, such as a pure topic or glossary entry |
 
-Lifecycle, authored checkpoint, and derived adherence remain separate values
+Lifecycle, immutable attestation, and derived adherence remain separate values
 for durable specifications. TASK progress and completion checkpoints are work
 metadata and never enter the adherence protocol. Render bundles and agent XML
 retain the full durable-specification snapshot, including provider, workspace,
@@ -1067,32 +1079,47 @@ inclusion appends a separate work-item collection and does not add TASK nodes
 to the hierarchy.
 Provider absence, timeout, malformed output, incomplete evidence, or abnormal
 termination is rendered explicitly as `unknown` with a warning; it is never
-converted to `current`. `spec implementation verify` is stricter: it records
-the resolved full commit through the shared typed mutation engine only when
-the provider returns `current` with complete evidence for that candidate.
-Verification failure writes nothing. `spec implementation clear`, lint,
-migration, structural inspection, and unrelated mutations remain usable
-without starting the provider.
+converted to `current`. `spec implementation verify` is stricter: it asks the
+provider to append a canonical, content-addressed attestation only when the
+provider returns `current` with complete evidence for that candidate. It does
+not change `HEAD`, the index, or working-tree bytes. Verification failure
+writes nothing. `spec implementation revoke` appends a revocation tombstone;
+it never deletes attestation history. Lint, structural inspection, and
+unrelated mutations remain usable without starting the provider.
 
 Forge-spec therefore has no build, installation, or mandatory runtime
 dependency on forge-intellect. Read-only adherence surfaces are optional
 enrichment and remain successful with explicit incomplete `unknown` state when
-the provider is unavailable. Only the authoring operation that records a new
-verification checkpoint requires a successful provider assessment and fails
-closed without one. Forge-intellect is installed independently as the global
-`forge-intellect` CLI from its locked `apps/cli` package; installing the
+the provider is unavailable. Only operations that record or revoke an
+attestation, or import a legacy checkpoint, require a successful provider and
+fail closed without one. Forge-intellect is installed independently as the
+global `forge-intellect` CLI from its locked `apps/cli` package; installing the
 provider does not require its optional CodeGraph sidecar or retained daemon.
 
 The v0.6 forge-intellect implementation does not treat a fresh candidate as
-self-verifying merely because no time has elapsed since it. Unless the same
-checkpoint is already authored, the candidate commit must carry an exact
+self-verifying merely because no time has elapsed since it. The candidate
+commit must carry an exact
 `Spec-Ref: <id> (implements)` trailer before freshness and bounded source
 evidence can produce `current`. Richer semantic evidence may extend this
 provider contract later without weakening the conservative fallback.
 
-Implementation status, verification, and checkpoint commands reject TASK IDs.
-The public mutation vocabulary includes
-`implementation.checkpoint.set`, `implementation.checkpoint.clear`, and
+Forge-intellect stores canonical attestation and revocation objects in its
+append-only ledger under the Git common directory and projects the same logical
+objects into `refs/notes/forge-spec/adherence`, keyed by candidate commit. The
+notes ref can be fetched and pushed like any other explicit Git ref without
+creating a commit on the checked-out branch. Selection considers reachable,
+non-revoked attestations and is deterministic across the ledger and notes
+stores; malformed, conflicting, or inaccessible records fail closed.
+
+`spec implementation migrate-attestations` imports valid legacy `implemented`
+fields as deterministic external attestations before removing those fields
+through the typed mutation engine. An import conflict fails before tracked
+bytes are changed. Legacy-field removal is an internal typed migration step,
+not part of the public mutation vocabulary and not an adherence authoring
+command.
+
+Implementation status, verification, revocation, and migration commands reject
+TASK IDs. The public provider-setting mutation remains
 `intellect.provider.set`. The v0.6 provider name is fixed to
 `forge-intellect`; an unsupported value fails lint and cannot be introduced by
 the typed command surface.

@@ -676,7 +676,7 @@ fn migrate_task_frontmatter(content: &str) -> Result<String> {
     let Some(mapping) = value.as_mapping() else {
         return Ok(content.to_string());
     };
-    if yaml_string(mapping, "type").is_none_or(|value| value != "task") {
+    if yaml_string(mapping, "type") != Some("task") {
         return Ok(content.to_string());
     }
 

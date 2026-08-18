@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
@@ -14,7 +14,7 @@ use crate::model::id::EntityType;
 use crate::model::reference::SpecReference;
 use crate::model::registry::SpecRegistry;
 
-pub const INTELLECT_PROTOCOL: &str = "forge-spec-intellect/v1";
+pub const INTELLECT_PROTOCOL: &str = "forge-spec-intellect/v2";
 pub const PROVIDER_CONTROL_SCHEMA: &str = "forge-intellect-provider-control/v1";
 pub const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 300;
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -22,6 +22,7 @@ const START_TIMEOUT: Duration = Duration::from_secs(5);
 const START_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceState {
     pub root: String,
     pub head: String,
@@ -57,8 +58,11 @@ impl AdherenceState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SpecAdherence {
     pub id: String,
+    pub intent_digest: String,
+    pub attestation_id: Option<String>,
     pub checkpoint: Option<String>,
     pub state: AdherenceState,
     pub complete: bool,
@@ -109,6 +113,9 @@ impl AdherenceSnapshot {
             .filter(|document| document.universal.entity_type != EntityType::Task)
             .map(|document| SpecAdherence {
                 id: document.id_str(),
+                intent_digest: crate::projection::specification_intent_digest(document)
+                    .unwrap_or_else(|_| "unavailable".into()),
+                attestation_id: None,
                 checkpoint: document.universal.implemented.clone(),
                 state: AdherenceState::Unknown,
                 complete: false,
@@ -136,6 +143,26 @@ enum ProviderRequest {
         authorization: String,
     },
     Adherence {
+        schema: &'static str,
+        authorization: String,
+        workspace: WorkspaceState,
+        specifications: Vec<SpecificationRequest>,
+    },
+    Attest {
+        schema: &'static str,
+        authorization: String,
+        workspace: WorkspaceState,
+        specifications: Vec<SpecificationRequest>,
+        candidate: String,
+    },
+    Revoke {
+        schema: &'static str,
+        authorization: String,
+        workspace: WorkspaceState,
+        specifications: Vec<SpecificationRequest>,
+        reason: String,
+    },
+    ImportLegacy {
         schema: &'static str,
         authorization: String,
         workspace: WorkspaceState,
@@ -173,13 +200,14 @@ struct SpecificationRequest {
     id: String,
     entity_type: String,
     status: String,
-    implemented: Option<String>,
-    candidate: Option<String>,
+    intent_digest: String,
+    legacy_checkpoint: Option<String>,
     path: String,
     source_paths: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct HealthResponse {
     schema: String,
     response: String,
@@ -189,6 +217,7 @@ struct HealthResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AdherenceResponse {
     schema: String,
     response: String,
@@ -200,15 +229,52 @@ struct AdherenceResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ShutdownResponse {
     schema: String,
     response: String,
 }
 
-pub fn fetch(
+enum ClientOperation<'a> {
+    Status,
+    Attest {
+        ids: &'a BTreeSet<String>,
+        candidate: &'a str,
+    },
+    Revoke {
+        ids: &'a BTreeSet<String>,
+        reason: &'a str,
+    },
+    ImportLegacy {
+        ids: &'a BTreeSet<String>,
+    },
+}
+
+pub fn fetch(registry: &SpecRegistry) -> Result<AdherenceSnapshot> {
+    exchange(registry, ClientOperation::Status)
+}
+
+pub fn attest(
     registry: &SpecRegistry,
-    candidates: &BTreeMap<String, String>,
+    ids: &BTreeSet<String>,
+    candidate: &str,
 ) -> Result<AdherenceSnapshot> {
+    exchange(registry, ClientOperation::Attest { ids, candidate })
+}
+
+pub fn revoke(
+    registry: &SpecRegistry,
+    ids: &BTreeSet<String>,
+    reason: &str,
+) -> Result<AdherenceSnapshot> {
+    exchange(registry, ClientOperation::Revoke { ids, reason })
+}
+
+pub fn import_legacy(registry: &SpecRegistry, ids: &BTreeSet<String>) -> Result<AdherenceSnapshot> {
+    exchange(registry, ClientOperation::ImportLegacy { ids })
+}
+
+fn exchange(registry: &SpecRegistry, operation: ClientOperation<'_>) -> Result<AdherenceSnapshot> {
     if registry.config.intellect_provider != DEFAULT_INTELLECT_PROVIDER {
         bail!(
             "unsupported intellect provider '{}'; this release supports only '{DEFAULT_INTELLECT_PROVIDER}'",
@@ -218,10 +284,17 @@ pub fn fetch(
 
     let root = workspace_root(&registry.specs_dir)?;
     let workspace = workspace_state(&root)?;
+    let selected = match &operation {
+        ClientOperation::Status => None,
+        ClientOperation::Attest { ids, .. }
+        | ClientOperation::Revoke { ids, .. }
+        | ClientOperation::ImportLegacy { ids } => Some(*ids),
+    };
     let mut specifications = registry
         .documents
         .iter()
         .filter(|document| document.universal.entity_type != EntityType::Task)
+        .filter(|document| selected.map_or(true, |ids| ids.contains(&document.id_str())))
         .map(|document| {
             let source_path = if document.source_path.is_absolute() {
                 document.source_path.clone()
@@ -253,14 +326,27 @@ pub fn fetch(
                 id: document.id_str(),
                 entity_type: document.universal.entity_type.prefix().into(),
                 status: document.universal.status.as_str().into(),
-                implemented: document.universal.implemented.clone(),
-                candidate: candidates.get(&document.id_str()).cloned(),
+                intent_digest: crate::projection::specification_intent_digest(document)?,
+                legacy_checkpoint: document.universal.implemented.clone(),
                 path,
                 source_paths,
             })
         })
         .collect::<Result<Vec<_>>>()?;
     specifications.sort_by(|left, right| left.id.cmp(&right.id));
+    if let Some(ids) = selected {
+        let actual = specifications
+            .iter()
+            .map(|specification| specification.id.clone())
+            .collect::<BTreeSet<_>>();
+        if &actual != ids {
+            let missing = ids.difference(&actual).cloned().collect::<Vec<_>>();
+            bail!(
+                "unknown or inapplicable specification(s): {}",
+                missing.join(", ")
+            );
+        }
+    }
 
     let control = ensure_service(&root, DEFAULT_IDLE_TIMEOUT_SECONDS)?;
     let mut client = ProviderClient::connect(&control)?;
@@ -276,27 +362,64 @@ pub fn fetch(
         bail!("intellect provider returned an invalid health response");
     }
 
-    let response: AdherenceResponse = client.exchange(&ProviderRequest::Adherence {
-        schema: INTELLECT_PROTOCOL,
-        authorization: control.authorization.clone(),
-        workspace: workspace.clone(),
-        specifications,
-    })?;
+    let (request, expected_response) = match operation {
+        ClientOperation::Status => (
+            ProviderRequest::Adherence {
+                schema: INTELLECT_PROTOCOL,
+                authorization: control.authorization.clone(),
+                workspace: workspace.clone(),
+                specifications,
+            },
+            "adherence",
+        ),
+        ClientOperation::Attest { candidate, .. } => (
+            ProviderRequest::Attest {
+                schema: INTELLECT_PROTOCOL,
+                authorization: control.authorization.clone(),
+                workspace: workspace.clone(),
+                specifications,
+                candidate: candidate.into(),
+            },
+            "attest",
+        ),
+        ClientOperation::Revoke { reason, .. } => (
+            ProviderRequest::Revoke {
+                schema: INTELLECT_PROTOCOL,
+                authorization: control.authorization.clone(),
+                workspace: workspace.clone(),
+                specifications,
+                reason: reason.into(),
+            },
+            "revoke",
+        ),
+        ClientOperation::ImportLegacy { .. } => (
+            ProviderRequest::ImportLegacy {
+                schema: INTELLECT_PROTOCOL,
+                authorization: control.authorization.clone(),
+                workspace: workspace.clone(),
+                specifications,
+            },
+            "import-legacy",
+        ),
+    };
+    let response: AdherenceResponse = client.exchange(&request)?;
 
     if response.schema != INTELLECT_PROTOCOL
-        || response.response != "adherence"
+        || response.response != expected_response
         || response.provider != DEFAULT_INTELLECT_PROVIDER
         || response.version != health.version
         || response.workspace != workspace
     {
         bail!("intellect provider returned a response for a different protocol or workspace state");
     }
-    let expected = registry
-        .documents
-        .iter()
-        .filter(|document| document.universal.entity_type != EntityType::Task)
-        .map(|document| document.id_str())
-        .collect::<BTreeSet<_>>();
+    let expected = selected.cloned().unwrap_or_else(|| {
+        registry
+            .documents
+            .iter()
+            .filter(|document| document.universal.entity_type != EntityType::Task)
+            .map(|document| document.id_str())
+            .collect::<BTreeSet<_>>()
+    });
     let actual = response
         .specifications
         .iter()
@@ -317,7 +440,7 @@ pub fn fetch(
 }
 
 pub fn fetch_or_unknown(registry: &SpecRegistry) -> Result<AdherenceSnapshot> {
-    match fetch(registry, &BTreeMap::new()) {
+    match fetch(registry) {
         Ok(snapshot) => Ok(snapshot),
         Err(error) => {
             let reason = format!("intellect provider unavailable: {error:#}");

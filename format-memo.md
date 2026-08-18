@@ -144,7 +144,8 @@ spec change batch --from changes.json --dry-run
 spec task start TASK:auth/foo              # begin implementation work
 spec task address TASK:auth/foo REQ:auth/foo#c-clause
 spec implementation status                 # exact-workspace adherence snapshot
-spec implementation verify REQ:auth/foo    # verify + record full Git checkpoint
+spec implementation verify REQ:auth/foo    # append external attestation; tracked tree unchanged
+spec implementation revoke REQ:auth/foo --reason 'evidence superseded'
 spec implementation provider start         # ensure one background provider
 spec implementation provider status        # inspect this worktree's provider
 spec implementation provider stop          # authenticated shutdown
@@ -176,7 +177,8 @@ referencing an `ADR:` in the same commit.
 | `R027`   | `spec:doc:` path is not enrolled                                     | enroll the file or fix the path            |
 | `R028`   | documentation heading is missing or ambiguous                        | use the exact hierarchical heading path    |
 | `R029`   | ordinary relative Markdown link does not resolve                     | fix or enroll the linked Markdown file     |
-| `R030`   | malformed `implemented` Git object ID                                | use `spec implementation verify <id>`      |
+| `R030`   | malformed legacy checkpoint or TASK completion checkpoint             | repair or clear the malformed value         |
+| `R033`   | legacy durable-spec `implemented` field                               | run `spec implementation migrate-attestations` |
 | `R031`   | unsupported intellect provider                                       | select `forge-intellect`                    |
 | `R032`   | invalid TASK addressing, grouping, or blocking target                 | link work items to valid durable specs, topics, or tasks |
 | `R-redir`| reference traversed a redirect (info)                              | rewrite to the canonical target           |

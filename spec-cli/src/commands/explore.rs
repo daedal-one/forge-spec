@@ -906,7 +906,7 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
             ]));
             if let Some(implemented) = &doc.universal.implemented {
                 lines.push(Line::from(vec![
-                    Span::styled("implemented", Style::default().fg(Color::DarkGray)),
+                    Span::styled("legacy    ", Style::default().fg(Color::DarkGray)),
                     Span::raw(format!(" {implemented}")),
                 ]));
             }
@@ -926,6 +926,12 @@ fn draw_detail(f: &mut ratatui::Frame, app: &App, area: Rect) {
                         app.adherence.provider, app.adherence.provider_version
                     )),
                 ]));
+                if let Some(attestation) = &state.attestation_id {
+                    lines.push(Line::from(vec![
+                        Span::styled("attestation", Style::default().fg(Color::DarkGray)),
+                        Span::raw(format!(" {attestation}")),
+                    ]));
+                }
                 for reason in &state.reasons {
                     lines.push(Line::from(format!("  ↳ {reason}")));
                 }

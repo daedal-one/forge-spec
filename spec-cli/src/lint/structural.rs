@@ -83,7 +83,15 @@ pub fn check_implemented_checkpoint(doc: &SpecDocument) -> Vec<Diagnostic> {
             .chars()
             .all(|character| character.is_ascii_hexdigit())
     {
-        Vec::new()
+        if field == "implemented" {
+            vec![Diagnostic::warning(
+                "R033",
+                "legacy implemented checkpoint should be migrated with `spec implementation migrate-attestations`",
+                doc.source_path.clone(),
+            )]
+        } else {
+            Vec::new()
+        }
     } else {
         vec![Diagnostic::error(
             "R030",
@@ -239,7 +247,7 @@ pub fn check_type_specific_fields(doc: &SpecDocument) -> Vec<Diagnostic> {
 
     match (&doc.universal.entity_type, &doc.type_fields) {
         (EntityType::Project, TypeSpecificFields::Project) => {}
-        (EntityType::Req, TypeSpecificFields::Requirement { level: _, .. }) => {
+        (EntityType::Req, TypeSpecificFields::Requirement { .. }) => {
             // level has a default; nothing strictly required beyond universal
         }
         (
@@ -451,6 +459,25 @@ mod tests {
         let diagnostics = check_implemented_checkpoint(&document);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "R030");
+    }
+
+    #[test]
+    fn valid_legacy_implementation_checkpoint_requires_external_migration() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("requirement.spec.md");
+        std::fs::write(
+            &path,
+            "---\nid: REQ:demo/checkpoint\ntype: requirement\nstatus: accepted\nsummary: Checkpoint.\nowners: [dev]\nimplemented: 0123456789abcdef0123456789abcdef01234567\nlevel: MUST\nrefines: []\n---\n\n# Checkpoint\n",
+        )
+        .unwrap();
+        let document = crate::parse::parse_document(&path).unwrap();
+        let diagnostics = check_implemented_checkpoint(&document);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "R033");
+        assert_eq!(
+            diagnostics[0].severity,
+            crate::lint::diagnostic::Severity::Warning
+        );
     }
 
     #[test]

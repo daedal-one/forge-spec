@@ -183,22 +183,19 @@ pub fn coverage(registry: &SpecRegistry, id: &str) -> Vec<CoverageEntry> {
         std::collections::BTreeMap::new();
 
     for child_doc in &registry.documents {
-        match &child_doc.type_fields {
-            TypeSpecificFields::Requirement { refines, .. } => {
-                for refine_target in refines {
-                    if let Some(anchor_pos) = refine_target.find('#') {
-                        let doc_id = &refine_target[..anchor_pos];
-                        let anchor = &refine_target[anchor_pos + 1..];
-                        if doc_id == id {
-                            req_children
-                                .entry(anchor.to_string())
-                                .or_default()
-                                .push(child_doc.id_str());
-                        }
+        if let TypeSpecificFields::Requirement { refines, .. } = &child_doc.type_fields {
+            for refine_target in refines {
+                if let Some(anchor_pos) = refine_target.find('#') {
+                    let doc_id = &refine_target[..anchor_pos];
+                    let anchor = &refine_target[anchor_pos + 1..];
+                    if doc_id == id {
+                        req_children
+                            .entry(anchor.to_string())
+                            .or_default()
+                            .push(child_doc.id_str());
                     }
                 }
             }
-            _ => {}
         }
     }
 

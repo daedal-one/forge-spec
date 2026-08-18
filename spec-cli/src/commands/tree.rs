@@ -56,9 +56,10 @@ pub fn run(
     let has_visible_tasks = include_tasks
         && registry.documents.iter().any(|document| {
             document.universal.entity_type == EntityType::Task
-                && namespace_filter
-                    .is_none_or(|namespace| document.universal.id.namespace == namespace)
-                && type_filter.is_none_or(|entity_type| entity_type.eq_ignore_ascii_case("TASK"))
+                && namespace_filter.map_or(true, |namespace| {
+                    document.universal.id.namespace == namespace
+                })
+                && type_filter.map_or(true, |entity_type| entity_type.eq_ignore_ascii_case("TASK"))
         });
     if grouped.is_empty() && project.is_none() && !has_visible_tasks {
         println!("(no specs match the filter)");
@@ -162,7 +163,9 @@ fn render_work_items(
         .iter()
         .filter(|document| document.universal.entity_type == EntityType::Task)
         .filter(|document| {
-            namespace_filter.is_none_or(|namespace| document.universal.id.namespace == namespace)
+            namespace_filter.map_or(true, |namespace| {
+                document.universal.id.namespace == namespace
+            })
         })
         .collect::<Vec<_>>();
     tasks.sort_by_key(|document| document.id_str());

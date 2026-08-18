@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -122,18 +122,85 @@ pub fn status(specs_dir: &Path, id: Option<&str>, json: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn verify(specs_dir: &Path, id: &str, at: Option<&str>) -> Result<()> {
+pub fn verify(specs_dir: &Path, ids: &[String], all: bool, at: Option<&str>) -> Result<()> {
     let registry = SpecRegistry::load(specs_dir)?;
-    let document = registry
-        .get_by_id(id)
-        .with_context(|| format!("unknown specification '{id}'"))?;
-    if document.universal.entity_type == EntityType::Task {
-        bail!("TASK work items cannot be implementation-verified; verify the durable specification they address");
+    if all && !ids.is_empty() {
+        bail!("implementation verify accepts explicit IDs or --all, not both");
+    }
+    if !all && ids.is_empty() {
+        bail!("implementation verify requires at least one specification ID or --all");
     }
     let commit = resolve_commit(specs_dir, at.unwrap_or("HEAD"))?;
-    let mut candidates = BTreeMap::new();
-    candidates.insert(id.to_string(), commit.clone());
-    let snapshot = intellect::fetch(&registry, &candidates)?;
+    let selected = if all {
+        implementation_trailer_ids(specs_dir, &commit)?
+    } else {
+        ids.iter().cloned().collect::<BTreeSet<_>>()
+    };
+    if selected.is_empty() {
+        bail!("candidate commit has no durable Spec-Ref (implements) trailers");
+    }
+    validate_durable_selection(&registry, &selected)?;
+    let snapshot = intellect::attest(&registry, &selected, &commit)?;
+    for id in &selected {
+        let state = require_complete_current(&snapshot, id, "record adherence attestation")?;
+        let attestation = state
+            .attestation_id
+            .as_deref()
+            .context("provider returned current adherence without an attestation ID")?;
+        println!("Verified {id} at {commit} · attestation {attestation}");
+    }
+    Ok(())
+}
+
+pub fn revoke(specs_dir: &Path, id: &str, reason: &str) -> Result<()> {
+    let registry = SpecRegistry::load(specs_dir)?;
+    let selected = BTreeSet::from([id.to_string()]);
+    validate_durable_selection(&registry, &selected)?;
+    let snapshot = intellect::revoke(&registry, &selected, reason)?;
+    let state = snapshot
+        .get(id)
+        .with_context(|| format!("provider omitted specification '{id}'"))?;
+    if state.attestation_id.is_some() {
+        bail!("provider retained a selected attestation after revocation");
+    }
+    println!("Revoked adherence for {id} · {reason}");
+    Ok(())
+}
+
+pub fn migrate_attestations(specs_dir: &Path) -> Result<()> {
+    let registry = SpecRegistry::load(specs_dir)?;
+    let selected = registry
+        .documents
+        .iter()
+        .filter(|document| document.universal.entity_type != EntityType::Task)
+        .filter(|document| document.universal.implemented.is_some())
+        .map(|document| document.id_str())
+        .collect::<BTreeSet<_>>();
+    if selected.is_empty() {
+        println!("No legacy implementation checkpoints to migrate");
+        return Ok(());
+    }
+    let snapshot = intellect::import_legacy(&registry, &selected)?;
+    for id in &selected {
+        let state = require_complete_current(&snapshot, id, "migrate legacy checkpoint")?;
+        if state.attestation_id.is_none() {
+            bail!("provider imported '{id}' without returning an attestation ID");
+        }
+    }
+    let operations = selected
+        .iter()
+        .map(|id| Operation::LegacyImplementationCheckpointClear { spec: id.clone() })
+        .collect();
+    crate::commands::change::run_operations(specs_dir, operations)?;
+    println!("Migrated {} legacy adherence checkpoint(s)", selected.len());
+    Ok(())
+}
+
+fn require_complete_current<'a>(
+    snapshot: &'a AdherenceSnapshot,
+    id: &str,
+    action: &str,
+) -> Result<&'a SpecAdherence> {
     let state = snapshot
         .get(id)
         .with_context(|| format!("provider omitted specification '{id}'"))?;
@@ -144,26 +211,39 @@ pub fn verify(specs_dir: &Path, id: &str, at: Option<&str>) -> Result<()> {
             state.reasons.join("; ")
         };
         bail!(
-            "cannot record implementation checkpoint for '{id}': provider reports {} ({reasons})",
+            "cannot {action} for '{id}': provider reports {} ({reasons})",
             state.state.as_str()
         );
     }
-    crate::commands::change::run_operations(
-        specs_dir,
-        vec![Operation::ImplementationCheckpointSet {
-            spec: id.into(),
-            commit: commit.clone(),
-        }],
-    )?;
-    println!("Verified {id} at {commit}");
+    Ok(state)
+}
+
+fn validate_durable_selection(registry: &SpecRegistry, ids: &BTreeSet<String>) -> Result<()> {
+    for id in ids {
+        let document = registry
+            .get_by_id(id)
+            .with_context(|| format!("unknown specification '{id}'"))?;
+        if document.universal.entity_type == EntityType::Task {
+            bail!("TASK work items cannot be implementation-verified; verify the durable specification they address");
+        }
+    }
     Ok(())
 }
 
-pub fn clear(specs_dir: &Path, id: &str) -> Result<()> {
-    crate::commands::change::run_operations(
-        specs_dir,
-        vec![Operation::ImplementationCheckpointClear { spec: id.into() }],
-    )
+fn implementation_trailer_ids(specs_dir: &Path, commit: &str) -> Result<BTreeSet<String>> {
+    let root = specs_dir.parent().unwrap_or_else(|| Path::new("."));
+    let events = crate::history::trailers::walk_trailers_from(root, Some(commit))?;
+    Ok(events
+        .into_iter()
+        .filter(|event| event.full_sha == commit && event.kind == "implements")
+        .map(|event| {
+            event
+                .spec_ref
+                .split_once('#')
+                .map_or(event.spec_ref.clone(), |(id, _)| id.to_string())
+        })
+        .filter(|id| !id.starts_with("TASK:"))
+        .collect())
 }
 
 fn selected_states<'a>(

@@ -68,10 +68,11 @@ Leave new documents as `draft` until their content has been reviewed or is clear
    context and navigation, never as implied refinement, coverage, or normative
    authority.
 7. Record genuine cross-spec links. Do not invent dependencies, ownership, decisions, or guarantees that project evidence does not support.
-8. Treat `implemented` as an authored full-commit attestation, not a status
-   label. Pull derived state with `spec implementation status` and record a
-   checkpoint only through `spec implementation verify <id>`, after the
-   configured forge-intellect provider returns complete current evidence.
+8. Keep adherence outside tracked specification bytes. Pull derived state with
+   `spec implementation status`; append an immutable attestation with
+   `spec implementation verify <id>` only after the configured forge-intellect
+   provider returns complete current evidence. Migrate any legacy `implemented`
+   fields with `spec implementation migrate-attestations`.
 9. Keep TASK work items outside the durable hierarchy and adherence model. Link
    them with `addresses`, use task labels/groups/blockers for work metadata, and
    inspect them explicitly with `spec inspect tree --include-tasks` or

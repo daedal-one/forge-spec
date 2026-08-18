@@ -7,7 +7,7 @@ This repo uses the **Specs Format v0.6** to capture durable project intent and o
 - Specs live in `.specs/` as `.spec.md` files with YAML frontmatter + CommonMark body.
 - The singleton root uses `PROJECT:slug`; every other spec uses `TYPE:namespace/slug` (e.g. `REQ:auth/session-expiry`).
 - `.specs/_config.toml` declares `baseline = "forge-spec-v0.6.0"`, selects `project = "PROJECT:slug"`, and defaults `intellect_provider = "forge-intellect"`; per-file revisions are derived from Git.
-- On durable specifications, `implemented: <full-git-oid>` is an authored last-verified checkpoint. Use `spec implementation status` for derived adherence and `spec implementation verify <id>` to record it safely. TASK work items are excluded from adherence.
+- Durable specifications contain no adherence checkpoint fields. Use `spec implementation verify <id>` to append an external immutable attestation without changing tracked bytes, and `spec implementation status` for derived adherence. TASK work items are excluded from adherence; migrate legacy `implemented` fields with `spec implementation migrate-attestations`.
 - Before changing an older tree, run `spec migrate plan --target agent`; then run `spec migrate apply` and `spec lint`.
 - Durable types: `PROJECT` root description, `REQ` requirement, `INV` invariant, `IFC` interface, `ADR` decision record, `GLO` glossary, `TOPIC` grouping, `SCN` scenario. `TASK` is a transient work item.
 - Durable specifications without an explicit refinement or categorization parent implicitly descend from PROJECT; TASK never participates in hierarchy, refinement, categorization, coverage, or adherence.
@@ -30,6 +30,7 @@ spec new REQ auth/foo          # scaffold
 spec lint                      # validate all rules (pre-commit)
 spec implementation status    # provider-derived adherence for the exact workspace
 spec implementation verify REQ:auth/foo
+spec implementation revoke REQ:auth/foo --reason 'evidence superseded'
 spec implementation provider status  # shared worktree-scoped background provider
 spec render REQ:auth/foo --target=agent --include-docs  # XML with referenced docs
 spec inspect tree                  # durable specification hierarchy

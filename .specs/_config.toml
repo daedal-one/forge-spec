@@ -13,4 +13,4 @@ include = ["README.md","AGENTS.md","format-memo.md","specification.md"]
 id = "integrations"
 title = "Tooling integrations"
 root = "."
-include = ["editors/vscode/README.md","skills/forge-spec/SKILL.md"]
+include = ["editors/vscode/README.md","skills/forge-spec/SKILL.md","skills/forge-spec-consistency/SKILL.md"]

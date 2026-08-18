@@ -1,0 +1,4 @@
+interface:
+  display_name: "Forge Spec Consistency"
+  short_description: "Measure adherence and expose code/spec gaps"
+  default_prompt: "Use $forge-spec-consistency to audit this project, populate evidence-backed adherence, and explain the highest-priority gaps."
