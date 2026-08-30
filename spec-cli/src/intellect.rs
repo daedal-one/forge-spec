@@ -235,6 +235,21 @@ struct ShutdownResponse {
     response: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProviderErrorResponse {
+    schema: String,
+    response: String,
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ProviderResponse<T> {
+    Success(T),
+    Error(ProviderErrorResponse),
+}
+
 enum ClientOperation<'a> {
     Status,
     Attest {
@@ -853,13 +868,39 @@ impl ProviderClient {
         if read == 0 {
             bail!("intellect provider closed the connection without a response");
         }
-        serde_json::from_str(&line).context("decoding intellect provider response")
+        decode_provider_response(&line)
+    }
+}
+
+fn decode_provider_response<T: for<'de> Deserialize<'de>>(line: &str) -> Result<T> {
+    let response: ProviderResponse<T> =
+        serde_json::from_str(line).context("decoding intellect provider response")?;
+    match response {
+        ProviderResponse::Success(response) => Ok(response),
+        ProviderResponse::Error(error) => {
+            if error.schema != INTELLECT_PROTOCOL || error.response != "error" {
+                bail!("intellect provider returned an invalid error response");
+            }
+            bail!("intellect provider rejected request: {}", error.message)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_error_envelope_surfaces_the_rejection_message() {
+        let line = format!(
+            r#"{{"schema":"{INTELLECT_PROTOCOL}","response":"error","message":"candidate is not attestable"}}"#
+        );
+        let error = decode_provider_response::<AdherenceResponse>(&line).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "intellect provider rejected request: candidate is not attestable"
+        );
+    }
 
     #[test]
     fn provider_registration_must_use_loopback() {
