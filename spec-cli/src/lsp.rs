@@ -509,7 +509,9 @@ fn hover(
     let Some(token) = spec_token_at(&document.text, line, character) else {
         return Ok(Value::Null);
     };
-    let Some(reference) = parse_spec_url(token) else {
+    let Some(reference) =
+        parse_spec_url(token).or_else(|| parse_spec_url(&format!("spec:{token}")))
+    else {
         return Ok(Value::Null);
     };
     let markdown = match reference {
@@ -566,7 +568,9 @@ fn definition(
     let Some(token) = spec_token_at(&document.text, line, character) else {
         return Ok(Value::Null);
     };
-    let Some(reference) = parse_spec_url(token) else {
+    let Some(reference) =
+        parse_spec_url(token).or_else(|| parse_spec_url(&format!("spec:{token}")))
+    else {
         return Ok(Value::Null);
     };
     match reference {
@@ -622,7 +626,8 @@ fn references(
     let Some(token) = spec_token_at(&document.text, line, character) else {
         return Ok(json!([]));
     };
-    let Some(target) = parse_spec_url(token) else {
+    let Some(target) = parse_spec_url(token).or_else(|| parse_spec_url(&format!("spec:{token}")))
+    else {
         return Ok(json!([]));
     };
     let registry = registry_for(workspace, document)?;
@@ -705,6 +710,14 @@ fn document_symbols(
         return Ok(json!([]));
     };
     let mut children = Vec::new();
+    for (id, line) in &spec.model_anchor_lines {
+        let line = line.saturating_sub(1) as u32;
+        children.push(
+            json!({"name":id,"detail":"Model / scenario declaration","kind":19,
+            "range":range(line,0,line,line_utf16_len(&document.text,line)),
+            "selectionRange":range(line,0,line,line_utf16_len(&document.text,line))}),
+        );
+    }
     for block in &spec.blocks {
         let mut clauses = Vec::new();
         for clause in &block.clauses {
@@ -884,6 +897,15 @@ fn completion_item(
             "range": range(line, start_character, line, character),
             "newText": new_text
         });
+    } else if let Some(byte_start) = [
+        "PROJECT:", "REQ:", "INV:", "IFC:", "ADR:", "GLO:", "TOPIC:", "SCN:", "TASK:",
+    ]
+    .iter()
+    .filter_map(|kind| prefix.rfind(kind))
+    .max()
+    {
+        let start_character = prefix[..byte_start].encode_utf16().count() as u32;
+        item["textEdit"] = json!({"range":range(line,start_character,line,character),"newText":new_text.strip_prefix("spec:").unwrap_or(new_text)});
     } else {
         item["insertText"] = Value::String(new_text.to_string());
     }
@@ -902,6 +924,9 @@ fn definition_line(document: &SpecDocument, anchor: Option<&str>) -> u32 {
             })
             .unwrap_or(1) as u32;
     };
+    if let Some(line) = document.model_anchor_lines.get(anchor) {
+        return line.saturating_sub(1) as u32;
+    }
     document
         .blocks
         .iter()
@@ -922,10 +947,25 @@ fn definition_line(document: &SpecDocument, anchor: Option<&str>) -> u32 {
 fn spec_token_at(text: &str, line: u32, character: u32) -> Option<&str> {
     let line = text.lines().nth(line as usize)?;
     let cursor = utf16_to_byte(line, character);
-    for (start, _) in line.match_indices("spec:") {
+    let mut starts = line
+        .match_indices("spec:")
+        .map(|(start, _)| start)
+        .collect::<Vec<_>>();
+    for prefix in [
+        "PROJECT:", "REQ:", "INV:", "IFC:", "ADR:", "GLO:", "TOPIC:", "SCN:", "TASK:",
+    ] {
+        starts.extend(
+            line.match_indices(prefix)
+                .filter(|(start, _)| !line[..*start].ends_with("spec:"))
+                .map(|(start, _)| start),
+        );
+    }
+    starts.sort();
+    for start in starts {
         let end = line[start..]
             .find(|character: char| {
-                character.is_whitespace() || matches!(character, ')' | ']' | '}' | '>' | '"' | '\'')
+                character.is_whitespace()
+                    || matches!(character, ')' | ']' | '}' | '>' | '"' | '\'' | ',')
             })
             .map(|offset| start + offset)
             .unwrap_or(line.len());
@@ -1014,6 +1054,31 @@ fn notify_index_changed(connection: &Connection, workspace: &WorkspaceIndex) -> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bare_model_references_support_unicode_and_yaml_delimiters() {
+        let text = "from: [PROJECT:demo#api, PROJECT:demo#client]";
+        assert_eq!(super::spec_token_at(text, 0, 20), Some("PROJECT:demo#api"));
+        let text = "ééé PROJECT:demo#api";
+        assert_eq!(super::spec_token_at(text, 0, 12), Some("PROJECT:demo#api"));
+        let completion = super::completion_item(
+            "PROJECT:demo#api",
+            6,
+            None,
+            "spec:PROJECT:demo#api",
+            "from: PROJECT:de",
+            0,
+            16,
+        );
+        assert_eq!(completion["textEdit"]["newText"], "PROJECT:demo#api");
+    }
+    #[test]
+    fn model_definition_uses_unsaved_frontmatter_position() {
+        let text="---\nid: PROJECT:demo\ntype: project\nmodel:\n  subjects:\n    - id: api\n      kind: service\n      title: API\n---\n# Demo\n";
+        let doc =
+            crate::parse::parse_content(std::path::Path::new("unsaved.spec.md"), text).unwrap();
+        assert_eq!(super::definition_line(&doc, Some("api")), 5);
+    }
+
     use super::*;
     use std::thread;
 
@@ -1041,7 +1106,7 @@ mod tests {
         std::fs::create_dir_all(&specs_dir).unwrap();
         std::fs::write(
             specs_dir.join("_config.toml"),
-            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -1198,7 +1263,7 @@ mod tests {
         std::fs::create_dir_all(&docs_dir).unwrap();
         std::fs::write(
             specs_dir.join("_config.toml"),
-            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+            "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
         )
         .unwrap();
         std::fs::write(
@@ -1271,7 +1336,7 @@ mod tests {
         std::fs::create_dir_all(&docs_dir).unwrap();
         std::fs::write(
             specs_dir.join("_config.toml"),
-            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+            "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
         )
         .unwrap();
         std::fs::write(

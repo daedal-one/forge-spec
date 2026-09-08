@@ -84,6 +84,8 @@ pub fn parse_frontmatter(
         related,
         supersedes: raw.supersedes,
         superseded_by: raw.superseded_by,
+        model: raw.model,
+        flow: raw.flow,
     };
 
     // Parse type-specific fields

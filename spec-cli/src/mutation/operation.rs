@@ -31,6 +31,26 @@ impl ChangeRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", deny_unknown_fields)]
 pub enum Operation {
+    #[serde(rename = "view.replace")]
+    ViewReplace {
+        value: crate::model::architecture::View,
+    },
+    #[serde(rename = "view.remove")]
+    ViewRemove { id: String },
+    #[serde(rename = "model.replace")]
+    ModelReplace {
+        spec: String,
+        value: crate::model::architecture::ModelFacet,
+    },
+    #[serde(rename = "model.clear")]
+    ModelClear { spec: String },
+    #[serde(rename = "scenario.flow.replace")]
+    ScenarioFlowReplace {
+        spec: String,
+        value: crate::model::architecture::ScenarioFlow,
+    },
+    #[serde(rename = "scenario.flow.clear")]
+    ScenarioFlowClear { spec: String },
     #[serde(rename = "summary.replace")]
     SummaryReplace { spec: String, value: String },
     #[serde(rename = "owner.add")]
@@ -205,7 +225,11 @@ pub enum Operation {
 impl Operation {
     pub fn primary_spec(&self) -> Option<&str> {
         match self {
-            Self::SummaryReplace { spec, .. }
+            Self::ModelReplace { spec, .. }
+            | Self::ModelClear { spec }
+            | Self::ScenarioFlowReplace { spec, .. }
+            | Self::ScenarioFlowClear { spec }
+            | Self::SummaryReplace { spec, .. }
             | Self::OwnerAdd { spec, .. }
             | Self::OwnerRemove { spec, .. }
             | Self::PinSet { spec, .. }
@@ -263,12 +287,21 @@ impl Operation {
             | Self::TaskEtaSet { spec, .. }
             | Self::TaskEtaClear { spec }
             | Self::SpecRename { spec, .. } => Some(spec),
-            Self::DocumentationCollectionAdd { .. } | Self::IntellectProviderSet { .. } => None,
+            Self::ViewReplace { .. }
+            | Self::ViewRemove { .. }
+            | Self::DocumentationCollectionAdd { .. }
+            | Self::IntellectProviderSet { .. } => None,
         }
     }
 
     pub fn name(&self) -> &'static str {
         match self {
+            Self::ModelReplace { .. } => "model.replace",
+            Self::ModelClear { .. } => "model.clear",
+            Self::ScenarioFlowReplace { .. } => "scenario.flow.replace",
+            Self::ScenarioFlowClear { .. } => "scenario.flow.clear",
+            Self::ViewReplace { .. } => "view.replace",
+            Self::ViewRemove { .. } => "view.remove",
             Self::SummaryReplace { .. } => "summary.replace",
             Self::OwnerAdd { .. } => "owner.add",
             Self::OwnerRemove { .. } => "owner.remove",

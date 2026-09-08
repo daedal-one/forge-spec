@@ -238,7 +238,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         write(
             &temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n",
         );
         write(
             &temp.path().join("_project.spec.md"),

@@ -8,7 +8,7 @@ use spec_cli::projection::{
     SPEC_STATE_SCHEMA_VERSION,
 };
 
-const CONFIG: &str = "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n";
+const CONFIG: &str = "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n";
 
 const PROJECT: &str = r#"---
 id: PROJECT:demo
@@ -428,7 +428,7 @@ fn projects_configured_documentation_links_headings_and_overlay_deltas() {
     let specs = temp.path().join(".specs");
     write(
         &specs.join("_config.toml"),
-        "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+        "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
     );
     write(
         &specs.join("_project.spec.md"),

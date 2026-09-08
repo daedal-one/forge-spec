@@ -64,8 +64,15 @@ pub fn for_path(path: &Path) -> Result<FileRevision> {
         .count() as u64;
 
     let status = Command::new("git")
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .arg("-C")
         .arg(&root)
+        .args([
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+        ])
         .args(["status", "--porcelain", "--untracked-files=all", "--"])
         .arg(relative)
         .output()

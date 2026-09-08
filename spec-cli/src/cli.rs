@@ -111,6 +111,11 @@ pub struct InspectArgs {
 
 #[derive(Subcommand)]
 pub enum InspectCommands {
+    /// Export the canonical, read-only semantic model and revision envelope
+    Model {
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the project-rooted specification tree
     Tree {
         #[arg(long)]

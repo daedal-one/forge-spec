@@ -84,7 +84,14 @@ impl MutationEngine {
 
         let registry = candidate.registry()?;
         validate_workspace_contracts(&registry)?;
-        let diagnostics = lint::lint_all(&registry);
+        let mut diagnostics = lint::lint_all(&registry);
+        if let Some(bytes) = candidate
+            .extra_writes
+            .get(&self.specs_dir.join("_views.toml"))
+        {
+            diagnostics.retain(|d| d.code != "R036");
+            diagnostics.extend(crate::model::architecture::parse_views(Some(bytes), &registry).1);
+        }
         let introduced = diagnostics
             .iter()
             .filter(|diagnostic| diagnostic.severity == Severity::Error)
@@ -122,10 +129,16 @@ impl MutationEngine {
                     index: index + 1,
                     operation: operation.name(),
                     spec: operation.primary_spec().map(str::to_string),
-                    config: operation
-                        .primary_spec()
-                        .is_none()
-                        .then_some(".specs/_config.toml"),
+                    config: operation.primary_spec().is_none().then_some(
+                        if matches!(
+                            operation,
+                            Operation::ViewReplace { .. } | Operation::ViewRemove { .. }
+                        ) {
+                            ".specs/_views.toml"
+                        } else {
+                            ".specs/_config.toml"
+                        },
+                    ),
                 })
                 .collect(),
             files,
@@ -251,6 +264,25 @@ impl CandidateWorkspace {
     fn apply(&mut self, operation: &Operation) -> Result<()> {
         use Operation::*;
         match operation {
+            ViewReplace { value } => self.update_view(Some(value), &value.id),
+            ViewRemove { id } => self.update_view(None, id),
+            ModelReplace { spec, value } => {
+                if self.doc_mut(spec)?.semantic.universal.entity_type == EntityType::Task {
+                    bail!("TASK cannot own an architecture model");
+                }
+                self.doc_mut(spec)?
+                    .replace_frontmatter_structured("model", value)
+            }
+            ModelClear { spec } => self.doc_mut(spec)?.remove_frontmatter_key("model"),
+            ScenarioFlowReplace { spec, value } => {
+                self.ensure_type(spec, EntityType::Scn)?;
+                self.doc_mut(spec)?
+                    .replace_frontmatter_structured("flow", value)
+            }
+            ScenarioFlowClear { spec } => {
+                self.ensure_type(spec, EntityType::Scn)?;
+                self.doc_mut(spec)?.remove_frontmatter_key("flow")
+            }
             SummaryReplace { spec, value } => self
                 .doc_mut(spec)?
                 .replace_frontmatter_scalar("summary", value),
@@ -727,6 +759,31 @@ impl CandidateWorkspace {
         if old_id.entity_type == EntityType::Project {
             self.update_config_project(old, new)?;
         }
+        let views_path = self.specs_dir.join("_views.toml");
+        if let Some(bytes) = self
+            .extra_writes
+            .get(&views_path)
+            .cloned()
+            .or_else(|| fs::read(&views_path).ok())
+        {
+            let mut file: crate::model::architecture::ViewsFile =
+                toml::from_str(std::str::from_utf8(&bytes)?)?;
+            let original = file.clone();
+            for view in &mut file.views {
+                for reference in view
+                    .focus
+                    .iter_mut()
+                    .chain(view.include.iter_mut())
+                    .chain(view.exclude.iter_mut())
+                {
+                    *reference = replace_id_prefix(reference, old, new);
+                }
+            }
+            if file != original {
+                self.extra_writes
+                    .insert(views_path, toml::to_string_pretty(&file)?.into_bytes());
+            }
+        }
         self.append_redirect(old, new)?;
         if original_path != new_path {
             self.renames.remove(&original_path);
@@ -736,6 +793,22 @@ impl CandidateWorkspace {
     }
 
     fn replace_id_in_document(&mut self, id: &str, old: &str, new: &str) -> Result<()> {
+        if let Some(mut model) = self.documents[id].semantic.universal.model.clone() {
+            let original = model.clone();
+            model.rename_reference(old, new);
+            if model != original {
+                self.doc_mut(id)?
+                    .replace_frontmatter_structured("model", &model)?;
+            }
+        }
+        if let Some(mut flow) = self.documents[id].semantic.universal.flow.clone() {
+            let original = flow.clone();
+            flow.rename_reference(old, new);
+            if flow != original {
+                self.doc_mut(id)?
+                    .replace_frontmatter_structured("flow", &flow)?;
+            }
+        }
         let keys = [
             "related",
             "refines",
@@ -776,6 +849,35 @@ impl CandidateWorkspace {
         }
         self.doc_mut(id)?
             .replace_reference_prefix(&format!("spec:{old}"), &format!("spec:{new}"))?;
+        Ok(())
+    }
+
+    fn update_view(
+        &mut self,
+        value: Option<&crate::model::architecture::View>,
+        id: &str,
+    ) -> Result<()> {
+        let path = self.specs_dir.join("_views.toml");
+        let bytes = self
+            .extra_writes
+            .get(&path)
+            .cloned()
+            .or_else(|| fs::read(&path).ok());
+        let mut file = if let Some(bytes) = bytes {
+            toml::from_str::<crate::model::architecture::ViewsFile>(std::str::from_utf8(&bytes)?)?
+        } else {
+            crate::model::architecture::ViewsFile {
+                schema: "forge-spec-views/v1".into(),
+                views: Vec::new(),
+            }
+        };
+        file.views.retain(|v| v.id != id);
+        if let Some(v) = value {
+            file.views.push(v.clone());
+        }
+        file.views.sort_by(|a, b| a.id.cmp(&b.id));
+        self.extra_writes
+            .insert(path, toml::to_string_pretty(&file)?.into_bytes());
         Ok(())
     }
 
@@ -1333,7 +1435,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         fs::write(
@@ -1590,7 +1692,7 @@ mod tests {
         fs::create_dir_all(temp.path().join("docs/generated")).unwrap();
         fs::write(
             specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         fs::write(
@@ -1687,7 +1789,7 @@ mod tests {
         fs::write(
             temp.path().join("_config.toml"),
             format!(
-                "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = {documentation_root:?}\ninclude = [\"guide.md\"]\n"
+                "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = {documentation_root:?}\ninclude = [\"guide.md\"]\n"
             ),
         )
         .unwrap();

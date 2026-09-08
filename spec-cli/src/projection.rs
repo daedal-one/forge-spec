@@ -25,8 +25,8 @@ use crate::model::id::EntityType;
 use crate::model::reference::{SourceTarget, SpecReference};
 use crate::model::registry::{Redirect, SpecRegistry};
 
-pub const SPEC_STATE_SCHEMA_VERSION: &str = "forge-spec-state-v4";
-pub const SPEC_DELTA_SCHEMA_VERSION: &str = "forge-spec-delta-v4";
+pub const SPEC_STATE_SCHEMA_VERSION: &str = "forge-spec-state-v5";
+pub const SPEC_DELTA_SCHEMA_VERSION: &str = "forge-spec-delta-v5";
 pub const SPEC_CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Repository-relative changes layered over the saved `.specs/` tree.
@@ -116,6 +116,10 @@ pub struct ProjectedSpecification {
     pub related: Vec<String>,
     pub supersedes: Option<String>,
     pub superseded_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<crate::model::architecture::ModelFacet>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow: Option<crate::model::architecture::ScenarioFlow>,
     pub attributes: ProjectedAttributes,
     pub blocks: Vec<ProjectedBlock>,
     pub body: String,
@@ -128,6 +132,10 @@ struct CanonicalSpecificationIntent<'a> {
     entity_type: &'a str,
     summary: &'a Option<String>,
     pinned_at: &'a Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: &'a Option<crate::model::architecture::ModelFacet>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    flow: &'a Option<crate::model::architecture::ScenarioFlow>,
     attributes: &'a ProjectedAttributes,
     blocks: &'a [ProjectedBlock],
     body: &'a str,
@@ -139,12 +147,19 @@ struct CanonicalSpecificationIntent<'a> {
 /// migration do not manufacture a new normative revision.
 pub fn specification_intent_digest(document: &SpecDocument) -> Result<String> {
     let projected = project_specification(document);
+    projected_specification_intent_digest(&projected)
+}
+
+/// Hash an already canonical durable specification with the same normative contract.
+pub fn projected_specification_intent_digest(projected: &ProjectedSpecification) -> Result<String> {
     let bytes = serde_json::to_vec(&CanonicalSpecificationIntent {
         schema: "forge-spec-intent-v1",
         id: &projected.id,
         entity_type: &projected.entity_type,
         summary: &projected.summary,
         pinned_at: &projected.pinned_at,
+        model: &projected.model,
+        flow: &projected.flow,
         attributes: &projected.attributes,
         blocks: &projected.blocks,
         body: &projected.body,
@@ -286,6 +301,9 @@ pub struct ProjectedDiagnostic {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpecState {
     pub schema_version: String,
+    pub model: crate::model::architecture::ProjectedModel,
+    pub scenarios: Vec<crate::model::architecture::ProjectedScenario>,
+    pub views: Vec<crate::model::architecture::View>,
     pub valid: bool,
     pub config: ProjectedConfig,
     pub specifications: Vec<ProjectedSpecification>,
@@ -344,6 +362,9 @@ pub struct SpecDelta {
     pub from_state_schema: String,
     pub to_state_schema: String,
     pub validity_changed: bool,
+    pub model: Option<ModelChange>,
+    pub scenarios: Option<ScenariosChange>,
+    pub views: Option<ViewsChange>,
     pub config: Option<ConfigChange>,
     pub added_specifications: Vec<ProjectedSpecification>,
     pub removed_specifications: Vec<ProjectedSpecification>,
@@ -364,6 +385,22 @@ pub struct SpecDelta {
     pub removed_documentation_links: Vec<ProjectedDocumentationLink>,
     pub added_diagnostics: Vec<ProjectedDiagnostic>,
     pub removed_diagnostics: Vec<ProjectedDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelChange {
+    pub before: crate::model::architecture::ProjectedModel,
+    pub after: crate::model::architecture::ProjectedModel,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScenariosChange {
+    pub before: Vec<crate::model::architecture::ProjectedScenario>,
+    pub after: Vec<crate::model::architecture::ProjectedScenario>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewsChange {
+    pub before: Vec<crate::model::architecture::View>,
+    pub after: Vec<crate::model::architecture::View>,
 }
 
 impl SpecDelta {
@@ -472,6 +509,18 @@ impl SpecDelta {
             from_state_schema: before.schema_version.clone(),
             to_state_schema: after.schema_version.clone(),
             validity_changed: before.valid != after.valid,
+            model: (before.model != after.model).then(|| ModelChange {
+                before: before.model.clone(),
+                after: after.model.clone(),
+            }),
+            scenarios: (before.scenarios != after.scenarios).then(|| ScenariosChange {
+                before: before.scenarios.clone(),
+                after: after.scenarios.clone(),
+            }),
+            views: (before.views != after.views).then(|| ViewsChange {
+                before: before.views.clone(),
+                after: after.views.clone(),
+            }),
             config: (before.config != after.config).then(|| ConfigChange {
                 before: before.config.clone(),
                 after: after.config.clone(),
@@ -518,9 +567,49 @@ impl SpecDelta {
 /// Project the saved specification tree, configured documentation, and an
 /// in-memory repository-relative overlay.
 ///
-/// Overlay keys may be relative to the supplied `.specs/` directory or may
-/// include its repository-relative `.specs/` prefix. Absolute paths and paths
-/// containing `..` are rejected before any input is read.
+/// Project current or v0.6 input read-only into the current state schema.
+/// Historical immutable v4 artifact hashes must be retained; this is a new v5
+/// projection, not a reproduction of prior projector bytes. Older/unknown
+/// baselines remain invalid with their compatibility diagnostics intact.
+pub fn project_compatible(specs_dir: &Path, overlay: &Overlay) -> Result<SpecState> {
+    let mut state = project(specs_dir, overlay)?;
+    // v0.6 has identical legacy semantics; no declarations are inferred or files changed.
+    if state.config.baseline == "forge-spec-v0.6.0" {
+        state
+            .diagnostics
+            .retain(|d| !(d.code == "R024" && d.message.contains("baseline")));
+        let roots = state
+            .specifications
+            .iter()
+            .filter(|s| s.entity_type == "project")
+            .collect::<Vec<_>>();
+        if roots.len() != 1
+            || roots.first().is_some_and(|s| {
+                Some(s.id.as_str()) != state.config.project.as_deref()
+                    || s.summary.as_deref().map_or(true, |s| s.trim().is_empty())
+            })
+        {
+            state.diagnostics.push(ProjectedDiagnostic {
+                code: "R025".into(),
+                severity: ProjectedSeverity::Error,
+                message: "Exactly one configured PROJECT with a summary is required".into(),
+                path: ".specs/_config.toml".into(),
+                line: None,
+                detail: None,
+            });
+        }
+        state.diagnostics.sort();
+        state.valid = state
+            .diagnostics
+            .iter()
+            .all(|d| d.severity != ProjectedSeverity::Error);
+    }
+    Ok(state)
+}
+
+/// Project strict current-baseline input. Overlay keys may be relative to the
+/// supplied `.specs/` directory or include its repository-relative prefix.
+/// Absolute paths and parent traversal are rejected before reading input.
 pub fn project(specs_dir: &Path, overlay: &Overlay) -> Result<SpecState> {
     let repository_root = specs_dir
         .parent()
@@ -601,6 +690,7 @@ fn project_files(
         if !is_spec_repository_path(path) {
             if path == Path::new(".specs/_config.toml")
                 || path == Path::new(".specs/_redirects.toml")
+                || path == Path::new(".specs/_views.toml")
             {
                 continue;
             }
@@ -661,6 +751,13 @@ fn project_files(
         DocumentationIndex::from_documents(Path::new(""), documentation_documents, Vec::new());
     let registry = build_registry(documents, config.clone(), redirects.clone(), documentation);
     raw_diagnostics.extend(projection_lint(&registry));
+    let (views, view_diagnostics) = crate::model::architecture::parse_views(
+        files
+            .get(Path::new(".specs/_views.toml"))
+            .map(Vec::as_slice),
+        &registry,
+    );
+    raw_diagnostics.extend(view_diagnostics);
 
     let specifications = registry
         .documents
@@ -705,6 +802,9 @@ fn project_files(
 
     Ok(SpecState {
         schema_version: SPEC_STATE_SCHEMA_VERSION.into(),
+        model: crate::model::architecture::project_model(&registry),
+        scenarios: crate::model::architecture::project_scenarios(&registry),
+        views,
         valid,
         config: ProjectedConfig {
             baseline: config.baseline,
@@ -789,7 +889,10 @@ fn normalize_overlay_path(_specs_dir: &Path, path: &Path) -> Result<PathBuf> {
 }
 
 fn is_supported_spec_relative_path(path: &Path) -> bool {
-    is_spec_file(path) || path == Path::new("_config.toml") || path == Path::new("_redirects.toml")
+    is_spec_file(path)
+        || path == Path::new("_config.toml")
+        || path == Path::new("_redirects.toml")
+        || path == Path::new("_views.toml")
 }
 
 fn is_specification_input(path: &Path) -> bool {
@@ -960,6 +1063,7 @@ fn projection_lint(registry: &SpecRegistry) -> Vec<Diagnostic> {
         }
         diagnostics.extend(document_diagnostics);
     }
+    diagnostics.extend(crate::model::architecture::validate(registry));
     diagnostics.extend(crate::lint::structural::check_spec_config(registry));
     diagnostics.extend(crate::lint::structural::check_project_root(registry));
     diagnostics.extend(crate::lint::structural::check_unique_ids(registry));
@@ -1037,6 +1141,8 @@ fn project_specification(document: &SpecDocument) -> ProjectedSpecification {
         related: sorted(&document.universal.related),
         supersedes: document.universal.supersedes.clone(),
         superseded_by: document.universal.superseded_by.clone(),
+        model: document.universal.model.clone().map(|m| m.normalized()),
+        flow: document.universal.flow.clone(),
         attributes,
         blocks,
         body: document.body_raw.clone(),

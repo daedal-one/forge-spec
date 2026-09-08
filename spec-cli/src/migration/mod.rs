@@ -50,6 +50,11 @@ const MIGRATIONS: &[MigrationDefinition] = &[
         apply: apply_v0_5_to_v0_6,
         verify: verify_v0_5_to_v0_6,
     },
+    MigrationDefinition {
+        guide: include_str!("../../migrations/forge-spec-v0.6.0-to-v0.7.0.yaml"),
+        apply: apply_v0_6_to_v0_7,
+        verify: verify_v0_6_to_v0_7,
+    },
 ];
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -1007,4 +1012,14 @@ mod tests {
         assert!(groups.is_empty());
         assert_eq!(completion_checkpoint.as_deref(), Some(checkpoint));
     }
+}
+
+fn apply_v0_6_to_v0_7(_specs_dir: &Path) -> Result<MigrationStepReport> {
+    Ok(MigrationStepReport::default())
+}
+fn verify_v0_6_to_v0_7(specs_dir: &Path) -> Result<()> {
+    for path in spec_paths(specs_dir)? {
+        crate::parse::parse_document(&path)?;
+    }
+    Ok(())
 }

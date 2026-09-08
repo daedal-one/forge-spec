@@ -14,7 +14,7 @@ fn agent_impact_report_keeps_related_work_outside_spec_and_source_closure() {
     let specs = temp.path().join(".specs");
     write(
         &specs.join("_config.toml"),
-        "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
+        "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n",
     );
     write(
         &specs.join("_project.spec.md"),

@@ -340,7 +340,7 @@ mod tests {
         let specs = temp.keep();
         std::fs::write(
             specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(

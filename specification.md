@@ -1,4 +1,4 @@
-# Specs Format v0.6 — Specification
+# Specs Format v0.7 — Specification
 
 A file format and toolchain for project specifications, designed to be:
 
@@ -155,7 +155,7 @@ The format baseline and singleton project root are declared once for the entire
 spec tree in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.6.0"
+baseline = "forge-spec-v0.7.0"
 project = "PROJECT:forge-spec"
 intellect_provider = "forge-intellect"
 ```
@@ -460,15 +460,36 @@ Soft. A requirement can declare
 Topics themselves are documents (`TOPIC:` prefix). The categorization graph
 is independent of the refinement graph.
 
-### 6.4 Composition (deferred)
+### 6.4 Architectural subjects, composition and scenario behavior
 
-v0.6 does not have a first-class `COMP:` type. If a requirement describes a
-component, set `kind: component` on the requirement. Future v2 work may
-introduce `COMP:` and migrate `kind: component` requirements to it.
+Durable documents MAY declare the typed `model` facet: `subjects`,
+`interactions`, and `about`. A subject is distinct from its owning document;
+its canonical identity is `OWNER#local-id`. Subject kinds are extensible domain
+vocabulary. Composition (`part_of`) is acyclic and independent of refinement,
+project membership and categorization, and permits multiple parents.
+Interactions have explicit subject endpoints and governing durable references.
+`about` connects a durable document to a registered subject. TASK cannot own
+these declarations. Existing free-form interface/invariant participant strings
+remain unregistered declarations.
 
-`applies_to:` exists today as a free-form list of component identifiers
-(e.g., `[auth-service, gateway]`). It is not validated against any registry
-in v0.6.
+Only SCN MAY declare typed `flow`: unique subject `participants` and ordered
+`steps`. Step variants are `interaction`, `parallel`, and `alternatives`, with
+closed validated fields. All step and branch anchors share the document's
+anchor namespace. Interactions may repeat as distinct steps; parallel groups
+and alternatives preserve their authored structure. Participants/endpoints and
+all governing references must resolve. Unsupported variants are parse errors.
+No behavior is inferred from legacy prose.
+
+Named view recipes live separately in `.specs/_views.toml`, schema
+`forge-spec-views/v1`. Each view has `id`, `title`, `mode` (map, architecture,
+scenarios or work), optional canonical `focus`, optional `depth` (0–32),
+`include` and `exclude` canonical selectors, and optional `profile` (generic
+or c4). Missing selectors are diagnostics. These presentation fields never
+participate in normative intent digests.
+
+The complete field grammar and examples are in
+[Architectural model](docs/architecture-model.md). Every `model` and `flow`
+field there is normative; renderer-specific presentation remains optional.
 
 ---
 
@@ -688,6 +709,11 @@ escape hatch for scratch specs; it is not meant to be permanent.
 
 ---
 
+Additional v0.7 validation: `R034` rejects invalid architecture/flow declarations,
+endpoint or reference errors and model anchor collisions; `R035` rejects
+composition cycles; `R036` rejects malformed views and unresolved selectors.
+These errors are not downgraded for draft documents.
+
 ## 10. Tooling
 
 The core CLI is a single `spec` binary with no runtime dependency on the host
@@ -753,8 +779,8 @@ describes exactly one adjacent baseline transition and contains:
 - an idempotent mechanical transformation implemented by the CLI.
 
 Migration artifacts compose in format release order. Given a tree at
-`forge-spec-v0.1.0`, CLI v0.7 plans and applies
-`v0.1 -> v0.2 -> v0.3 -> v0.4 -> v0.5 -> v0.6` in one
+`forge-spec-v0.1.0`, CLI v0.8 plans and applies
+`v0.1 -> v0.2 -> v0.3 -> v0.4 -> v0.5 -> v0.6 -> v0.7` in one
 invocation rather than requiring a direct migration for every version pair.
 The CLI release does not create a format migration when stored document syntax
 is unchanged. Historical artifacts remain shipped with future CLIs.
@@ -773,7 +799,7 @@ cycles, ambiguous routes, and a `--from` value that conflicts with a declared
 project baseline.
 
 Missing `_config.toml` is inferred as v0.1 when legacy per-file version fields
-are present, as the current v0.6 shape when a valid PROJECT document exists,
+are present, as the current v0.7 shape when a valid PROJECT document exists,
 and as v0.2
 otherwise. The v0.2→v0.3 migration creates a deterministic draft project
 document, reuses existing owners, and records the source baseline before the
@@ -895,7 +921,7 @@ and the desire to ship a single static binary.
 
 ### 10.4 Typed workspace mutation
 
-CLI v0.7 implements the v0.6 document format. Every supported document writer
+CLI v0.8 implements the v0.7 document format. Every supported document writer
 and documentation-collection mutation uses one Rust transaction engine. The
 public batch envelope is:
 
@@ -953,11 +979,11 @@ The Rust library exposes a read-only projection surface for consumers that need
 specification semantics at an unsaved workspace state. Its inputs are one saved
 `.specs/` directory and a map of repository-relative overlay entries. An entry
 can create or replace bytes, or delete the corresponding saved input. Supported
-inputs are `.spec.md`, `_config.toml`, `_redirects.toml`, and generic Markdown
+inputs are `.spec.md`, `_config.toml`, `_redirects.toml`, `_views.toml`, and generic Markdown
 matched by the overlaid configuration's documentation collections; absolute
 paths and parent-directory traversal are rejected before projection.
 
-`forge-spec-state-v4` deterministically orders and serializes semantic
+`forge-spec-state-v5` deterministically orders and serializes semantic
 configuration, durable `specifications`, orthogonal `work_items`, typed blocks
 and clause anchors, redirects,
 explicit relationships, synthesized PROJECT containment, documentation
@@ -975,7 +1001,7 @@ schedule, completion metadata, and body, but appear outside
 `TaskAddresses` and `TaskBlockedBy`; TASK source references are not projected
 as specification implementation evidence.
 
-`forge-spec-delta-v4` compares two canonical states and reports added, removed,
+`forge-spec-delta-v5` compares two canonical states and reports added, removed,
 and changed specifications, work items, and documentation plus documentation-link,
 redirect, relationship, source-reference, diagnostic, validity, and
 configuration changes. Projecting or diffing performs no workspace writes.
@@ -1179,7 +1205,7 @@ Symbolic enforcement point:
 
 ---
 
-## 12. Open issues for v0.6 → v1
+## 12. Open issues for v0.7 → v1
 
 - **Component first-class type (`COMP:`).** Deferred. Trigger condition for
   introducing it: more than ~5 requirements with `kind: component` and a
@@ -1191,7 +1217,7 @@ Symbolic enforcement point:
 
 - **Cross-repo references.** Useful for monorepo / multi-repo organizations.
   The `spec:` URL scheme is extensible (`spec:other-repo/REQ:foo`); resolution
-  needs a registry. Out of scope for v0.6.
+  uses the explicit subject registry when authored; legacy participant strings remain unregistered.
 
 - **Symbolic clause-coverage proof.** The current coverage check is
   syntactic: every clause has at least one refining child. A semantic check
@@ -1205,3 +1231,19 @@ Symbolic enforcement point:
   that depend on RFC 2119 keywords (`R017`) are English-only. Multi-language
   projects should disable `R017` and rely on `level:` in typed-block
   attributes.
+
+
+### v0.7 machine export and typed model operations
+
+`spec inspect model --json` is the supported read-only `forge-spec-model/v1`
+envelope over state v5. It includes canonical state/cache digest, durable-only
+`intent_digests`, projector version, baseline, capabilities and explicit nullable
+per-file Git revisions. `commit` identifies the snapshot HEAD. v0.6 is accepted
+read-only; v0.6→v0.7 migration advances configuration without rewriting prose.
+
+Typed operations `model.replace`, `model.clear`, `scenario.flow.replace`,
+`scenario.flow.clear`, `view.replace` and `view.remove` use the existing atomic
+transaction engine. Semantic model and flow edits change normative digests;
+view edits do not. State v5 exposes `model`, `scenarios` and `views` as distinct
+collections; delta v5 adds their nullable `{before, after}` changes. Existing
+per-spec digests remain byte-compatible when model and flow are absent.

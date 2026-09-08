@@ -1,4 +1,4 @@
-baseline = "forge-spec-v0.6.0"
+baseline = "forge-spec-v0.7.0"
 project = "PROJECT:forge-spec"
 
 intellect_provider = "forge-intellect"
@@ -14,3 +14,9 @@ id = "integrations"
 title = "Tooling integrations"
 root = "."
 include = ["editors/vscode/README.md","skills/forge-spec/SKILL.md","skills/forge-spec-consistency/SKILL.md"]
+
+[[documentation]]
+id = "architecture-guides"
+title = "Architecture and scenario authoring"
+root = "docs"
+include = ["architecture-model.md"]

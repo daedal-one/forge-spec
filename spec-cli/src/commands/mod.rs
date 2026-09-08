@@ -12,6 +12,7 @@ pub mod init;
 pub mod lifecycle;
 pub mod lint;
 pub mod migrate;
+pub mod model;
 pub mod new;
 pub mod query;
 pub mod relation;

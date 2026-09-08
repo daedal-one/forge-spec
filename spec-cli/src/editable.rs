@@ -138,6 +138,22 @@ impl EditableDocument {
         Ok(())
     }
 
+    pub fn replace_frontmatter_structured<T: serde::Serialize>(
+        &mut self,
+        key: &str,
+        value: &T,
+    ) -> Result<()> {
+        // Replace only this typed facet, preserving unrelated frontmatter and body bytes.
+        let mut mapping = serde_yaml::Mapping::new();
+        mapping.insert(
+            serde_yaml::Value::String(key.into()),
+            serde_yaml::to_value(value)?,
+        );
+        let yaml = serde_yaml::to_string(&mapping)?;
+        let yaml = yaml.strip_prefix("---\n").unwrap_or(&yaml);
+        self.replace_or_append_frontmatter(key, yaml.replace('\n', self.line_ending.as_str()))
+    }
+
     pub fn replace_frontmatter_scalar(&mut self, key: &str, value: &str) -> Result<()> {
         self.replace_frontmatter_value(key, &yaml_scalar(value))
     }

@@ -142,6 +142,10 @@ pub struct UniversalFrontmatter {
     pub related: Vec<String>,
     pub supersedes: Option<String>,
     pub superseded_by: Option<String>,
+    #[serde(default)]
+    pub model: Option<super::architecture::ModelFacet>,
+    #[serde(default)]
+    pub flow: Option<super::architecture::ScenarioFlow>,
 }
 
 /// Type-specific frontmatter fields.
@@ -198,6 +202,10 @@ pub struct RawFrontmatter {
     pub related: Option<Vec<String>>,
     pub supersedes: Option<String>,
     pub superseded_by: Option<String>,
+    #[serde(default)]
+    pub model: Option<super::architecture::ModelFacet>,
+    #[serde(default)]
+    pub flow: Option<super::architecture::ScenarioFlow>,
     // REQ fields
     pub level: Option<String>,
     pub refines: Option<Vec<String>>,

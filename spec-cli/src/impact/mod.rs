@@ -1781,7 +1781,7 @@ mod tests {
         let specs = temp.path().join(".specs");
         write(
             &specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n",
         );
         write(&specs.join("_project.spec.md"), project());
         write(
@@ -2008,7 +2008,7 @@ mod tests {
         let specs = temp.path().join(".specs");
         write(
             &specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+            "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
         );
         write(
             &temp.path().join("docs/guide.md"),

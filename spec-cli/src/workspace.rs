@@ -22,7 +22,7 @@ use crate::model::id::EntityType;
 use crate::model::reference::{SourceTarget, SpecReference};
 use crate::model::registry::SpecRegistry;
 
-const CACHE_SCHEMA_VERSION: &str = "5";
+const CACHE_SCHEMA_VERSION: &str = "6";
 
 #[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -699,7 +699,7 @@ fn explorer_document(document: &SpecDocument, registry: &SpecRegistry) -> Explor
         ),
         _ => (Vec::new(), Vec::new(), Vec::new(), None),
     };
-    let blocks = document
+    let mut blocks: Vec<ExplorerBlock> = document
         .blocks
         .iter()
         .flat_map(|block| {
@@ -720,6 +720,17 @@ fn explorer_document(document: &SpecDocument, registry: &SpecRegistry) -> Explor
                 .collect::<Vec<_>>()
         })
         .collect();
+    blocks.extend(
+        document
+            .model_anchor_lines
+            .iter()
+            .map(|(id, line)| ExplorerBlock {
+                id: id.clone(),
+                kind: "model".into(),
+                line: *line,
+                text: id.clone(),
+            }),
+    );
     let sources = document
         .references
         .iter()
@@ -1038,7 +1049,7 @@ mod tests {
         std::fs::create_dir_all(&specs).unwrap();
         std::fs::write(
             specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -1070,7 +1081,7 @@ mod tests {
         std::fs::create_dir_all(&docs).unwrap();
         std::fs::write(
             specs.join("_config.toml"),
-            "baseline = \"forge-spec-v0.6.0\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+            "baseline = \"forge-spec-v0.7.0\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
         )
         .unwrap();
         let guide = docs.join("start.md");

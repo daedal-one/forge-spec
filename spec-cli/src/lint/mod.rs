@@ -55,6 +55,9 @@ pub fn lint_all_with_options(
         diags.extend(doc_diags);
     }
 
+    diags.extend(crate::model::architecture::validate(registry));
+    diags.extend(crate::model::architecture::validate_saved_views(registry));
+
     // Registry-wide checks
     diags.extend(structural::check_spec_config(registry));
     diags.extend(structural::check_intellect_provider(registry));

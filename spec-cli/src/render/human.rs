@@ -45,6 +45,20 @@ fn render_full(
     // Header table
     render_frontmatter_table(doc, registry, adherence, out);
     out.push('\n');
+    for (label, value) in [
+        (
+            "Architectural model",
+            doc.universal.model.as_ref().map(serde_yaml::to_string),
+        ),
+        (
+            "Scenario flow",
+            doc.universal.flow.as_ref().map(serde_yaml::to_string),
+        ),
+    ] {
+        if let Some(Ok(value)) = value {
+            out.push_str(&format!("### {label}\n\n```yaml\n{value}```\n\n"));
+        }
+    }
     // Body
     out.push_str(&doc.body_raw);
     if !doc.body_raw.ends_with('\n') {

@@ -18,7 +18,7 @@ mechanically validated.
 
 ## What's here
 
-- `specification.md` — the full Specs Format v0.6 specification
+- `specification.md` — the full Specs Format v0.7 specification
 - `format-memo.md` — one-page cheat sheet
 - `AGENTS.md` — compact reference for AI coding agents
 - `example/` — a working `.specs/` tree demonstrating the format
@@ -214,7 +214,7 @@ line with `spec:src:path/file.ts:42-78` or by language-server symbol with
 The spec tree declares its format once in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.6.0"
+baseline = "forge-spec-v0.7.0"
 project = "PROJECT:example"
 intellect_provider = "forge-intellect"
 ```
@@ -263,7 +263,7 @@ git fetch origin refs/notes/forge-spec/adherence:refs/notes/forge-spec/adherence
 TASK work items are excluded from provider requests and implementation commands;
 their progress and optional `completion_checkpoint` are workflow metadata only.
 The default tree hides them, while `--include-tasks` appends a separate work-item
-section. v0.6 defaults to and supports only the `forge-intellect` provider, but
+section. v0.7 defaults to and supports only the `forge-intellect` provider, but
 forge-spec has no build, installation, or mandatory runtime dependency on it. Lint, migration,
 mutation, impact, inspection, LSP, and other non-adherence workflows run
 without the provider. Read-only adherence surfaces such as tree, render,
@@ -340,10 +340,10 @@ Use `--from` when an unconfigured legacy tree cannot be inferred and `--to` to
 target a specific supported baseline. The baseline is updated only after every
 format transformation and reference redirect succeeds.
 
-## Typed changes in CLI v0.7
+## Typed changes in CLI v0.8
 
-The executable is `spec 0.7.0`; the stored document format is
-`forge-spec-v0.6.0`. Supported writers compile human commands and editor
+The executable is `spec 0.8.0`; the stored document format is
+`forge-spec-v0.7.0`. Supported writers compile human commands and editor
 actions into the same closed Rust operation enum. A versioned batch can group
 changes across the workspace:
 
@@ -382,12 +382,12 @@ availability must be enforced rather than reported as a warning.
 Rust consumers can project a saved `.specs/` tree plus a multi-file in-memory
 overlay through `spec_cli::projection`. Overlay entries create, replace, or
 delete spec, configuration, redirect, and configured Markdown inputs without
-writing them to disk. The result is a deterministic `forge-spec-state-v4`
+writing them to disk. The result is a deterministic `forge-spec-state-v5`
 schema containing normalized durable specifications, a separate work-item
 collection, clauses, relationships, documentation, cross-surface links, source
 selectors, and diagnostics; invalid intermediate input remains visible as an
 invalid state. `SpecState::diff` produces a deterministic
-`forge-spec-delta-v4` semantic delta.
+`forge-spec-delta-v5` semantic delta.
 
 The projection surface deliberately performs no language-server lookup and
 contains no ledger, session, or temporal-graph policy. Downstream systems may
@@ -395,3 +395,16 @@ hash or retain the canonical bytes while forge-spec stays independently useful
 as the authority for specification semantics.
 
 See `specification.md` for the full format definition.
+
+
+### Architecture and scenario views
+
+Forge Spec v0.7 declares architectural subjects independently of specification
+documents, validates composition/interactions, and preserves ordered SCN flow
+including alternatives and concurrency. C4 is an optional presentation profile.
+Saved view recipes stay outside normative digests; TASK stays outside durable
+hierarchy and adherence. See the [model grammar and complete authoring example](docs/architecture-model.md).
+
+Export canonical data with `spec inspect model --json`. State/delta v5 and the
+`forge-spec-model/v1` envelope provide canonical identities, revision context,
+durable intent digests and explicit diagnostics for Forge and Intellect.

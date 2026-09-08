@@ -1,6 +1,6 @@
 # Specs Format — Hands-on Memo
 
-One-page reference for Specs Format v0.6. For the full spec, see `specification.md`.
+One-page reference for Specs Format v0.7. For the full spec, see `specification.md`.
 
 ## File layout
 
@@ -31,7 +31,7 @@ aspects: [duration]     # required if refines has multiple parents
 Declare the format once in `.specs/_config.toml`:
 
 ```toml
-baseline = "forge-spec-v0.6.0"
+baseline = "forge-spec-v0.7.0"
 project = "PROJECT:example"
 intellect_provider = "forge-intellect"
 ```
@@ -193,3 +193,14 @@ only for scratch work; remove before merging to main.
 ```sh
 spec lint && spec history rebuild
 ```
+
+
+## Architecture and behavior
+
+Durable `model` facets declare subjects, directed interactions and about links.
+Subject/interaction IDs resolve as `OWNER#local-id`; composition is an independent
+acyclic graph. SCN `flow` declares participants and ordered interaction, parallel
+and alternative steps. TASK cannot own these declarations. `_views.toml` holds
+presentation recipes outside normative digests. Use `spec inspect model --json`
+for state v5, intent digests and revision context; author through typed
+`model.replace`, `scenario.flow.replace` and `view.replace` batch operations.

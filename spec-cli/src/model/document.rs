@@ -17,6 +17,8 @@ pub struct SpecDocument {
     pub source_path: PathBuf,
     /// Line number where the body starts (after frontmatter closing `---`).
     pub body_start_line: usize,
+    #[serde(default)]
+    pub model_anchor_lines: std::collections::BTreeMap<String, usize>,
 }
 
 impl SpecDocument {
@@ -33,6 +35,13 @@ impl SpecDocument {
             for clause in &block.clauses {
                 result.push(clause.id.clone());
             }
+        }
+        if let Some(model) = &self.universal.model {
+            result.extend(model.subjects.iter().map(|s| s.id.clone()));
+            result.extend(model.interactions.iter().map(|s| s.id.clone()));
+        }
+        if let Some(flow) = &self.universal.flow {
+            flow.anchors(&mut result);
         }
         result
     }

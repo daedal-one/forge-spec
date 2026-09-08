@@ -10,7 +10,7 @@ fn workspace() -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
         temp.path().join("_config.toml"),
-        "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
+        "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n",
     )
     .unwrap();
     std::fs::write(
@@ -38,7 +38,7 @@ fn git_workspace() -> (tempfile::TempDir, std::path::PathBuf) {
     std::fs::create_dir(&specs).unwrap();
     std::fs::write(
         specs.join("_config.toml"),
-        "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
+        "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n",
     )
     .unwrap();
     std::fs::write(
@@ -394,7 +394,7 @@ fn documentation_commands_and_render_share_heading_resolution() {
     std::fs::create_dir_all(&docs).unwrap();
     std::fs::write(
         specs.join("_config.toml"),
-        "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
+        "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n\n[[documentation]]\nid = \"guides\"\ntitle = \"Guides\"\nroot = \"docs\"\ninclude = [\"**/*.md\"]\n",
     )
     .unwrap();
     std::fs::write(

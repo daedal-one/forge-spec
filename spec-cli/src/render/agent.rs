@@ -145,6 +145,19 @@ fn render_spec_full(
 
     render_adherence(&id, adherence, out);
 
+    if let Some(model) = &doc.universal.model {
+        out.push_str(&format!(
+            "    <model encoding=\"json\">{}</model>\n",
+            escape_xml(&serde_json::to_string(model).expect("serializable model"))
+        ));
+    }
+    if let Some(flow) = &doc.universal.flow {
+        out.push_str(&format!(
+            "    <flow encoding=\"json\">{}</flow>\n",
+            escape_xml(&serde_json::to_string(flow).expect("serializable flow"))
+        ));
+    }
+
     // Body
     out.push_str("    <body>\n");
     for line in doc.body_raw.lines() {
@@ -352,7 +365,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -387,7 +400,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("_config.toml"),
-            "baseline = \"forge-spec-v0.6.0\"\nproject = \"PROJECT:demo\"\n",
+            "baseline = \"forge-spec-v0.7.0\"\nproject = \"PROJECT:demo\"\n",
         )
         .unwrap();
         std::fs::write(

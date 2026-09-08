@@ -258,7 +258,7 @@ function renderViewer(
     <button id="inspect-source" type="button">Inspect source</button>
   </header>
   <main>
-    <article>${renderedBody}</article>
+    <article>${renderedBody}${renderModelDeclarations(metadata)}</article>
     <aside>
       ${renderRefinementContext(revealAnchor, refinements)}
       <h2>Specification metadata</h2>
@@ -503,3 +503,32 @@ button:hover { background: var(--vscode-button-hoverBackground); }
 .error { padding: 12px; color: var(--vscode-errorForeground); border: 1px solid var(--vscode-inputValidation-errorBorder); background: var(--vscode-inputValidation-errorBackground); }
 @media (max-width: 760px) { body { display: block; height: auto; min-height: 100vh; overflow: auto; } header { position: sticky; top: 0; } main { display: grid; grid-template-columns: 1fr; min-height: calc(100vh - 110px); } article, aside { overflow: visible; } aside { border-left: 0; border-top: 1px solid var(--vscode-panel-border); } header button { position: static; margin-top: 14px; } }
 `
+
+
+/** Readable fallback for canonical model/flow declarations; source editing uses the Rust writer. */
+function renderModelDeclarations(metadata: Record<string, unknown>): string {
+  const sections: string[] = []
+  const visit = (value: unknown, label: string): void => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return
+    const record = value as Record<string, unknown>
+    const id = typeof record.id === 'string' ? record.id : ''
+    const title = typeof record.title === 'string' ? record.title : label
+    sections.push(`<section${id ? ` id="${escapeAttribute(id)}"` : ''}><h3>${escapeHtml(title)}</h3><pre>${escapeHtml(JSON.stringify(record, null, 2))}</pre></section>`)
+    for (const key of ['steps', 'branches']) {
+      if (Array.isArray(record[key])) for (const child of record[key]) visit(child, key === 'steps' ? 'Step' : 'Branch')
+    }
+  }
+  const model = metadata.model as Record<string, unknown> | undefined
+  if (model && typeof model === 'object') {
+    for (const key of ['subjects', 'interactions']) {
+      if (Array.isArray(model[key])) for (const declaration of model[key]) visit(declaration, key)
+    }
+    if (Array.isArray(model.about) && model.about.length) sections.push(`<h3>About</h3><pre>${escapeHtml(JSON.stringify(model.about, null, 2))}</pre>`)
+  }
+  const flow = metadata.flow as Record<string, unknown> | undefined
+  if (flow && typeof flow === 'object' && Array.isArray(flow.steps)) {
+    sections.push(`<h2>Scenario flow</h2><pre>${escapeHtml(JSON.stringify(flow.participants ?? [], null, 2))}</pre>`)
+    for (const step of flow.steps) visit(step, 'Step')
+  }
+  return sections.length ? `<section><h2>Architectural model and behavior</h2>${sections.join('')}</section>` : ''
+}

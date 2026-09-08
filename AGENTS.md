@@ -1,12 +1,12 @@
 # Working with specs
 
-This repo uses the **Specs Format v0.6** to capture durable project intent and orthogonal, transient implementation work as version-controlled, cross-referenced documents connected to source code and selected project documentation.
+This repo uses the **Specs Format v0.7** to capture durable project intent and orthogonal, transient implementation work as version-controlled, cross-referenced documents connected to source code and selected project documentation.
 
 ## Quick rules
 
 - Specs live in `.specs/` as `.spec.md` files with YAML frontmatter + CommonMark body.
 - The singleton root uses `PROJECT:slug`; every other spec uses `TYPE:namespace/slug` (e.g. `REQ:auth/session-expiry`).
-- `.specs/_config.toml` declares `baseline = "forge-spec-v0.6.0"`, selects `project = "PROJECT:slug"`, and defaults `intellect_provider = "forge-intellect"`; per-file revisions are derived from Git.
+- `.specs/_config.toml` declares `baseline = "forge-spec-v0.7.0"`, selects `project = "PROJECT:slug"`, and defaults `intellect_provider = "forge-intellect"`; per-file revisions are derived from Git.
 - Durable specifications contain no adherence checkpoint fields. Use `spec implementation verify <id>` to append an external immutable attestation without changing tracked bytes, and `spec implementation status` for derived adherence. TASK work items are excluded from adherence; migrate legacy `implemented` fields with `spec implementation migrate-attestations`.
 - Before changing an older tree, run `spec migrate plan --target agent`; then run `spec migrate apply` and `spec lint`.
 - Durable types: `PROJECT` root description, `REQ` requirement, `INV` invariant, `IFC` interface, `ADR` decision record, `GLO` glossary, `TOPIC` grouping, `SCN` scenario. `TASK` is a transient work item.
@@ -16,6 +16,8 @@ This repo uses the **Specs Format v0.6** to capture durable project intent and o
 - Requirements use typed blocks: `:::{requirement id="name" level="MUST"} ... :::`.
 - Clause anchors inside blocks (`- {#c-lifetime} description`) create addressable sub-properties for refinement.
 - Requirement children declare `refines: [REQ:parent#c-clause]` in frontmatter; add positional `aspects:` when refining multiple parents.
+- Durable `model` facets declare subjects/interactions/about; SCN `flow` declares explicit participants and ordered interaction, parallel and alternative steps. Canonical anchors are `OWNER#local-id`. TASK cannot own these declarations.
+- `_views.toml` schema `forge-spec-views/v1` stores presentation separately from normative intent. Use typed `model.replace`, `scenario.flow.replace`, and `view.replace` batch operations.
 - TASK work items declare one or more durable targets with `addresses: [REQ:parent#c-clause]`; use `labels`, `groups`, `blocked_by`, and `completion_checkpoint` for work metadata.
 
 ## Commits touching specs
@@ -33,6 +35,7 @@ spec implementation verify REQ:auth/foo
 spec implementation revoke REQ:auth/foo --reason 'evidence superseded'
 spec implementation provider status  # shared worktree-scoped background provider
 spec render REQ:auth/foo --target=agent --include-docs  # XML with referenced docs
+spec inspect model --json          # canonical state v5 + intent digests + revision envelope
 spec inspect tree                  # durable specification hierarchy
 spec inspect tree --include-tasks  # append a separate WORK ITEMS section
 spec inspect documentation        # enrolled Markdown and headings

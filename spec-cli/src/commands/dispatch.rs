@@ -97,6 +97,7 @@ fn inspect(specs_dir: PathBuf, command: InspectCommands) -> Result<()> {
             no_color,
             include_tasks,
         ),
+        InspectCommands::Model { json: _ } => commands::model::run(&specs_dir),
         InspectCommands::Graph { view } => commands::graph::run(&specs_dir, view),
         InspectCommands::Relations { id } => commands::query::relations(&specs_dir, &id),
         InspectCommands::Coverage { id } => commands::query::coverage(&specs_dir, &id),
