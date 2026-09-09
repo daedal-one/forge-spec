@@ -56,12 +56,14 @@ pub fn run(cli: Cli) -> Result<()> {
             base,
             head,
             target,
+            json,
         } => commands::impact::run(
             &find_specs_dir(explicit)?,
             subject.as_deref(),
             base.as_deref(),
             head.as_deref(),
             &target,
+            json,
         ),
         Commands::Explore => commands::explore::run(&find_specs_dir(explicit)?),
         Commands::Inspect(args) => inspect(find_specs_dir(explicit)?, args.command),
@@ -100,7 +102,7 @@ fn inspect(specs_dir: PathBuf, command: InspectCommands) -> Result<()> {
         InspectCommands::Model { json: _ } => commands::model::run(&specs_dir),
         InspectCommands::Graph { view } => commands::graph::run(&specs_dir, view),
         InspectCommands::Relations { id } => commands::query::relations(&specs_dir, &id),
-        InspectCommands::Coverage { id } => commands::query::coverage(&specs_dir, &id),
+        InspectCommands::Coverage { id, json } => commands::query::coverage(&specs_dir, &id, json),
         InspectCommands::Orphans => commands::query::orphans(&specs_dir),
         InspectCommands::Documentation { collection, json } => {
             commands::documentation::list(&specs_dir, collection.as_deref(), json)

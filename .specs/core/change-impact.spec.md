@@ -46,7 +46,8 @@ Human output MUST summarize changed inputs, affected specifications, traversal
 depth, implementation surfaces, related work-item state, and evidence gaps. Agent output
 MUST expose the same information in a deterministic
 `forge-spec-impact` XML envelope with a versioned schema and explicit traversal
-paths.
+paths. Machine consumers MAY request the versioned `forge-spec-impact/v1`
+JSON envelope with the same native analysis and provenance distinctions.
 :::
 
 :::{requirement id="read-only" level="MUST"}

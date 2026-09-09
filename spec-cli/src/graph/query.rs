@@ -167,6 +167,7 @@ pub fn orphans(registry: &SpecRegistry) -> Vec<String> {
 }
 
 /// Clause-by-clause coverage report for a spec.
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct CoverageEntry {
     pub clause_id: String,
     pub clause_text: String,

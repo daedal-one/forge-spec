@@ -62,6 +62,9 @@ pub enum Commands {
         head: Option<String>,
         #[arg(long, default_value = "human", value_enum)]
         target: RenderTarget,
+        /// Emit the versioned machine-readable report
+        #[arg(long, conflicts_with = "target")]
+        json: bool,
     },
     /// Interactive terminal explorer
     Explore,
@@ -136,7 +139,12 @@ pub enum InspectCommands {
     /// Show incoming and outgoing relationships for one specification
     Relations { id: String },
     /// Show clause-by-clause refinement coverage
-    Coverage { id: String },
+    Coverage {
+        id: String,
+        /// Emit structural refinement coverage as versioned JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// List specifications without refinement relationships
     Orphans,
     /// List configured Markdown documentation and headings

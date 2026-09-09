@@ -1247,3 +1247,18 @@ transaction engine. Semantic model and flow edits change normative digests;
 view edits do not. State v5 exposes `model`, `scenarios` and `views` as distinct
 collections; delta v5 adds their nullable `{before, after}` changes. Existing
 per-spec digests remain byte-compatible when model and flow are absent.
+
+### Machine-readable grounding queries
+
+`spec inspect coverage ID --json` emits `forge-spec-coverage/v1`, with the
+subject, an applicability flag, `kind: refinement`, and native clause entries
+(`clause_id`, `clause_text`, `refined_by`). TASK work items are not applicable;
+unknown IDs fail. Refinement coverage is structural and does not attest code
+implementation.
+
+`spec impact SUBJECT --json` (also available with `--base`/`--head`) emits
+`forge-spec-impact/v1` containing the same native report as human and agent
+output. Exact input anchors, durable traversal paths, explicit source surfaces,
+documentation, historical evidence, separate related work and gaps are retained.
+The JSON option is mutually exclusive with an explicit `--target`. Both queries
+are deterministic and read-only; consumers must preserve their evidence classes.

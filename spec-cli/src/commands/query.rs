@@ -123,9 +123,28 @@ pub fn orphans(specs_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn coverage(specs_dir: &Path, id: &str) -> Result<()> {
+pub fn coverage(specs_dir: &Path, id: &str, json: bool) -> Result<()> {
     let registry = SpecRegistry::load(specs_dir)?;
     let entries = graph::query::coverage(&registry, id);
+    if json {
+        anyhow::ensure!(
+            registry.get_by_id(id).is_some(),
+            "Specification not found: {id}"
+        );
+        let applicable = !id.starts_with("TASK:");
+        let entries = if applicable { entries } else { Vec::new() };
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "schema_version": "forge-spec-coverage/v1",
+                "subject": id,
+                "kind": "refinement",
+                "applicable": applicable,
+                "clauses": entries,
+            }))?
+        );
+        return Ok(());
+    }
 
     if entries.is_empty() {
         println!("No clauses found for '{id}'");
