@@ -223,6 +223,70 @@ fn saved_and_multi_file_overlay_bytes_converge_without_writes() {
 }
 
 #[test]
+fn rejected_nested_escape_preserves_saved_bytes() {
+    let temp = tempfile::tempdir().unwrap();
+    let specs = temp.path().join(".specs");
+    final_tree(&specs);
+    let before = project(&specs, &Overlay::new())
+        .unwrap()
+        .canonical_json()
+        .unwrap();
+    let original = std::fs::read(specs.join("child.spec.md")).unwrap();
+    for path in [
+        ".specs/nested/../../escape.spec.md",
+        "nested/../child.spec.md",
+    ] {
+        let overlay =
+            Overlay::from([(path.into(), OverlayEntry::Upsert(CHILD.as_bytes().to_vec()))]);
+        assert!(
+            project(&specs, &overlay).is_err(),
+            "accepted traversal: {path}"
+        );
+        assert_eq!(
+            std::fs::read(specs.join("child.spec.md")).unwrap(),
+            original
+        );
+        assert_eq!(
+            project(&specs, &Overlay::new())
+                .unwrap()
+                .canonical_json()
+                .unwrap(),
+            before
+        );
+        assert!(!temp.path().join("escape.spec.md").exists());
+    }
+}
+
+#[test]
+fn canonical_bytes_ignore_file_creation_order_and_host_root() {
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let inputs = [
+        ("_config.toml", CONFIG),
+        ("_project.spec.md", PROJECT),
+        ("parents/a.spec.md", PARENT_A),
+        ("parents/b.spec.md", PARENT_B),
+        ("child.spec.md", CHILD),
+        ("topic.spec.md", TOPIC),
+        ("work.spec.md", WORK_ITEM),
+    ];
+    for (path, body) in &inputs {
+        write(&first.path().join(".specs").join(path), body);
+    }
+    for (path, body) in inputs.iter().rev() {
+        write(&second.path().join(".specs").join(path), body);
+    }
+    let a = project(&first.path().join(".specs"), &Overlay::new()).unwrap();
+    let b = project(&second.path().join(".specs"), &Overlay::new()).unwrap();
+    assert!(a.valid && b.valid);
+    assert_eq!(a.canonical_json().unwrap(), b.canonical_json().unwrap());
+    assert_eq!(
+        a.diff(&b).canonical_json().unwrap(),
+        b.diff(&a).canonical_json().unwrap()
+    );
+}
+
+#[test]
 fn canonical_intent_digest_ignores_legacy_checkpoint_but_not_normative_text() {
     let temp = tempfile::tempdir().unwrap();
     let specs = temp.path().join(".specs");
