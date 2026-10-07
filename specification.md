@@ -1059,6 +1059,12 @@ incoherent. The response repeats that exact workspace state and identifies the
 provider name and version. Every per-spec result retains the canonical intent
 digest, selected attestation ID and checkpoint, one state, an
 evidence-completeness flag, ordered reasons, and explicit evidence boundaries.
+
+Untracked regular files retain the existing path-and-content manifest encoding.
+Untracked symbolic links use a distinct link marker, path and target bytes;
+the client and provider read the link itself without following directory,
+file or dangling targets. External target content is outside the Git workspace
+identity. Unsupported special files reject identity calculation explicitly.
 Responses with missing, duplicate, or unexpected spec IDs are invalid.
 
 The derived state vocabulary is:

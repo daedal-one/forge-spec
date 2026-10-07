@@ -786,15 +786,34 @@ fn worktree_manifest(root: &Path) -> Result<Vec<u8>> {
         .filter(|path| !path.is_empty())
     {
         let path_text = std::str::from_utf8(path).context("untracked path is not UTF-8")?;
-        manifest.extend_from_slice(b"\0untracked\0");
+        let (marker, content) = untracked_entry(root, path_text)?;
+        manifest.extend_from_slice(marker);
         manifest.extend_from_slice(path);
         manifest.push(0);
-        manifest.extend_from_slice(
-            &std::fs::read(root.join(path_text))
-                .with_context(|| format!("reading untracked file {path_text}"))?,
-        );
+        manifest.extend_from_slice(&content);
     }
     Ok(manifest)
+}
+
+fn untracked_entry(root: &Path, path: &str) -> Result<(&'static [u8], Vec<u8>)> {
+    let absolute = root.join(path);
+    let metadata = std::fs::symlink_metadata(&absolute)
+        .with_context(|| format!("inspecting untracked file {path}"))?;
+    if metadata.file_type().is_symlink() {
+        let target = std::fs::read_link(&absolute)
+            .with_context(|| format!("reading untracked symbolic link {path}"))?;
+        Ok((
+            b"\0untracked-symlink\0",
+            target.into_os_string().into_encoded_bytes(),
+        ))
+    } else if metadata.is_file() {
+        Ok((
+            b"\0untracked\0",
+            std::fs::read(&absolute).with_context(|| format!("reading untracked file {path}"))?,
+        ))
+    } else {
+        bail!("unsupported untracked file type {path}")
+    }
 }
 
 fn git_output(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
@@ -889,6 +908,94 @@ fn decode_provider_response<T: for<'de> Deserialize<'de>>(line: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn git_workspace() -> tempfile::TempDir {
+        let temp = tempfile::tempdir().unwrap();
+        for args in [
+            vec!["init", "--quiet"],
+            vec![
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ],
+        ] {
+            git_output(temp.path(), &args).unwrap();
+        }
+        temp
+    }
+
+    #[test]
+    fn untracked_regular_files_preserve_manifest_encoding() {
+        let temp = git_workspace();
+        assert!(worktree_manifest(temp.path()).unwrap().is_empty());
+        std::fs::write(temp.path().join("entry"), "first").unwrap();
+        assert_eq!(
+            worktree_manifest(temp.path()).unwrap(),
+            b"\0untracked\0entry\0first"
+        );
+        std::fs::write(temp.path().join("entry"), "second").unwrap();
+        assert_eq!(
+            worktree_manifest(temp.path()).unwrap(),
+            b"\0untracked\0entry\0second"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untracked_symlinks_hash_targets_without_following_them() {
+        use std::os::unix::fs::symlink;
+
+        let temp = git_workspace();
+        let external = tempfile::tempdir().unwrap();
+        let target = external.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("content"), "first").unwrap();
+        let link = temp.path().join("entry");
+        symlink(&target, &link).unwrap();
+        let mut expected = b"\0untracked-symlink\0entry\0".to_vec();
+        expected.extend_from_slice(target.as_os_str().as_encoded_bytes());
+        assert_eq!(worktree_manifest(temp.path()).unwrap(), expected);
+        std::fs::write(target.join("content"), "second").unwrap();
+        assert_eq!(worktree_manifest(temp.path()).unwrap(), expected);
+
+        std::fs::remove_file(&link).unwrap();
+        symlink("missing", &link).unwrap();
+        let dangling = worktree_manifest(temp.path()).unwrap();
+        assert_eq!(dangling, b"\0untracked-symlink\0entry\0missing");
+        assert_ne!(dangling, expected);
+
+        std::fs::remove_file(&link).unwrap();
+        let file = external.path().join("file");
+        std::fs::write(&file, "first").unwrap();
+        symlink(&file, &link).unwrap();
+        let before = worktree_manifest(temp.path()).unwrap();
+        std::fs::write(&file, "second").unwrap();
+        assert_eq!(worktree_manifest(temp.path()).unwrap(), before);
+        std::fs::remove_file(&link).unwrap();
+        std::fs::write(&link, file.as_os_str().as_encoded_bytes()).unwrap();
+        assert_ne!(worktree_manifest(temp.path()).unwrap(), before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untracked_special_files_are_rejected_without_reading() {
+        let temp = git_workspace();
+        let status = Command::new("mkfifo")
+            .arg(temp.path().join("pipe"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let error = untracked_entry(temp.path(), "pipe").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("unsupported untracked file type pipe"));
+    }
 
     #[test]
     fn provider_error_envelope_surfaces_the_rejection_message() {

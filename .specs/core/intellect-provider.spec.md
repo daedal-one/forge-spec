@@ -30,6 +30,9 @@ related:
   request and response with the provider, keyed by specification ID, canonical
   intent digest, and one exact workspace state. Recording and revoking
   attestations MUST be explicit protocol operations.
+  Untracked symbolic links MUST contribute their path, link type and target
+  bytes without following the target; unsupported special files MUST fail
+  explicitly, and existing regular-file identities MUST remain unchanged.
 - {#c-lifecycle} Adherence-aware commands MUST discover or atomically start one
   healthy worktree-scoped background provider, complete a health handshake,
   and request one coherent state without stopping the shared process. The

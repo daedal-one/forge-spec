@@ -238,6 +238,10 @@ verifier, time, completeness, and evidence. It lives in Forge Intellect's
 append-only ledger and is replicated through
 `refs/notes/forge-spec/adherence`, never in tracked specification bytes.
 
+Workspace identity records untracked symbolic links without following their
+targets, including directory and dangling links. External target contents
+remain outside that identity; unsupported special files fail explicitly.
+
 Adherence-aware commands atomically ensure one lightweight provider is running
 for the Git worktree, validate the exact HEAD and working-tree state, and pull
 one evidence-qualified snapshot. Concurrent commands reuse the same process,
